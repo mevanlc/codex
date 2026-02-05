@@ -486,7 +486,7 @@ pub struct Tui {
     #[serde(default)]
     pub chatbox_placeholder_tips: ChatboxPlaceholderTips,
 
-    /// Start the TUI in the specified collaboration mode (plan/execute/etc.).
+    /// Start the TUI in the specified collaboration mode (plan/default).
     /// Defaults to unset.
     #[serde(default)]
     pub experimental_mode: Option<ModeKind>,
