@@ -447,6 +447,14 @@ impl fmt::Display for NotificationMethod {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatboxPlaceholderTips {
+    #[default]
+    On,
+    Off,
+}
+
 /// Collection of settings that are specific to the TUI.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -470,6 +478,13 @@ pub struct Tui {
     /// Defaults to `true`.
     #[serde(default = "default_true")]
     pub show_tooltips: bool,
+
+    /// Controls whether the chatbox placeholder shows a rotating set of "tip" prompts.
+    ///
+    /// - `on` (default): Show rotating placeholder tips (for example "Use /skills to list...").
+    /// - `off`: Use a generic placeholder instead.
+    #[serde(default)]
+    pub chatbox_placeholder_tips: ChatboxPlaceholderTips,
 
     /// Start the TUI in the specified collaboration mode (plan/execute/etc.).
     /// Defaults to unset.

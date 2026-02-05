@@ -7,6 +7,7 @@ use crate::config::types::McpServerConfig;
 use crate::config::types::McpServerDisabledReason;
 use crate::config::types::McpServerTransportConfig;
 use crate::config::types::Notice;
+use crate::config::types::ChatboxPlaceholderTips;
 use crate::config::types::NotificationMethod;
 use crate::config::types::Notifications;
 use crate::config::types::OtelConfig;
@@ -212,6 +213,12 @@ pub struct Config {
 
     /// Show startup tooltips in the TUI welcome screen.
     pub show_tooltips: bool,
+
+    /// Controls whether the chatbox placeholder shows a rotating set of "tip" prompts.
+    ///
+    /// - `on` (default): Show rotating placeholder tips.
+    /// - `off`: Use a generic placeholder instead.
+    pub chatbox_placeholder_tips: ChatboxPlaceholderTips,
 
     /// Start the TUI in the specified collaboration mode (plan/execute/etc.).
     pub experimental_mode: Option<ModeKind>,
@@ -1656,6 +1663,11 @@ impl Config {
                 .unwrap_or_default(),
             animations: cfg.tui.as_ref().map(|t| t.animations).unwrap_or(true),
             show_tooltips: cfg.tui.as_ref().map(|t| t.show_tooltips).unwrap_or(true),
+            chatbox_placeholder_tips: cfg
+                .tui
+                .as_ref()
+                .map(|t| t.chatbox_placeholder_tips)
+                .unwrap_or_default(),
             experimental_mode: cfg.tui.as_ref().and_then(|t| t.experimental_mode),
             tui_alternate_screen: cfg
                 .tui
