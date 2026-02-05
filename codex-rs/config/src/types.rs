@@ -649,6 +649,14 @@ pub enum TuiPetAnchor {
     ScreenBottom,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatboxPlaceholderTips {
+    #[default]
+    On,
+    Off,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct TuiNotificationSettings {
@@ -695,6 +703,13 @@ pub struct Tui {
     /// Defaults to `true`.
     #[serde(default = "default_true")]
     pub show_tooltips: bool,
+
+    /// Controls whether the chatbox placeholder shows a rotating set of tip prompts.
+    ///
+    /// - `on` (default): Show rotating placeholder tips.
+    /// - `off`: Use a generic placeholder instead.
+    #[serde(default)]
+    pub chatbox_placeholder_tips: ChatboxPlaceholderTips,
 
     /// Start the composer in Vim mode (`Normal`) by default.
     /// Defaults to `false`.

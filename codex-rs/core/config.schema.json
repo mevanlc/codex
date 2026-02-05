@@ -352,6 +352,13 @@
       },
       "type": "object"
     },
+    "ChatboxPlaceholderTips": {
+      "enum": [
+        "on",
+        "off"
+      ],
+      "type": "string"
+    },
     "CodeModeConfigToml": {
       "additionalProperties": false,
       "properties": {
@@ -3036,6 +3043,15 @@
           "default": true,
           "description": "Enable animations (welcome screen, shimmer effects, spinners). Defaults to `true`.",
           "type": "boolean"
+        },
+        "chatbox_placeholder_tips": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ChatboxPlaceholderTips"
+            }
+          ],
+          "default": "on",
+          "description": "Controls whether the chatbox placeholder shows a rotating set of tip prompts.\n\n- `on` (default): Show rotating placeholder tips. - `off`: Use a generic placeholder instead."
         },
         "keymap": {
           "allOf": [

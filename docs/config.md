@@ -13,3 +13,12 @@ Admins can set top-level `allow_managed_hooks_only = true` in
 still allowing managed hooks from requirements and managed config layers. This
 setting is only supported in `requirements.toml`; putting it in `config.toml`
 does not enable managed-hooks-only mode.
+
+## TUI
+
+To disable the rotating "tip" placeholders in the chatbox, set:
+
+```toml
+[tui]
+chatbox_placeholder_tips = "off"
+```
