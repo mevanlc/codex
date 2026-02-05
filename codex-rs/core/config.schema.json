@@ -347,6 +347,13 @@
       },
       "type": "object"
     },
+    "ChatboxPlaceholderTips": {
+      "enum": [
+        "on",
+        "off"
+      ],
+      "type": "string"
+    },
     "ConfigProfile": {
       "additionalProperties": false,
       "description": "Collection of common configuration options that a user can define as a unit in `config.toml`.",
@@ -2761,6 +2768,15 @@
           "default": true,
           "description": "Enable animations (welcome screen, shimmer effects, spinners). Defaults to `true`.",
           "type": "boolean"
+        },
+        "chatbox_placeholder_tips": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ChatboxPlaceholderTips"
+            }
+          ],
+          "default": "on",
+          "description": "Controls whether the chatbox placeholder shows a rotating set of tip prompts.\n\n- `on` (default): Show rotating placeholder tips. - `off`: Use a generic placeholder instead."
         },
         "keymap": {
           "allOf": [

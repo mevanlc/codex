@@ -1,6 +1,7 @@
 //! Construction and initial wiring for `ChatWidget`.
 
 use super::*;
+use codex_config::types::ChatboxPlaceholderTips;
 
 impl ChatWidget {
     pub(crate) fn new_with_app_event(common: ChatWidgetInit) -> Self {
@@ -36,7 +37,7 @@ impl ChatWidget {
         config.model = model.clone();
         let prevent_idle_sleep = config.features.enabled(Feature::PreventIdleSleep);
         let mut rng = rand::rng();
-        let placeholder = PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string();
+        let placeholder = select_chatbox_placeholder(&config, &mut rng);
         let side_placeholder =
             SIDE_PLACEHOLDERS[rng.random_range(0..SIDE_PLACEHOLDERS.len())].to_string();
 
@@ -265,5 +266,14 @@ impl ChatWidget {
         widget.refresh_status_surfaces();
 
         widget
+    }
+}
+
+fn select_chatbox_placeholder<R: Rng + ?Sized>(config: &Config, rng: &mut R) -> String {
+    match config.chatbox_placeholder_tips {
+        ChatboxPlaceholderTips::On => {
+            PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string()
+        }
+        ChatboxPlaceholderTips::Off => DEFAULT_CHATBOX_PLACEHOLDER.to_string(),
     }
 }

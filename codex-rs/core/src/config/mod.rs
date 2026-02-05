@@ -37,6 +37,7 @@ use codex_config::permissions_toml::PermissionsToml;
 use codex_config::sandbox_mode_requirement_for_permission_profile;
 use codex_config::types::ApprovalsReviewer;
 use codex_config::types::AuthCredentialsStoreMode;
+use codex_config::types::ChatboxPlaceholderTips;
 use codex_config::types::History;
 use codex_config::types::McpServerConfig;
 use codex_config::types::McpServerDisabledReason;
@@ -671,6 +672,12 @@ pub struct Config {
 
     /// Show startup tooltips in the TUI welcome screen.
     pub show_tooltips: bool,
+
+    /// Controls whether the chatbox placeholder shows a rotating set of tip prompts.
+    ///
+    /// - `on` (default): Show rotating placeholder tips.
+    /// - `off`: Use a generic placeholder instead.
+    pub chatbox_placeholder_tips: ChatboxPlaceholderTips,
 
     /// Persisted startup availability NUX state for model tooltips.
     pub model_availability_nux: ModelAvailabilityNuxConfig,
@@ -3512,6 +3519,11 @@ impl Config {
                 .unwrap_or_default(),
             animations: cfg.tui.as_ref().map(|t| t.animations).unwrap_or(true),
             show_tooltips: cfg.tui.as_ref().map(|t| t.show_tooltips).unwrap_or(true),
+            chatbox_placeholder_tips: cfg
+                .tui
+                .as_ref()
+                .map(|t| t.chatbox_placeholder_tips)
+                .unwrap_or_default(),
             model_availability_nux: cfg
                 .tui
                 .as_ref()
