@@ -43,6 +43,7 @@ use codex_backend_client::Client as BackendClient;
 use codex_chatgpt::connectors;
 use codex_core::config::Config;
 use codex_core::config::ConstraintResult;
+use codex_core::config::types::ChatboxPlaceholderTips;
 use codex_core::config::types::Notifications;
 use codex_core::config_loader::ConfigLayerStackOrdering;
 use codex_core::features::FEATURES;
@@ -2479,7 +2480,7 @@ impl ChatWidget {
         let mut config = config;
         config.model = model.clone();
         let mut rng = rand::rng();
-        let placeholder = PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string();
+        let placeholder = select_chatbox_placeholder(&config, &mut rng);
         let codex_op_tx = spawn_agent(config.clone(), app_event_tx.clone(), thread_manager);
 
         let model_override = model.as_deref();
@@ -2642,7 +2643,7 @@ impl ChatWidget {
         let mut config = config;
         config.model = model.clone();
         let mut rng = rand::rng();
-        let placeholder = PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string();
+        let placeholder = select_chatbox_placeholder(&config, &mut rng);
 
         let model_override = model.as_deref();
         let model_for_header = model
@@ -2791,7 +2792,7 @@ impl ChatWidget {
         } = common;
         let model = model.filter(|m| !m.trim().is_empty());
         let mut rng = rand::rng();
-        let placeholder = PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string();
+        let placeholder = select_chatbox_placeholder(&config, &mut rng);
 
         let model_override = model.as_deref();
         let header_model = model
@@ -6852,6 +6853,8 @@ impl Notification {
 
 const AGENT_NOTIFICATION_PREVIEW_GRAPHEMES: usize = 200;
 
+const DEFAULT_CHATBOX_PLACEHOLDER: &str = "Ask Codex to do anything";
+
 const PLACEHOLDERS: [&str; 8] = [
     "Explain this codebase",
     "Summarize recent commits",
@@ -6862,6 +6865,15 @@ const PLACEHOLDERS: [&str; 8] = [
     "Run /review on my current changes",
     "Use /skills to list available skills",
 ];
+
+fn select_chatbox_placeholder<R: Rng + ?Sized>(config: &Config, rng: &mut R) -> String {
+    match config.chatbox_placeholder_tips {
+        ChatboxPlaceholderTips::On => {
+            PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string()
+        }
+        ChatboxPlaceholderTips::Off => DEFAULT_CHATBOX_PLACEHOLDER.to_string(),
+    }
+}
 
 // Extract the first bold (Markdown) element in the form **...** from `s`.
 // Returns the inner text if found; otherwise `None`.
