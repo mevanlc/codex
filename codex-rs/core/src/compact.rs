@@ -7,11 +7,11 @@ use crate::client_common::ResponseEvent;
 use crate::codex::Session;
 use crate::codex::TurnContext;
 use crate::codex::get_last_assistant_message_from_turn;
+use crate::context_manager::ContextManager;
 use crate::error::CodexErr;
 use crate::error::Result as CodexResult;
 use crate::protocol::CompactedItem;
 use crate::protocol::EventMsg;
-use crate::protocol::TurnContextItem;
 use crate::protocol::TurnStartedEvent;
 use crate::protocol::WarningEvent;
 use crate::truncate::TruncationPolicy;
@@ -36,6 +36,31 @@ pub(crate) fn should_use_remote_compact_task(provider: &ModelProviderInfo) -> bo
     provider.is_openai()
 }
 
+pub(crate) fn extract_trailing_model_switch_update_for_compaction_request(
+    history: &mut ContextManager,
+) -> Option<ResponseItem> {
+    let history_items = history.raw_items();
+    let last_user_turn_boundary_index = history_items
+        .iter()
+        .rposition(crate::context_manager::is_user_turn_boundary);
+    let model_switch_index = history_items
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(i, item)| {
+            let is_trailing = last_user_turn_boundary_index.is_none_or(|boundary| i > boundary);
+            if is_trailing && Session::is_model_switch_developer_message(item) {
+                Some(i)
+            } else {
+                None
+            }
+        })?;
+    let mut replacement = history_items.to_vec();
+    let model_switch_item = replacement.remove(model_switch_index);
+    history.replace(replacement);
+    Some(model_switch_item)
+}
+
 pub(crate) async fn run_inline_auto_compact_task(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
@@ -57,6 +82,7 @@ pub(crate) async fn run_compact_task(
     input: Vec<UserInput>,
 ) -> CodexResult<()> {
     let start_event = EventMsg::TurnStarted(TurnStartedEvent {
+        turn_id: turn_context.sub_id.clone(),
         model_context_window: turn_context.model_context_window(),
         collaboration_mode_kind: turn_context.collaboration_mode.mode,
     });
@@ -75,6 +101,10 @@ async fn run_compact_task_inner(
     let initial_input_for_turn: ResponseInputItem = ResponseInputItem::from(input);
 
     let mut history = sess.clone_history().await;
+    // Keep compaction prompts in-distribution: if a model-switch update was injected at the
+    // tail of history (between turns), exclude it from the compaction request payload.
+    let stripped_model_switch_item =
+        extract_trailing_model_switch_update_for_compaction_request(&mut history);
     history.record_items(
         &[initial_input_for_turn.into()],
         turn_context.truncation_policy,
@@ -84,7 +114,6 @@ async fn run_compact_task_inner(
 
     let max_retries = turn_context.provider.stream_max_retries();
     let mut retries = 0;
-    let turn_metadata_header = turn_context.resolve_turn_metadata_header().await;
     let mut client_session = sess.services.model_client.new_session();
     // Reuse one client session so turn-scoped state (sticky routing, websocket append tracking)
     // survives retries within this compact turn.
@@ -94,25 +123,15 @@ async fn run_compact_task_inner(
     // duplicating model settings on TurnContext, but an Op after turn start could update the
     // session config before this write occurs.
     let collaboration_mode = sess.current_collaboration_mode().await;
-    let rollout_item = RolloutItem::TurnContext(TurnContextItem {
-        cwd: turn_context.cwd.clone(),
-        approval_policy: turn_context.approval_policy,
-        sandbox_policy: turn_context.sandbox_policy.clone(),
-        model: turn_context.model_info.slug.clone(),
-        personality: turn_context.personality,
-        collaboration_mode: Some(collaboration_mode),
-        effort: turn_context.reasoning_effort,
-        summary: turn_context.reasoning_summary,
-        user_instructions: turn_context.user_instructions.clone(),
-        developer_instructions: turn_context.developer_instructions.clone(),
-        final_output_json_schema: turn_context.final_output_json_schema.clone(),
-        truncation_policy: Some(turn_context.truncation_policy.into()),
-    });
+    let rollout_item =
+        RolloutItem::TurnContext(turn_context.to_turn_context_item(collaboration_mode));
     sess.persist_rollout_items(&[rollout_item]).await;
 
     loop {
         // Clone is required because of the loop
-        let turn_input = history.clone().for_prompt();
+        let turn_input = history
+            .clone()
+            .for_prompt(&turn_context.model_info.input_modalities);
         let turn_input_len = turn_input.len();
         let prompt = Prompt {
             input: turn_input,
@@ -120,6 +139,7 @@ async fn run_compact_task_inner(
             personality: turn_context.personality,
             ..Default::default()
         };
+        let turn_metadata_header = turn_context.turn_metadata_state.current_header_value();
         let attempt_result = drain_to_completed(
             &sess,
             turn_context.as_ref(),
@@ -190,6 +210,11 @@ async fn run_compact_task_inner(
 
     let initial_context = sess.build_initial_context(turn_context.as_ref()).await;
     let mut new_history = build_compacted_history(initial_context, &user_messages, &summary_text);
+    // Reattach the stripped model-switch update only after successful compaction so the model
+    // still sees the switch instructions on the next real sampling request.
+    if let Some(model_switch_item) = stripped_model_switch_item {
+        new_history.push(model_switch_item);
+    }
     let ghost_snapshots: Vec<ResponseItem> = history_items
         .iter()
         .filter(|item| matches!(item, ResponseItem::GhostSnapshot { .. }))
@@ -454,6 +479,107 @@ mod tests {
     }
 
     #[test]
+    fn extract_trailing_model_switch_update_for_compaction_request_removes_trailing_item() {
+        let mut history = ContextManager::new();
+        history.replace(vec![
+            ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "USER_MESSAGE".to_string(),
+                }],
+                end_turn: None,
+                phase: None,
+            },
+            ResponseItem::Message {
+                id: None,
+                role: "assistant".to_string(),
+                content: vec![ContentItem::OutputText {
+                    text: "ASSISTANT_REPLY".to_string(),
+                }],
+                end_turn: None,
+                phase: None,
+            },
+            ResponseItem::Message {
+                id: None,
+                role: "developer".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "<model_switch>\nNEW_MODEL_INSTRUCTIONS".to_string(),
+                }],
+                end_turn: None,
+                phase: None,
+            },
+        ]);
+
+        let model_switch_item =
+            extract_trailing_model_switch_update_for_compaction_request(&mut history);
+
+        assert_eq!(history.raw_items().len(), 2);
+        assert!(model_switch_item.is_some());
+        assert!(
+            history
+                .raw_items()
+                .iter()
+                .all(|item| !Session::is_model_switch_developer_message(item))
+        );
+    }
+
+    #[test]
+    fn extract_trailing_model_switch_update_for_compaction_request_keeps_historical_item() {
+        let mut history = ContextManager::new();
+        history.replace(vec![
+            ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "FIRST_USER_MESSAGE".to_string(),
+                }],
+                end_turn: None,
+                phase: None,
+            },
+            ResponseItem::Message {
+                id: None,
+                role: "developer".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "<model_switch>\nOLDER_MODEL_INSTRUCTIONS".to_string(),
+                }],
+                end_turn: None,
+                phase: None,
+            },
+            ResponseItem::Message {
+                id: None,
+                role: "assistant".to_string(),
+                content: vec![ContentItem::OutputText {
+                    text: "ASSISTANT_REPLY".to_string(),
+                }],
+                end_turn: None,
+                phase: None,
+            },
+            ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "SECOND_USER_MESSAGE".to_string(),
+                }],
+                end_turn: None,
+                phase: None,
+            },
+        ]);
+
+        let model_switch_item =
+            extract_trailing_model_switch_update_for_compaction_request(&mut history);
+
+        assert_eq!(history.raw_items().len(), 4);
+        assert!(model_switch_item.is_none());
+        assert!(
+            history
+                .raw_items()
+                .iter()
+                .any(Session::is_model_switch_developer_message)
+        );
+    }
+
+    #[test]
     fn collect_user_messages_extracts_user_text_only() {
         let items = vec![
             ResponseItem::Message {
@@ -489,11 +615,15 @@ mod tests {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
-                    text: "# AGENTS.md instructions for project\n\n<INSTRUCTIONS>\ndo things\n</INSTRUCTIONS>"
+                    text: r#"# AGENTS.md instructions for project
+
+<INSTRUCTIONS>
+do things
+</INSTRUCTIONS>"#
                         .to_string(),
                 }],
                 end_turn: None,
-            phase: None,
+                phase: None,
             },
             ResponseItem::Message {
                 id: None,
@@ -502,7 +632,7 @@ mod tests {
                     text: "<ENVIRONMENT_CONTEXT>cwd=/tmp</ENVIRONMENT_CONTEXT>".to_string(),
                 }],
                 end_turn: None,
-            phase: None,
+                phase: None,
             },
             ResponseItem::Message {
                 id: None,
@@ -511,7 +641,7 @@ mod tests {
                     text: "real user message".to_string(),
                 }],
                 end_turn: None,
-            phase: None,
+                phase: None,
             },
         ];
 
@@ -629,7 +759,11 @@ mod tests {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
-                    text: "<environment_context>cwd=/tmp</environment_context>".to_string(),
+                    text: r#"<environment_context>
+  <cwd>/tmp</cwd>
+  <shell>zsh</shell>
+</environment_context>"#
+                        .to_string(),
                 }],
                 end_turn: None,
                 phase: None,
@@ -660,7 +794,11 @@ mod tests {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
-                    text: "<environment_context>cwd=/tmp</environment_context>".to_string(),
+                    text: r#"<environment_context>
+  <cwd>/tmp</cwd>
+  <shell>zsh</shell>
+</environment_context>"#
+                        .to_string(),
                 }],
                 end_turn: None,
                 phase: None,
@@ -712,7 +850,12 @@ mod tests {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
-                    text: "# AGENTS.md instructions for /repo\n\n<INSTRUCTIONS>\nkeep me updated\n</INSTRUCTIONS>".to_string(),
+                    text: r#"# AGENTS.md instructions for /repo
+
+<INSTRUCTIONS>
+keep me updated
+</INSTRUCTIONS>"#
+                        .to_string(),
                 }],
                 end_turn: None,
                 phase: None,
@@ -721,7 +864,11 @@ mod tests {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
-                    text: "<environment_context>\n  <cwd>/repo</cwd>\n  <shell>zsh</shell>\n</environment_context>".to_string(),
+                    text: r#"<environment_context>
+  <cwd>/repo</cwd>
+  <shell>zsh</shell>
+</environment_context>"#
+                        .to_string(),
                 }],
                 end_turn: None,
                 phase: None,
@@ -730,7 +877,11 @@ mod tests {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
-                    text: "<turn_aborted>\n  <turn_id>turn-1</turn_id>\n  <reason>interrupted</reason>\n</turn_aborted>".to_string(),
+                    text: r#"<turn_aborted>
+  <turn_id>turn-1</turn_id>
+  <reason>interrupted</reason>
+</turn_aborted>"#
+                        .to_string(),
                 }],
                 end_turn: None,
                 phase: None,
@@ -752,7 +903,12 @@ mod tests {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
-                    text: "# AGENTS.md instructions for /repo\n\n<INSTRUCTIONS>\nkeep me updated\n</INSTRUCTIONS>".to_string(),
+                    text: r#"# AGENTS.md instructions for /repo
+
+<INSTRUCTIONS>
+keep me updated
+</INSTRUCTIONS>"#
+                        .to_string(),
                 }],
                 end_turn: None,
                 phase: None,
@@ -761,7 +917,11 @@ mod tests {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
-                    text: "<environment_context>\n  <cwd>/repo</cwd>\n  <shell>zsh</shell>\n</environment_context>".to_string(),
+                    text: r#"<environment_context>
+  <cwd>/repo</cwd>
+  <shell>zsh</shell>
+</environment_context>"#
+                        .to_string(),
                 }],
                 end_turn: None,
                 phase: None,
@@ -770,7 +930,10 @@ mod tests {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
-                    text: "<turn_aborted>\n  <turn_id>turn-1</turn_id>\n  <reason>interrupted</reason>\n</turn_aborted>"
+                    text: r#"<turn_aborted>
+  <turn_id>turn-1</turn_id>
+  <reason>interrupted</reason>
+</turn_aborted>"#
                         .to_string(),
                 }],
                 end_turn: None,
@@ -796,7 +959,12 @@ mod tests {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
-                    text: "# AGENTS.md instructions for /repo\n\n<INSTRUCTIONS>\nkeep me updated\n</INSTRUCTIONS>".to_string(),
+                    text: r#"# AGENTS.md instructions for /repo
+
+<INSTRUCTIONS>
+keep me updated
+</INSTRUCTIONS>"#
+                        .to_string(),
                 }],
                 end_turn: None,
                 phase: None,
@@ -805,7 +973,11 @@ mod tests {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
-                    text: "<environment_context>\n  <cwd>/repo</cwd>\n  <shell>zsh</shell>\n</environment_context>".to_string(),
+                    text: r#"<environment_context>
+  <cwd>/repo</cwd>
+  <shell>zsh</shell>
+</environment_context>"#
+                        .to_string(),
                 }],
                 end_turn: None,
                 phase: None,
@@ -814,7 +986,11 @@ mod tests {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
-                    text: "<turn_aborted>\n  <turn_id>turn-1</turn_id>\n  <reason>interrupted</reason>\n</turn_aborted>".to_string(),
+                    text: r#"<turn_aborted>
+  <turn_id>turn-1</turn_id>
+  <reason>interrupted</reason>
+</turn_aborted>"#
+                        .to_string(),
                 }],
                 end_turn: None,
                 phase: None,
