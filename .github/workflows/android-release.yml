@@ -72,7 +72,7 @@ jobs:
       - name: Install NDK 27
         run: sdkmanager --install "ndk;27.2.12479018"
 
-      - name: Configure Android linker
+      - name: Configure Android toolchain
         run: |
           NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
           TOOLCHAIN="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
@@ -80,6 +80,11 @@ jobs:
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$LINKER" >> "$GITHUB_ENV"
           echo "CC_aarch64_linux_android=$LINKER" >> "$GITHUB_ENV"
           echo "AR_aarch64_linux_android=$TOOLCHAIN/bin/llvm-ar" >> "$GITHUB_ENV"
+          echo "RANLIB_aarch64_linux_android=$TOOLCHAIN/bin/llvm-ranlib" >> "$GITHUB_ENV"
+          # Create prefixed symlinks that vendored OpenSSL expects
+          ln -sf "$TOOLCHAIN/bin/llvm-ranlib" "$TOOLCHAIN/bin/aarch64-linux-android-ranlib"
+          ln -sf "$TOOLCHAIN/bin/llvm-ar"     "$TOOLCHAIN/bin/aarch64-linux-android-ar"
+          echo "$TOOLCHAIN/bin" >> "$GITHUB_PATH"
 
       - uses: Swatinem/rust-cache@v2
         with:
