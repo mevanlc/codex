@@ -116,12 +116,12 @@ jobs:
         with:
           name: codex-aarch64-linux-android
 
-      - name: Create prerelease
+      - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: android-${{ needs.build.outputs.version }}
           name: Android aarch64 ${{ needs.build.outputs.version }}
-          prerelease: true
+          prerelease: false
           make_latest: false
           files: codex-aarch64-linux-android.zst
           body: |
