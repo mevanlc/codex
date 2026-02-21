@@ -1,0 +1,131 @@
+name: Android aarch64 Release
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Compute version
+        id: version
+        run: |
+          # Find the tag with the most commits in common with HEAD
+          # (i.e. whose merge-base with HEAD is closest to HEAD).
+          best_tag=""
+          best_dist=999999999
+          short=$(git rev-parse --short=7 HEAD)
+
+          for tag in $(git tag -l); do
+            # Only consider tags containing a rust-v version
+            case "$tag" in *rust-v*) ;; *) continue ;; esac
+
+            mb=$(git merge-base HEAD "$tag" 2>/dev/null) || continue
+            dist=$(git rev-list --count "$mb..HEAD" 2>/dev/null) || continue
+
+            if [ "$dist" -lt "$best_dist" ]; then
+              best_dist=$dist
+              best_tag=$tag
+            fi
+          done
+
+          if [ -n "$best_tag" ]; then
+            # Extract the version portion after 'rust-v'
+            tag_ver=$(echo "$best_tag" | sed 's/.*rust-v//')
+            if [ "$best_dist" -eq 0 ]; then
+              version="$tag_ver"
+            else
+              version="${tag_ver}-${best_dist}-g${short}"
+            fi
+          else
+            version="0.0.0-g${short}"
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version (tag: ${best_tag:-none}, distance: ${best_dist})"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.0"
+          targets: aarch64-linux-android
+
+      - name: Install Android NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK 27
+        run: sdkmanager --install "ndk;27.2.12479018"
+
+      - name: Configure Android linker
+        run: |
+          NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          TOOLCHAIN="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
+          LINKER="$TOOLCHAIN/bin/aarch64-linux-android35-clang"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$LINKER" >> "$GITHUB_ENV"
+          echo "CC_aarch64_linux_android=$LINKER" >> "$GITHUB_ENV"
+          echo "AR_aarch64_linux_android=$TOOLCHAIN/bin/llvm-ar" >> "$GITHUB_ENV"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: codex-rs -> target
+
+      - name: Build codex
+        run: cargo build --release --bin codex --target aarch64-linux-android
+
+      - name: Compress binary
+        run: |
+          zstd -19 target/aarch64-linux-android/release/codex \
+            -o codex-aarch64-linux-android.zst
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-aarch64-linux-android
+          path: codex-rs/codex-aarch64-linux-android.zst
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: codex-aarch64-linux-android
+
+      - name: Create prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-${{ needs.build.outputs.version }}
+          name: Android aarch64 ${{ needs.build.outputs.version }}
+          prerelease: true
+          make_latest: false
+          files: codex-aarch64-linux-android.zst
+          body: |
+            Codex CLI for Android aarch64 (Termux).
+
+            Version: `${{ needs.build.outputs.version }}`
+            Commit: `${{ github.sha }}`
+
+            ```sh
+            zstd -d codex-aarch64-linux-android.zst -o codex
+            chmod +x codex
+            ```
