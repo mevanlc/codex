@@ -48,7 +48,7 @@ use crate::app_event::RealtimeAudioDeviceKind;
 use crate::app_server_approval_conversions::file_update_changes_to_display;
 use crate::approval_events::ApplyPatchApprovalRequestEvent;
 use crate::approval_events::ExecApprovalRequestEvent;
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 use crate::audio_device::list_realtime_audio_device_names;
 use crate::bottom_pane::StatusLineItem;
 use crate::bottom_pane::StatusLineSetupView;
@@ -915,7 +915,7 @@ impl ChatWidget {
 
     fn realtime_conversation_enabled(&self) -> bool {
         self.config.features.enabled(Feature::RealtimeConversation)
-            && cfg!(not(target_os = "linux"))
+            && cfg!(not(any(target_os = "linux", target_os = "android")))
     }
 
     fn realtime_audio_device_selection_enabled(&self) -> bool {
