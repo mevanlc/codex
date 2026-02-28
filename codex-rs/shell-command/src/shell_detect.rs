@@ -60,6 +60,11 @@ pub fn detect_shell_type(shell_path: impl AsRef<std::path::Path>) -> Option<Shel
 
 #[cfg(unix)]
 fn get_user_shell_path() -> Option<PathBuf> {
+    #[cfg(target_os = "android")]
+    if let Some(shell_path) = shell_path_from_env(std::env::var_os("SHELL")) {
+        return Some(shell_path);
+    }
+
     let uid = unsafe { libc::getuid() };
     use std::ffi::CStr;
     use std::mem::MaybeUninit;
@@ -116,6 +121,20 @@ fn get_user_shell_path() -> Option<PathBuf> {
             return None;
         }
         buffer.resize(new_len, 0);
+    }
+}
+
+#[cfg(all(unix, any(test, target_os = "android")))]
+fn shell_path_from_env(shell_env: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    let Some(shell_env) = shell_env else {
+        return None;
+    };
+
+    let shell_path = PathBuf::from(shell_env);
+    if std::fs::metadata(&shell_path).is_ok_and(|metadata| metadata.is_file()) {
+        Some(shell_path)
+    } else {
+        None
     }
 }
 
@@ -298,6 +317,16 @@ pub fn default_user_shell_from_path(user_shell_path: Option<PathBuf>) -> Detecte
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    #[cfg(unix)]
+    fn shell_path_from_env_accepts_existing_file() {
+        let shell_path = std::env::current_exe().unwrap();
+        assert_eq!(
+            shell_path_from_env(Some(shell_path.clone().into_os_string())),
+            Some(shell_path)
+        );
+    }
 
     #[test]
     fn test_detect_shell_type() {
