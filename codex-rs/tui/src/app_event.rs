@@ -195,7 +195,11 @@ pub(crate) enum AppEvent {
 
     /// Persist the selected realtime microphone or speaker to top-level config.
     #[cfg_attr(
-        any(target_os = "linux", not(feature = "voice-input")),
+        any(
+            target_os = "linux",
+            target_os = "android",
+            not(feature = "voice-input")
+        ),
         allow(dead_code)
     )]
     PersistRealtimeAudioDeviceSelection {
@@ -376,6 +380,7 @@ pub(crate) enum AppEvent {
 
     /// Voice transcription finished for the given placeholder id.
     #[cfg(not(target_os = "linux"))]
+    #[cfg_attr(target_os = "android", allow(dead_code))]
     TranscriptionComplete {
         id: String,
         text: String,

@@ -38,7 +38,10 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::app_event::RealtimeAudioDeviceKind;
-#[cfg(all(not(target_os = "linux"), feature = "voice-input"))]
+#[cfg(all(
+    not(any(target_os = "linux", target_os = "android")),
+    feature = "voice-input"
+))]
 use crate::audio_device::list_realtime_audio_device_names;
 use crate::bottom_pane::StatusLineItem;
 use crate::bottom_pane::StatusLineSetupView;
@@ -856,7 +859,7 @@ enum ReplayKind {
 impl ChatWidget {
     fn realtime_conversation_enabled(&self) -> bool {
         self.config.features.enabled(Feature::RealtimeConversation)
-            && cfg!(not(target_os = "linux"))
+            && cfg!(not(any(target_os = "linux", target_os = "android")))
     }
 
     fn realtime_audio_device_selection_enabled(&self) -> bool {
@@ -5326,7 +5329,10 @@ impl ChatWidget {
         });
     }
 
-    #[cfg(all(not(target_os = "linux"), feature = "voice-input"))]
+    #[cfg(all(
+        not(any(target_os = "linux", target_os = "android")),
+        feature = "voice-input"
+    ))]
     pub(crate) fn open_realtime_audio_device_selection(&mut self, kind: RealtimeAudioDeviceKind) {
         match list_realtime_audio_device_names(kind) {
             Ok(device_names) => {
@@ -5341,12 +5347,19 @@ impl ChatWidget {
         }
     }
 
-    #[cfg(any(target_os = "linux", not(feature = "voice-input")))]
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        not(feature = "voice-input")
+    ))]
     pub(crate) fn open_realtime_audio_device_selection(&mut self, kind: RealtimeAudioDeviceKind) {
         let _ = kind;
     }
 
-    #[cfg(all(not(target_os = "linux"), feature = "voice-input"))]
+    #[cfg(all(
+        not(any(target_os = "linux", target_os = "android")),
+        feature = "voice-input"
+    ))]
     fn open_realtime_audio_device_selection_with_names(
         &mut self,
         kind: RealtimeAudioDeviceKind,

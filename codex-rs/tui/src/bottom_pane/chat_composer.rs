@@ -600,7 +600,8 @@ impl ChatComposer {
 
     #[cfg(not(target_os = "linux"))]
     fn voice_transcription_enabled(&self) -> bool {
-        self.voice_state.transcription_enabled && cfg!(not(target_os = "linux"))
+        self.voice_state.transcription_enabled
+            && cfg!(not(any(target_os = "linux", target_os = "android")))
     }
     /// Centralized feature gating keeps config checks out of call sites.
     fn popups_enabled(&self) -> bool {
