@@ -1,6 +1,7 @@
 use super::*;
 use std::path::PathBuf;
 use std::process::Command;
+use tempfile::NamedTempFile;
 
 #[test]
 #[cfg(target_os = "macos")]
@@ -143,6 +144,16 @@ fn derive_exec_args() {
     assert_eq!(
         test_powershell_shell.derive_exec_args("echo hello", /*use_login_shell*/ true),
         vec!["pwsh.exe", "-Command", "echo hello"]
+    );
+}
+
+#[test]
+fn shell_path_from_env_accepts_existing_file() {
+    let shell = NamedTempFile::new().unwrap();
+    let shell_path = shell.path().to_path_buf();
+    assert_eq!(
+        shell_path_from_env(Some(shell_path.clone().into_os_string())),
+        Some(shell_path)
     );
 }
 
