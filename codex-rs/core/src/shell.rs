@@ -94,6 +94,11 @@ fn get_user_shell_path() -> Option<PathBuf> {
     use libc::getuid;
     use std::ffi::CStr;
 
+    #[cfg(target_os = "android")]
+    if let Some(shell_path) = shell_path_from_env(std::env::var_os("SHELL")) {
+        return Some(shell_path);
+    }
+
     unsafe {
         let uid = getuid();
         let pw = getpwuid(uid);
@@ -106,6 +111,20 @@ fn get_user_shell_path() -> Option<PathBuf> {
         } else {
             None
         }
+    }
+}
+
+#[cfg(all(unix, any(test, target_os = "android")))]
+fn shell_path_from_env(shell_env: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    let Some(shell_env) = shell_env else {
+        return None;
+    };
+
+    let shell_path = PathBuf::from(shell_env);
+    if std::fs::metadata(&shell_path).is_ok_and(|metadata| metadata.is_file()) {
+        Some(shell_path)
+    } else {
+        None
     }
 }
 
@@ -343,8 +362,10 @@ mod detect_shell_type_tests {
 #[cfg(unix)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
     use std::path::PathBuf;
     use std::process::Command;
+    use tempfile::NamedTempFile;
 
     #[test]
     #[cfg(target_os = "macos")]
@@ -463,6 +484,16 @@ mod tests {
         assert_eq!(
             test_powershell_shell.derive_exec_args("echo hello", true),
             vec!["pwsh.exe", "-Command", "echo hello"]
+        );
+    }
+
+    #[test]
+    fn shell_path_from_env_accepts_existing_file() {
+        let shell = NamedTempFile::new().unwrap();
+        let shell_path = shell.path().to_path_buf();
+        assert_eq!(
+            shell_path_from_env(Some(shell_path.clone().into_os_string())),
+            Some(shell_path)
         );
     }
 
