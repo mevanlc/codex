@@ -2,6 +2,7 @@ use crate::auth::AuthCredentialsStoreMode;
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
 use crate::config::types::AppsConfigToml;
+use crate::config::types::ChatboxPlaceholderTips;
 use crate::config::types::DEFAULT_OTEL_ENVIRONMENT;
 use crate::config::types::History;
 use crate::config::types::McpServerConfig;
@@ -10,7 +11,6 @@ use crate::config::types::McpServerTransportConfig;
 use crate::config::types::MemoriesConfig;
 use crate::config::types::MemoriesToml;
 use crate::config::types::Notice;
-use crate::config::types::ChatboxPlaceholderTips;
 use crate::config::types::NotificationMethod;
 use crate::config::types::Notifications;
 use crate::config::types::OtelConfig;
@@ -2682,6 +2682,7 @@ theme = "dracula"
                 notification_method: NotificationMethod::Auto,
                 animations: true,
                 show_tooltips: true,
+                chatbox_placeholder_tips: ChatboxPlaceholderTips::On,
                 alternate_screen: AltScreenMode::Auto,
                 status_line: None,
                 theme: None,
@@ -4896,6 +4897,7 @@ model_verbosity = "high"
                 tui_notification_method: Default::default(),
                 animations: true,
                 show_tooltips: true,
+                chatbox_placeholder_tips: ChatboxPlaceholderTips::On,
                 analytics_enabled: Some(true),
                 feedback_enabled: true,
                 tui_alternate_screen: AltScreenMode::Auto,
@@ -5023,6 +5025,7 @@ model_verbosity = "high"
             tui_notification_method: Default::default(),
             animations: true,
             show_tooltips: true,
+            chatbox_placeholder_tips: ChatboxPlaceholderTips::On,
             analytics_enabled: Some(true),
             feedback_enabled: true,
             tui_alternate_screen: AltScreenMode::Auto,
@@ -5148,6 +5151,7 @@ model_verbosity = "high"
             tui_notification_method: Default::default(),
             animations: true,
             show_tooltips: true,
+            chatbox_placeholder_tips: ChatboxPlaceholderTips::On,
             analytics_enabled: Some(false),
             feedback_enabled: true,
             tui_alternate_screen: AltScreenMode::Auto,
@@ -5259,6 +5263,7 @@ model_verbosity = "high"
             tui_notification_method: Default::default(),
             animations: true,
             show_tooltips: true,
+            chatbox_placeholder_tips: ChatboxPlaceholderTips::On,
             analytics_enabled: Some(true),
             feedback_enabled: true,
             tui_alternate_screen: AltScreenMode::Auto,
