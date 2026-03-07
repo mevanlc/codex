@@ -2022,8 +2022,6 @@ impl Drop for ChatWidget {
     }
 }
 
-const DEFAULT_CHATBOX_PLACEHOLDER: &str = "Ask Codex to do anything";
-
 const PLACEHOLDERS: [&str; 8] = [
     "Explain this codebase",
     "Summarize recent commits",
