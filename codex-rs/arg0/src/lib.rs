@@ -1,5 +1,7 @@
 use std::fs::File;
+use std::fs::TryLockError;
 use std::future::Future;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -15,6 +17,7 @@ const MISSPELLED_APPLY_PATCH_ARG0: &str = "applypatch";
 #[cfg(unix)]
 const EXECVE_WRAPPER_ARG0: &str = "codex-execve-wrapper";
 const LOCK_FILENAME: &str = ".lock";
+const PROCESS_METADATA_FILENAME: &str = ".process";
 const TOKIO_WORKER_STACK_SIZE_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -23,15 +26,15 @@ pub struct Arg0DispatchPaths {
     pub main_execve_wrapper_exe: Option<PathBuf>,
 }
 
-/// Keeps the per-session PATH entry alive and locked for the process lifetime.
+/// Keeps the per-session PATH entry alive for the process lifetime.
 pub struct Arg0PathEntryGuard {
     _temp_dir: TempDir,
-    _lock_file: File,
+    _lock_file: Option<File>,
     paths: Arg0DispatchPaths,
 }
 
 impl Arg0PathEntryGuard {
-    fn new(temp_dir: TempDir, lock_file: File, paths: Arg0DispatchPaths) -> Self {
+    fn new(temp_dir: TempDir, lock_file: Option<File>, paths: Arg0DispatchPaths) -> Self {
         Self {
             _temp_dir: temp_dir,
             _lock_file: lock_file,
@@ -270,7 +273,19 @@ pub fn prepend_path_entry_for_codex_aliases() -> std::io::Result<Arg0PathEntryGu
         .create(true)
         .truncate(false)
         .open(&lock_path)?;
-    lock_file.try_lock()?;
+    let lock_file = match try_lock_file(lock_file)? {
+        FileLockStatus::Acquired(lock_file) => Some(lock_file),
+        FileLockStatus::WouldBlock => {
+            return Err(std::io::Error::new(
+                ErrorKind::WouldBlock,
+                format!("lock file unexpectedly busy: {lock_path:?}"),
+            ));
+        }
+        FileLockStatus::Unsupported(_lock_file) => {
+            write_current_process_metadata(path)?;
+            None
+        }
+    };
 
     for filename in &[
         APPLY_PATCH_ARG0,
@@ -362,9 +377,9 @@ fn janitor_cleanup(temp_root: &Path) -> std::io::Result<()> {
             continue;
         }
 
-        // Skip the directory if locking fails or the lock is currently held.
-        let Some(_lock_file) = try_lock_dir(&path)? else {
-            continue;
+        let cleanup_claim = match try_claim_stale_dir(&path)? {
+            Some(cleanup_claim) => cleanup_claim,
+            None => continue,
         };
 
         match std::fs::remove_dir_all(&path) {
@@ -373,12 +388,21 @@ fn janitor_cleanup(temp_root: &Path) -> std::io::Result<()> {
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
             Err(err) => return Err(err),
         }
+        drop(cleanup_claim);
     }
 
     Ok(())
 }
 
-fn try_lock_dir(dir: &Path) -> std::io::Result<Option<File>> {
+fn try_claim_stale_dir(dir: &Path) -> std::io::Result<Option<CleanupClaim>> {
+    if let Some(is_live) = dir_has_live_process_metadata(dir)? {
+        return if is_live {
+            Ok(None)
+        } else {
+            Ok(Some(CleanupClaim::ProcessMetadata))
+        };
+    }
+
     let lock_path = dir.join(LOCK_FILENAME);
     let lock_file = match File::options().read(true).write(true).open(&lock_path) {
         Ok(file) => file,
@@ -386,17 +410,159 @@ fn try_lock_dir(dir: &Path) -> std::io::Result<Option<File>> {
         Err(err) => return Err(err),
     };
 
-    match lock_file.try_lock() {
-        Ok(()) => Ok(Some(lock_file)),
-        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
-        Err(err) => Err(err.into()),
+    match try_lock_file(lock_file)? {
+        FileLockStatus::Acquired(lock_file) => Ok(Some(CleanupClaim::FileLock {
+            _lock_file: lock_file,
+        })),
+        FileLockStatus::WouldBlock | FileLockStatus::Unsupported(_) => Ok(None),
     }
+}
+
+enum FileLockStatus {
+    Acquired(File),
+    WouldBlock,
+    Unsupported(File),
+}
+
+enum CleanupClaim {
+    FileLock { _lock_file: File },
+    ProcessMetadata,
+}
+
+fn try_lock_file(lock_file: File) -> std::io::Result<FileLockStatus> {
+    match lock_file.try_lock() {
+        Ok(()) => Ok(FileLockStatus::Acquired(lock_file)),
+        Err(TryLockError::WouldBlock) => Ok(FileLockStatus::WouldBlock),
+        Err(TryLockError::Error(err)) if err.kind() == ErrorKind::Unsupported => {
+            Ok(FileLockStatus::Unsupported(lock_file))
+        }
+        Err(TryLockError::Error(err)) => Err(err),
+    }
+}
+
+#[cfg(any(target_os = "android", target_os = "linux"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ProcessMetadata {
+    pid: u32,
+    starttime_ticks: u64,
+}
+
+#[cfg(any(target_os = "android", target_os = "linux"))]
+fn write_current_process_metadata(dir: &Path) -> std::io::Result<()> {
+    let metadata = current_process_metadata()?;
+    let metadata_path = dir.join(PROCESS_METADATA_FILENAME);
+    std::fs::write(
+        metadata_path,
+        format!("{} {}\n", metadata.pid, metadata.starttime_ticks),
+    )
+}
+
+#[cfg(not(any(target_os = "android", target_os = "linux")))]
+fn write_current_process_metadata(_dir: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        ErrorKind::Unsupported,
+        "process metadata fallback requires /proc support",
+    ))
+}
+
+#[cfg(any(target_os = "android", target_os = "linux"))]
+fn dir_has_live_process_metadata(dir: &Path) -> std::io::Result<Option<bool>> {
+    let Some(metadata) = read_process_metadata(dir)? else {
+        return Ok(None);
+    };
+    match read_process_starttime_ticks(metadata.pid) {
+        Ok(starttime_ticks) => Ok(Some(starttime_ticks == metadata.starttime_ticks)),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(Some(false)),
+        Err(err) => Err(err),
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "linux")))]
+fn dir_has_live_process_metadata(_dir: &Path) -> std::io::Result<Option<bool>> {
+    Ok(None)
+}
+
+#[cfg(any(target_os = "android", target_os = "linux"))]
+fn current_process_metadata() -> std::io::Result<ProcessMetadata> {
+    let pid = std::process::id();
+    let starttime_ticks = read_process_starttime_ticks(pid)?;
+    Ok(ProcessMetadata {
+        pid,
+        starttime_ticks,
+    })
+}
+
+#[cfg(any(target_os = "android", target_os = "linux"))]
+fn read_process_metadata(dir: &Path) -> std::io::Result<Option<ProcessMetadata>> {
+    let metadata_path = dir.join(PROCESS_METADATA_FILENAME);
+    let metadata = match std::fs::read_to_string(&metadata_path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err),
+    };
+    let mut fields = metadata.split_ascii_whitespace();
+    let Some(pid) = fields.next() else {
+        return Ok(None);
+    };
+    let Some(starttime_ticks) = fields.next() else {
+        return Ok(None);
+    };
+    let Ok(pid) = pid.parse::<u32>() else {
+        return Ok(None);
+    };
+    let Ok(starttime_ticks) = starttime_ticks.parse::<u64>() else {
+        return Ok(None);
+    };
+    Ok(Some(ProcessMetadata {
+        pid,
+        starttime_ticks,
+    }))
+}
+
+#[cfg(any(target_os = "android", target_os = "linux"))]
+fn read_process_starttime_ticks(pid: u32) -> std::io::Result<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"))?;
+    parse_process_starttime_ticks(&stat)
+}
+
+#[cfg(any(target_os = "android", target_os = "linux"))]
+fn parse_process_starttime_ticks(stat: &str) -> std::io::Result<u64> {
+    let Some(comm_end) = stat.rfind(')') else {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidData,
+            "missing closing ')' in /proc stat entry",
+        ));
+    };
+    let fields = stat[comm_end + 1..]
+        .split_ascii_whitespace()
+        .collect::<Vec<_>>();
+    let Some(starttime_ticks) = fields.get(19) else {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidData,
+            "missing starttime field in /proc stat entry",
+        ));
+    };
+    starttime_ticks.parse::<u64>().map_err(|err| {
+        std::io::Error::new(
+            ErrorKind::InvalidData,
+            format!("invalid starttime field in /proc stat entry: {err}"),
+        )
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use super::FileLockStatus;
     use super::LOCK_FILENAME;
+    use super::PROCESS_METADATA_FILENAME;
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    use super::current_process_metadata;
     use super::janitor_cleanup;
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    use super::parse_process_starttime_ticks;
+    use super::try_lock_file;
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    use super::write_current_process_metadata;
     use std::fs;
     use std::fs::File;
     use std::path::Path;
@@ -409,6 +575,16 @@ mod tests {
             .create(true)
             .truncate(false)
             .open(lock_path)
+    }
+
+    fn locking_is_supported() -> std::io::Result<bool> {
+        let root = tempfile::tempdir()?;
+        let lock_file = create_lock(root.path())?;
+        match try_lock_file(lock_file)? {
+            FileLockStatus::Acquired(_lock_file) => Ok(true),
+            FileLockStatus::WouldBlock => Ok(true),
+            FileLockStatus::Unsupported(_lock_file) => Ok(false),
+        }
     }
 
     #[test]
@@ -428,8 +604,12 @@ mod tests {
         let root = tempfile::tempdir()?;
         let dir = root.path().join("locked");
         fs::create_dir(&dir)?;
-        let lock_file = create_lock(&dir)?;
-        lock_file.try_lock()?;
+        if locking_is_supported()? {
+            let lock_file = create_lock(&dir)?;
+            lock_file.try_lock()?;
+        } else {
+            write_current_process_metadata(&dir)?;
+        }
 
         janitor_cleanup(root.path())?;
 
@@ -442,11 +622,43 @@ mod tests {
         let root = tempfile::tempdir()?;
         let dir = root.path().join("stale");
         fs::create_dir(&dir)?;
-        create_lock(&dir)?;
+        if locking_is_supported()? {
+            create_lock(&dir)?;
+        } else {
+            let metadata = current_process_metadata()?;
+            fs::write(
+                dir.join(PROCESS_METADATA_FILENAME),
+                format!("{} {}\n", metadata.pid, metadata.starttime_ticks + 1),
+            )?;
+        }
 
         janitor_cleanup(root.path())?;
 
         assert!(!dir.exists());
+        Ok(())
+    }
+
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    #[test]
+    fn parse_process_starttime_ticks_handles_proc_stat_format() -> std::io::Result<()> {
+        let stat = "1234 (codex worker) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 424242 21";
+        let starttime_ticks = parse_process_starttime_ticks(stat)?;
+
+        assert_eq!(starttime_ticks, 424242);
+        Ok(())
+    }
+
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    #[test]
+    fn janitor_skips_dirs_with_malformed_process_metadata() -> std::io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let dir = root.path().join("malformed");
+        fs::create_dir(&dir)?;
+        fs::write(dir.join(PROCESS_METADATA_FILENAME), "not-valid\n")?;
+
+        janitor_cleanup(root.path())?;
+
+        assert!(dir.exists());
         Ok(())
     }
 }
