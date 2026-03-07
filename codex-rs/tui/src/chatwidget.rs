@@ -8572,8 +8572,6 @@ impl Notification {
 
 const AGENT_NOTIFICATION_PREVIEW_GRAPHEMES: usize = 200;
 
-const DEFAULT_CHATBOX_PLACEHOLDER: &str = "Ask Codex to do anything";
-
 const PLACEHOLDERS: [&str; 8] = [
     "Explain this codebase",
     "Summarize recent commits",
@@ -8590,7 +8588,7 @@ fn select_chatbox_placeholder<R: Rng + ?Sized>(config: &Config, rng: &mut R) -> 
         ChatboxPlaceholderTips::On => {
             PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string()
         }
-        ChatboxPlaceholderTips::Off => DEFAULT_CHATBOX_PLACEHOLDER.to_string(),
+        ChatboxPlaceholderTips::Off => String::new(),
     }
 }
 
