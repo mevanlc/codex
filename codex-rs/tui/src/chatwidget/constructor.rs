@@ -274,6 +274,6 @@ fn select_chatbox_placeholder<R: Rng + ?Sized>(config: &Config, rng: &mut R) -> 
         ChatboxPlaceholderTips::On => {
             PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string()
         }
-        ChatboxPlaceholderTips::Off => DEFAULT_CHATBOX_PLACEHOLDER.to_string(),
+        ChatboxPlaceholderTips::Off => String::new(),
     }
 }
