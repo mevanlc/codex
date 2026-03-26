@@ -7,12 +7,15 @@ use crate::config_loader::ConfigLayerEntry;
 use crate::config_loader::ConfigLayerStack;
 use crate::config_loader::ConfigRequirements;
 use crate::config_loader::ConfigRequirementsToml;
+use crate::plugins::LoadedPlugin;
 use crate::plugins::MarketplacePluginInstallPolicy;
+use crate::plugins::PluginLoadOutcome;
 use crate::plugins::test_support::TEST_CURATED_PLUGIN_SHA;
 use crate::plugins::test_support::write_curated_plugin_sha_with as write_curated_plugin_sha;
 use crate::plugins::test_support::write_file;
 use crate::plugins::test_support::write_openai_curated_marketplace;
 use codex_app_server_protocol::ConfigLayerSource;
+use codex_protocol::protocol::Product;
 use pretty_assertions::assert_eq;
 use std::fs;
 use tempfile::TempDir;
@@ -24,6 +27,8 @@ use wiremock::matchers::header;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 use wiremock::matchers::query_param;
+
+const MAX_CAPABILITY_SUMMARY_DESCRIPTION_LEN: usize = 1024;
 
 fn write_plugin(root: &Path, dir_name: &str, manifest_name: &str) {
     let plugin_root = root.join(dir_name);
@@ -129,7 +134,7 @@ fn load_plugins_loads_default_skills_and_mcp_servers() {
     let outcome = load_plugins_from_config(&plugin_config_toml(true, true), codex_home.path());
 
     assert_eq!(
-        outcome.plugins,
+        outcome.plugins(),
         vec![LoadedPlugin {
             config_name: "sample@test".to_string(),
             manifest_name: Some("sample".to_string()),
@@ -139,6 +144,8 @@ fn load_plugins_loads_default_skills_and_mcp_servers() {
             root: AbsolutePathBuf::try_from(plugin_root.clone()).unwrap(),
             enabled: true,
             skill_roots: vec![plugin_root.join("skills")],
+            disabled_skill_paths: HashSet::new(),
+            has_enabled_skills: true,
             mcp_servers: HashMap::from([(
                 "sample".to_string(),
                 McpServerConfig {
@@ -157,6 +164,7 @@ fn load_plugins_loads_default_skills_and_mcp_servers() {
                     disabled_tools: None,
                     scopes: None,
                     oauth_resource: None,
+                    tools: HashMap::new(),
                 },
             )]),
             apps: vec![AppConnectorId("connector_example".to_string())],
@@ -182,6 +190,89 @@ fn load_plugins_loads_default_skills_and_mcp_servers() {
     assert_eq!(
         outcome.effective_apps(),
         vec![AppConnectorId("connector_example".to_string())]
+    );
+}
+
+#[test]
+fn load_plugins_resolves_disabled_skill_names_against_loaded_plugin_skills() {
+    let codex_home = TempDir::new().unwrap();
+    let plugin_root = codex_home
+        .path()
+        .join("plugins/cache")
+        .join("test/sample/local");
+    let skill_path = plugin_root.join("skills/sample-search/SKILL.md");
+
+    write_file(
+        &plugin_root.join(".codex-plugin/plugin.json"),
+        r#"{"name":"sample"}"#,
+    );
+    write_file(
+        &skill_path,
+        "---\nname: sample-search\ndescription: search sample data\n---\n",
+    );
+
+    let config_toml = r#"[features]
+plugins = true
+
+[[skills.config]]
+name = "sample:sample-search"
+enabled = false
+
+[plugins."sample@test"]
+enabled = true
+"#;
+    let outcome = load_plugins_from_config(config_toml, codex_home.path());
+    let skill_path = dunce::canonicalize(skill_path).expect("skill path should canonicalize");
+
+    assert_eq!(
+        outcome.plugins()[0].disabled_skill_paths,
+        HashSet::from([skill_path])
+    );
+    assert!(!outcome.plugins()[0].has_enabled_skills);
+    assert!(outcome.capability_summaries().is_empty());
+}
+
+#[test]
+fn load_plugins_ignores_unknown_disabled_skill_names() {
+    let codex_home = TempDir::new().unwrap();
+    let plugin_root = codex_home
+        .path()
+        .join("plugins/cache")
+        .join("test/sample/local");
+
+    write_file(
+        &plugin_root.join(".codex-plugin/plugin.json"),
+        r#"{"name":"sample"}"#,
+    );
+    write_file(
+        &plugin_root.join("skills/sample-search/SKILL.md"),
+        "---\nname: sample-search\ndescription: search sample data\n---\n",
+    );
+
+    let config_toml = r#"[features]
+plugins = true
+
+[[skills.config]]
+name = "sample:missing-skill"
+enabled = false
+
+[plugins."sample@test"]
+enabled = true
+"#;
+    let outcome = load_plugins_from_config(config_toml, codex_home.path());
+
+    assert!(outcome.plugins()[0].disabled_skill_paths.is_empty());
+    assert!(outcome.plugins()[0].has_enabled_skills);
+    assert_eq!(
+        outcome.capability_summaries(),
+        &[PluginCapabilitySummary {
+            config_name: "sample@test".to_string(),
+            display_name: "sample".to_string(),
+            description: None,
+            has_skills: true,
+            mcp_server_names: Vec::new(),
+            app_connector_ids: Vec::new(),
+        }]
     );
 }
 
@@ -252,7 +343,7 @@ fn capability_summary_sanitizes_plugin_descriptions_to_one_line() {
     let outcome = load_plugins_from_config(&plugin_config_toml(true, true), codex_home.path());
 
     assert_eq!(
-        outcome.plugins[0].manifest_description.as_deref(),
+        outcome.plugins()[0].manifest_description.as_deref(),
         Some("Plugin that\n includes   the sample\tserver")
     );
     assert_eq!(
@@ -287,7 +378,7 @@ fn capability_summary_truncates_overlong_plugin_descriptions() {
     let outcome = load_plugins_from_config(&plugin_config_toml(true, true), codex_home.path());
 
     assert_eq!(
-        outcome.plugins[0].manifest_description.as_deref(),
+        outcome.plugins()[0].manifest_description.as_deref(),
         Some(too_long.as_str())
     );
     assert_eq!(
@@ -367,14 +458,14 @@ fn load_plugins_uses_manifest_configured_component_paths() {
     let outcome = load_plugins_from_config(&plugin_config_toml(true, true), codex_home.path());
 
     assert_eq!(
-        outcome.plugins[0].skill_roots,
+        outcome.plugins()[0].skill_roots,
         vec![
             plugin_root.join("custom-skills"),
             plugin_root.join("skills")
         ]
     );
     assert_eq!(
-        outcome.plugins[0].mcp_servers,
+        outcome.plugins()[0].mcp_servers,
         HashMap::from([(
             "custom".to_string(),
             McpServerConfig {
@@ -393,11 +484,12 @@ fn load_plugins_uses_manifest_configured_component_paths() {
                 disabled_tools: None,
                 scopes: None,
                 oauth_resource: None,
+                tools: HashMap::new(),
             },
         )])
     );
     assert_eq!(
-        outcome.plugins[0].apps,
+        outcome.plugins()[0].apps,
         vec![AppConnectorId("connector_custom".to_string())]
     );
 }
@@ -473,11 +565,11 @@ fn load_plugins_ignores_manifest_component_paths_without_dot_slash() {
     let outcome = load_plugins_from_config(&plugin_config_toml(true, true), codex_home.path());
 
     assert_eq!(
-        outcome.plugins[0].skill_roots,
+        outcome.plugins()[0].skill_roots,
         vec![plugin_root.join("skills")]
     );
     assert_eq!(
-        outcome.plugins[0].mcp_servers,
+        outcome.plugins()[0].mcp_servers,
         HashMap::from([(
             "default".to_string(),
             McpServerConfig {
@@ -496,11 +588,12 @@ fn load_plugins_ignores_manifest_component_paths_without_dot_slash() {
                 disabled_tools: None,
                 scopes: None,
                 oauth_resource: None,
+                tools: HashMap::new(),
             },
         )])
     );
     assert_eq!(
-        outcome.plugins[0].apps,
+        outcome.plugins()[0].apps,
         vec![AppConnectorId("connector_default".to_string())]
     );
 }
@@ -532,7 +625,7 @@ fn load_plugins_preserves_disabled_plugins_without_effective_contributions() {
     let outcome = load_plugins_from_config(&plugin_config_toml(false, true), codex_home.path());
 
     assert_eq!(
-        outcome.plugins,
+        outcome.plugins(),
         vec![LoadedPlugin {
             config_name: "sample@test".to_string(),
             manifest_name: None,
@@ -540,6 +633,8 @@ fn load_plugins_preserves_disabled_plugins_without_effective_contributions() {
             root: AbsolutePathBuf::try_from(plugin_root).unwrap(),
             enabled: false,
             skill_roots: Vec::new(),
+            disabled_skill_paths: HashSet::new(),
+            has_enabled_skills: false,
             mcp_servers: HashMap::new(),
             apps: Vec::new(),
             error: None,
@@ -643,6 +738,7 @@ fn capability_index_filters_inactive_and_zero_capability_plugins() {
         disabled_tools: None,
         scopes: None,
         oauth_resource: None,
+        tools: HashMap::new(),
     };
     let plugin = |config_name: &str, dir_name: &str, manifest_name: &str| LoadedPlugin {
         config_name: config_name.to_string(),
@@ -651,6 +747,8 @@ fn capability_index_filters_inactive_and_zero_capability_plugins() {
         root: AbsolutePathBuf::try_from(codex_home.path().join(dir_name)).unwrap(),
         enabled: true,
         skill_roots: Vec::new(),
+        disabled_skill_paths: HashSet::new(),
+        has_enabled_skills: false,
         mcp_servers: HashMap::new(),
         apps: Vec::new(),
         error: None,
@@ -664,6 +762,7 @@ fn capability_index_filters_inactive_and_zero_capability_plugins() {
     let outcome = PluginLoadOutcome::from_plugins(vec![
         LoadedPlugin {
             skill_roots: vec![codex_home.path().join("skills-plugin/skills")],
+            has_enabled_skills: true,
             ..plugin("skills@test", "skills-plugin", "skills-plugin")
         },
         LoadedPlugin {
@@ -711,24 +810,6 @@ fn capability_index_filters_inactive_and_zero_capability_plugins() {
                 ..summary("beta@test", "beta-plugin")
             },
         ]
-    );
-}
-
-#[test]
-fn plugin_namespace_for_skill_path_uses_manifest_name() {
-    let codex_home = TempDir::new().unwrap();
-    let plugin_root = codex_home.path().join("plugins/sample");
-    let skill_path = plugin_root.join("skills/search/SKILL.md");
-
-    write_file(
-        &plugin_root.join(".codex-plugin/plugin.json"),
-        r#"{"name":"sample"}"#,
-    );
-    write_file(&skill_path, "---\ndescription: search\n---\n");
-
-    assert_eq!(
-        plugin_namespace_for_skill_path(&skill_path),
-        Some("sample".to_string())
     );
 }
 
@@ -789,9 +870,9 @@ fn load_plugins_rejects_invalid_plugin_keys() {
         codex_home.path(),
     );
 
-    assert_eq!(outcome.plugins.len(), 1);
+    assert_eq!(outcome.plugins().len(), 1);
     assert_eq!(
-        outcome.plugins[0].error.as_deref(),
+        outcome.plugins()[0].error.as_deref(),
         Some("invalid plugin key `sample`; expected <plugin>@<marketplace>")
     );
     assert!(outcome.effective_skill_roots().is_empty());
@@ -944,7 +1025,8 @@ enabled = false
     let config = load_config(tmp.path(), &repo_root).await;
     let marketplaces = PluginsManager::new(tmp.path().to_path_buf())
         .list_marketplaces_for_config(&config, &[AbsolutePathBuf::try_from(repo_root).unwrap()])
-        .unwrap();
+        .unwrap()
+        .marketplaces;
 
     let marketplace = marketplaces
         .into_iter()
@@ -1039,7 +1121,8 @@ enabled = true
     let config = load_config(tmp.path(), &repo_root).await;
     let marketplaces = PluginsManager::new(tmp.path().to_path_buf())
         .list_marketplaces_for_config(&config, &[AbsolutePathBuf::try_from(repo_root).unwrap()])
-        .unwrap();
+        .unwrap()
+        .marketplaces;
 
     assert_eq!(marketplaces, Vec::new());
 }
@@ -1086,7 +1169,8 @@ plugins = true
     let config = load_config(tmp.path(), &repo_root).await;
     let marketplaces = PluginsManager::new(tmp.path().to_path_buf())
         .list_marketplaces_for_config(&config, &[AbsolutePathBuf::try_from(repo_root).unwrap()])
-        .unwrap();
+        .unwrap()
+        .marketplaces;
 
     let marketplace = marketplaces
         .into_iter()
@@ -1167,6 +1251,70 @@ enabled = true
 }
 
 #[tokio::test]
+async fn read_plugin_for_config_uses_user_layer_skill_settings_only() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo_root = tmp.path().join("repo");
+    let plugin_root = repo_root.join("enabled-plugin");
+    fs::create_dir_all(repo_root.join(".git")).unwrap();
+    fs::create_dir_all(repo_root.join(".agents/plugins")).unwrap();
+    write_file(
+        &repo_root.join(".agents/plugins/marketplace.json"),
+        r#"{
+  "name": "debug",
+  "plugins": [
+    {
+      "name": "enabled-plugin",
+      "source": {
+        "source": "local",
+        "path": "./enabled-plugin"
+      }
+    }
+  ]
+}"#,
+    );
+    write_file(
+        &plugin_root.join(".codex-plugin/plugin.json"),
+        r#"{"name":"enabled-plugin"}"#,
+    );
+    write_file(
+        &plugin_root.join("skills/sample-search/SKILL.md"),
+        "---\nname: sample-search\ndescription: search sample data\n---\n",
+    );
+    write_file(
+        &tmp.path().join(CONFIG_TOML_FILE),
+        r#"[features]
+plugins = true
+
+[plugins."enabled-plugin@debug"]
+enabled = true
+"#,
+    );
+    write_file(
+        &repo_root.join(".codex/config.toml"),
+        r#"[[skills.config]]
+name = "enabled-plugin:sample-search"
+enabled = false
+"#,
+    );
+
+    let config = load_config(tmp.path(), &repo_root).await;
+    let outcome = PluginsManager::new(tmp.path().to_path_buf())
+        .read_plugin_for_config(
+            &config,
+            &PluginReadRequest {
+                plugin_name: "enabled-plugin".to_string(),
+                marketplace_path: AbsolutePathBuf::try_from(
+                    repo_root.join(".agents/plugins/marketplace.json"),
+                )
+                .unwrap(),
+            },
+        )
+        .unwrap();
+
+    assert!(outcome.plugin.disabled_skill_paths.is_empty());
+}
+
+#[tokio::test]
 async fn sync_plugins_from_remote_returns_default_when_feature_disabled() {
     let tmp = tempfile::tempdir().unwrap();
     write_file(
@@ -1227,7 +1375,8 @@ plugins = true
     let config = load_config(tmp.path(), tmp.path()).await;
     let marketplaces = PluginsManager::new(tmp.path().to_path_buf())
         .list_marketplaces_for_config(&config, &[])
-        .unwrap();
+        .unwrap()
+        .marketplaces;
 
     let curated_marketplace = marketplaces
         .into_iter()
@@ -1241,7 +1390,7 @@ plugins = true
             path: AbsolutePathBuf::try_from(curated_root.join(".agents/plugins/marketplace.json"))
                 .unwrap(),
             interface: Some(MarketplaceInterface {
-                display_name: Some("ChatGPT Official".to_string()),
+                display_name: Some(OPENAI_CURATED_MARKETPLACE_DISPLAY_NAME.to_string()),
             }),
             plugins: vec![ConfiguredMarketplacePlugin {
                 id: "linear@openai-curated".to_string(),
@@ -1332,7 +1481,8 @@ enabled = false
                 AbsolutePathBuf::try_from(repo_b_root).unwrap(),
             ],
         )
-        .unwrap();
+        .unwrap()
+        .marketplaces;
 
     let repo_a_marketplace = marketplaces
         .iter()
@@ -1435,7 +1585,8 @@ enabled = true
     let config = load_config(tmp.path(), &repo_root).await;
     let marketplaces = PluginsManager::new(tmp.path().to_path_buf())
         .list_marketplaces_for_config(&config, &[AbsolutePathBuf::try_from(repo_root).unwrap()])
-        .unwrap();
+        .unwrap()
+        .marketplaces;
 
     let marketplace = marketplaces
         .into_iter()
@@ -1578,6 +1729,7 @@ enabled = true
     let curated_marketplace = manager
         .list_marketplaces_for_config(&synced_config, &[])
         .unwrap()
+        .marketplaces
         .into_iter()
         .find(|marketplace| marketplace.name == OPENAI_CURATED_MARKETPLACE_NAME)
         .unwrap();
@@ -2082,8 +2234,11 @@ fn load_plugins_ignores_project_config_files() {
     )
     .expect("config layer stack should build");
 
-    let outcome =
-        load_plugins_from_layer_stack(&stack, &PluginStore::new(codex_home.path().to_path_buf()));
+    let outcome = load_plugins_from_layer_stack(
+        &stack,
+        &PluginStore::new(codex_home.path().to_path_buf()),
+        Some(Product::Codex),
+    );
 
     assert_eq!(outcome, PluginLoadOutcome::default());
 }
