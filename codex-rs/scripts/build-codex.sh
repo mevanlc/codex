@@ -34,6 +34,30 @@ Options:
                              - auto: incremental then aggressive if still over cap
 
 If version is omitted, auto-detects from git tags.
+
+Platform Notes
+──────────────
+  macOS:
+    Xcode Command Line Tools required (xcode-select --install).
+    Homebrew deps: brew install cmake pkg-config openssl protobuf
+    Apple Silicon (M1+) builds natively; no special flags needed.
+
+  Linux (x86_64 / aarch64):
+    Debian/Ubuntu: apt install build-essential cmake pkg-config libssl-dev
+    Fedora/RHEL:   dnf install gcc cmake openssl-devel pkg-config
+    Builds with default features including code-mode (V8).
+
+  Windows:
+    Requires Visual Studio Build Tools (MSVC) or the full VS installer.
+    Install Rust via rustup (rustup.rs). Use the "x86_64-pc-windows-msvc"
+    toolchain. Run from a "Developer Command Prompt" or ensure cl.exe is
+    on PATH. See also: codex-rs/scripts/setup-windows.ps1
+
+  Termux / Android (aarch64-linux-android):
+    Auto-detected by this script. V8 has no prebuilt for this target, so
+    code-mode is disabled (--no-default-features). The C++ runtime is
+    linked explicitly for native deps (oboe-sys, onig_sys).
+    Prereqs: pkg install rust binutils cmake openssl pkg-config
 EOF
 }
 
