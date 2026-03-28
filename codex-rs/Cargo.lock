@@ -2717,6 +2717,7 @@ dependencies = [
  "image",
  "indexmap 2.14.0",
  "insta",
+ "keyring",
  "libc",
  "maplit",
  "once_cell",
@@ -2753,6 +2754,7 @@ dependencies = [
  "walkdir",
  "which 8.0.0",
  "whoami 1.6.1",
+ "windows-sys 0.52.0",
  "wiremock",
  "zstd 0.13.3",
 ]
