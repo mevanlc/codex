@@ -154,7 +154,7 @@ codex-cloud-tasks-mock-client = { path = "cloud-tasks-mock-client" }
 codex-code-mode = { path = "code-mode" }
 codex-config = { path = "config" }
 codex-connectors = { path = "connectors" }
-codex-core = { path = "core" }
+codex-core = { path = "core", default-features = false }
 codex-core-api = { path = "core-api" }
 codex-core-plugins = { path = "core-plugins" }
 codex-core-skills = { path = "core-skills" }

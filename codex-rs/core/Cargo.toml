@@ -12,6 +12,14 @@ path = "src/lib.rs"
 name = "codex-write-config-schema"
 path = "src/bin/config_schema.rs"
 
+[features]
+default = ["code-mode"]
+code-mode = [
+    "codex-rollout-trace/code-mode",
+    "codex-tools/code-mode",
+    "dep:codex-code-mode",
+]
+
 [lints]
 workspace = true
 
@@ -29,7 +37,7 @@ codex-api = { workspace = true }
 codex-app-server-protocol = { workspace = true }
 codex-apply-patch = { workspace = true }
 codex-async-utils = { workspace = true }
-codex-code-mode = { workspace = true }
+codex-code-mode = { workspace = true, optional = true }
 codex-connectors = { workspace = true }
 codex-config = { workspace = true }
 codex-core-plugins = { workspace = true }
