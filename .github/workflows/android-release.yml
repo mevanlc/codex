@@ -91,7 +91,7 @@ jobs:
           workspaces: codex-rs -> target
 
       - name: Build codex
-        run: cargo build --release --bin codex --target aarch64-linux-android
+        run: cargo build --release --bin codex --target aarch64-linux-android --no-default-features
 
       - name: Compress binary
         run: |
