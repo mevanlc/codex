@@ -117,7 +117,7 @@ codex-client = { path = "codex-client" }
 codex-cloud-requirements = { path = "cloud-requirements" }
 codex-connectors = { path = "connectors" }
 codex-config = { path = "config" }
-codex-core = { path = "core" }
+codex-core = { path = "core", default-features = false }
 codex-core-skills = { path = "core-skills" }
 codex-exec = { path = "exec" }
 codex-exec-server = { path = "exec-server" }

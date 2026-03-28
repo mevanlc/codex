@@ -1,5 +1,11 @@
+#[cfg(feature = "code-mode")]
 pub mod code_mode;
+#[cfg(feature = "code-mode")]
 pub(crate) mod code_mode_description;
+
+#[cfg(not(feature = "code-mode"))]
+#[path = "code_mode_stub.rs"]
+pub mod code_mode;
 pub mod context;
 pub(crate) mod discoverable;
 pub mod events;

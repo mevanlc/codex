@@ -9,8 +9,11 @@ use crate::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use crate::original_image_detail::can_request_original_image_detail;
 use crate::shell::Shell;
 use crate::shell::ShellType;
+#[cfg(feature = "code-mode")]
 use crate::tools::code_mode::PUBLIC_TOOL_NAME;
+#[cfg(feature = "code-mode")]
 use crate::tools::code_mode::WAIT_TOOL_NAME;
+#[cfg(feature = "code-mode")]
 use crate::tools::code_mode_description::augment_tool_spec_for_code_mode;
 use crate::tools::discoverable::DiscoverablePluginInfo;
 use crate::tools::discoverable::DiscoverableTool;
@@ -856,6 +859,7 @@ fn create_write_stdin_tool() -> ToolSpec {
     })
 }
 
+#[cfg(feature = "code-mode")]
 fn create_wait_tool() -> ToolSpec {
     let properties = BTreeMap::from([
         (
@@ -2237,6 +2241,7 @@ fn create_js_repl_reset_tool() -> ToolSpec {
     })
 }
 
+#[cfg(feature = "code-mode")]
 fn create_code_mode_tool(
     enabled_tools: &[(String, String)],
     code_mode_only_enabled: bool,
@@ -2401,9 +2406,10 @@ fn push_tool_spec(
     builder: &mut ToolRegistryBuilder,
     spec: ToolSpec,
     supports_parallel_tool_calls: bool,
-    code_mode_enabled: bool,
+    _code_mode_enabled: bool,
 ) {
-    let spec = augment_tool_spec_for_code_mode(spec, code_mode_enabled);
+    #[cfg(feature = "code-mode")]
+    let spec = augment_tool_spec_for_code_mode(spec, _code_mode_enabled);
     if supports_parallel_tool_calls {
         builder.push_spec_with_parallel_support(spec, /*supports_parallel_tool_calls*/ true);
     } else {
@@ -2656,7 +2662,9 @@ pub(crate) fn build_specs_with_discoverable_tools(
     dynamic_tools: &[DynamicToolSpec],
 ) -> ToolRegistryBuilder {
     use crate::tools::handlers::ApplyPatchHandler;
+    #[cfg(feature = "code-mode")]
     use crate::tools::handlers::CodeModeExecuteHandler;
+    #[cfg(feature = "code-mode")]
     use crate::tools::handlers::CodeModeWaitHandler;
     use crate::tools::handlers::DynamicToolHandler;
     use crate::tools::handlers::JsReplHandler;
@@ -2703,12 +2711,15 @@ pub(crate) fn build_specs_with_discoverable_tools(
         default_mode_request_user_input: config.default_mode_request_user_input,
     });
     let tool_suggest_handler = Arc::new(ToolSuggestHandler);
+    #[cfg(feature = "code-mode")]
     let code_mode_handler = Arc::new(CodeModeExecuteHandler);
+    #[cfg(feature = "code-mode")]
     let code_mode_wait_handler = Arc::new(CodeModeWaitHandler);
     let js_repl_handler = Arc::new(JsReplHandler);
     let js_repl_reset_handler = Arc::new(JsReplResetHandler);
     let exec_permission_approvals_enabled = config.exec_permission_approvals_enabled;
 
+    #[cfg(feature = "code-mode")]
     if config.code_mode_enabled {
         let nested_config = config.for_code_mode_nested_tools();
         let (nested_specs, _) = build_specs_with_discoverable_tools(
