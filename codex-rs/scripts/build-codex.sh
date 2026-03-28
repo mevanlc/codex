@@ -18,6 +18,15 @@ CARGO_TOML="$CODEX_DIR/Cargo.toml"
 
 cd "$CODEX_DIR"
 
+# Portable in-place sed (BSD sed requires -i '', GNU sed does not).
+sedi() {
+  if sed --version >/dev/null 2>&1; then
+    sed -i "$@"
+  else
+    sed -i '' "$@"
+  fi
+}
+
 usage() {
   cat <<'EOF' >&2
 Usage: build-codex.sh [options] [version]
@@ -202,11 +211,11 @@ fi
 ORIGINAL_VERSION=$(grep -E '^version = "' "$CARGO_TOML" | head -1)
 
 # Set custom version
-sed -i 's/^version = ".*"/version = "'"$VERSION"'"/' "$CARGO_TOML"
+sedi 's/^version = ".*"/version = "'"$VERSION"'"/' "$CARGO_TOML"
 
 # Ensure we restore Cargo.toml on exit
 cleanup() {
-    sed -i 's/^version = ".*"/'"$ORIGINAL_VERSION"'/' "$CARGO_TOML"
+    sedi 's/^version = ".*"/'"$ORIGINAL_VERSION"'/' "$CARGO_TOML"
 }
 trap cleanup EXIT
 
@@ -253,7 +262,7 @@ maybe_prune_target() {
   stamp="$target_dir/.build-codex.last_prune"
   min_age_s="$(( PRUNE_EVERY_DAYS * 86400 ))"
   now_s="$(date +%s)"
-  stamp_s="$(stat -c %Y "$stamp" 2>/dev/null || echo 0)"
+  stamp_s="$(stat -c %Y "$stamp" 2>/dev/null || stat -f %m "$stamp" 2>/dev/null || echo 0)"
   if [[ $(( now_s - stamp_s )) -lt "$min_age_s" ]]; then
     return 0
   fi
