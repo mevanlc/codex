@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
     timeout-minutes: 120
     defaults:
       run:
@@ -91,6 +91,8 @@ jobs:
           workspaces: codex-rs -> target
 
       - name: Build codex
+        env:
+          CARGO_BUILD_JOBS: "2"
         run: cargo build --release --bin codex --target aarch64-linux-android --no-default-features
 
       - name: Compress binary
