@@ -510,9 +510,6 @@
             "use_linux_sandbox_bwrap": {
               "type": "boolean"
             },
-            "voice_transcription": {
-              "type": "boolean"
-            },
             "web_search": {
               "type": "boolean"
             },
@@ -920,6 +917,16 @@
       ],
       "type": "object"
     },
+    "NetworkDomainPermissionToml": {
+      "enum": [
+        "allow",
+        "deny"
+      ],
+      "type": "string"
+    },
+    "NetworkDomainPermissionsToml": {
+      "type": "object"
+    },
     "NetworkModeSchema": {
       "enum": [
         "limited",
@@ -933,20 +940,8 @@
         "allow_local_binding": {
           "type": "boolean"
         },
-        "allow_unix_sockets": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "allow_upstream_proxy": {
           "type": "boolean"
-        },
-        "allowed_domains": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
         },
         "dangerously_allow_all_unix_sockets": {
           "type": "boolean"
@@ -954,11 +949,8 @@
         "dangerously_allow_non_loopback_proxy": {
           "type": "boolean"
         },
-        "denied_domains": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+        "domains": {
+          "$ref": "#/definitions/NetworkDomainPermissionsToml"
         },
         "enable_socks5": {
           "type": "boolean"
@@ -977,8 +969,21 @@
         },
         "socks_url": {
           "type": "string"
+        },
+        "unix_sockets": {
+          "$ref": "#/definitions/NetworkUnixSocketPermissionsToml"
         }
       },
+      "type": "object"
+    },
+    "NetworkUnixSocketPermissionToml": {
+      "enum": [
+        "allow",
+        "none"
+      ],
+      "type": "string"
+    },
+    "NetworkUnixSocketPermissionsToml": {
       "type": "object"
     },
     "Notice": {
@@ -1265,9 +1270,7 @@
       "type": "object"
     },
     "RawMcpServerConfig": {
-      "additionalProperties": {
-        "$ref": "#/definitions/McpServerToolConfig"
-      },
+      "additionalProperties": false,
       "properties": {
         "args": {
           "default": null,
@@ -2156,9 +2159,6 @@
           "type": "boolean"
         },
         "use_linux_sandbox_bwrap": {
-          "type": "boolean"
-        },
-        "voice_transcription": {
           "type": "boolean"
         },
         "web_search": {
