@@ -5,7 +5,6 @@ name = "codex-tools"
 version.workspace = true
 
 [features]
-default = ["code-mode"]
 code-mode = ["dep:codex-code-mode"]
 
 [lints]
