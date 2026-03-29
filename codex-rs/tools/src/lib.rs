@@ -3,6 +3,7 @@
 
 mod agent_job_tool;
 mod agent_tool;
+#[cfg(feature = "code-mode")]
 mod code_mode;
 mod dynamic_tool;
 mod json_schema;
@@ -29,7 +30,9 @@ pub use agent_tool::create_spawn_agent_tool_v1;
 pub use agent_tool::create_spawn_agent_tool_v2;
 pub use agent_tool::create_wait_agent_tool_v1;
 pub use agent_tool::create_wait_agent_tool_v2;
+#[cfg(feature = "code-mode")]
 pub use code_mode::augment_tool_spec_for_code_mode;
+#[cfg(feature = "code-mode")]
 pub use code_mode::tool_spec_to_code_mode_tool_definition;
 pub use dynamic_tool::parse_dynamic_tool;
 pub use json_schema::AdditionalProperties;

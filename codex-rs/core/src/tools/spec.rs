@@ -50,6 +50,7 @@ use codex_tools::ShellToolOptions;
 use codex_tools::SpawnAgentToolOptions;
 use codex_tools::ViewImageToolOptions;
 use codex_tools::WaitAgentTimeoutOptions;
+#[cfg(feature = "code-mode")]
 use codex_tools::augment_tool_spec_for_code_mode;
 use codex_tools::create_assign_task_tool;
 use codex_tools::create_close_agent_tool_v1;
@@ -73,6 +74,7 @@ use codex_tools::create_wait_agent_tool_v2;
 use codex_tools::create_write_stdin_tool;
 use codex_tools::dynamic_tool_to_responses_api_tool;
 use codex_tools::mcp_tool_to_responses_api_tool;
+#[cfg(feature = "code-mode")]
 use codex_tools::tool_spec_to_code_mode_tool_definition;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_template::Template;
@@ -368,6 +370,7 @@ fn supports_image_generation(model_info: &ModelInfo) -> bool {
     model_info.input_modalities.contains(&InputModality::Image)
 }
 
+#[cfg(feature = "code-mode")]
 fn create_wait_tool() -> ToolSpec {
     let properties = BTreeMap::from([
         (
@@ -799,6 +802,7 @@ fn create_js_repl_reset_tool() -> ToolSpec {
 }
 
 #[cfg(feature = "code-mode")]
+#[cfg(feature = "code-mode")]
 fn create_code_mode_tool(
     enabled_tools: &[(String, String)],
     code_mode_only_enabled: bool,
@@ -947,9 +951,10 @@ fn push_tool_spec(
     builder: &mut ToolRegistryBuilder,
     spec: ToolSpec,
     supports_parallel_tool_calls: bool,
-    code_mode_enabled: bool,
+    _code_mode_enabled: bool,
 ) {
-    let spec = if code_mode_enabled {
+    #[cfg(feature = "code-mode")]
+    let spec = if _code_mode_enabled {
         augment_tool_spec_for_code_mode(spec)
     } else {
         spec
