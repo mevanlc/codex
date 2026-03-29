@@ -90,9 +90,18 @@ jobs:
         with:
           workspaces: codex-rs -> target
 
+      - name: Add swap for linker
+        run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+        working-directory: /
+
       - name: Build codex
         env:
           CARGO_BUILD_JOBS: "2"
+          CARGO_PROFILE_RELEASE_LTO: "thin"
         run: cargo build --release --bin codex --target aarch64-linux-android --no-default-features
 
       - name: Compress binary
