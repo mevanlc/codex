@@ -68,9 +68,7 @@ impl ToolRouter {
                 .filter_map(|configured_tool| {
                     #[cfg(feature = "code-mode")]
                     {
-                        if !codex_code_mode::is_code_mode_nested_tool(
-                            configured_tool.name(),
-                        ) {
+                        if !codex_code_mode::is_code_mode_nested_tool(configured_tool.name()) {
                             Some(configured_tool.spec.clone())
                         } else {
                             None
