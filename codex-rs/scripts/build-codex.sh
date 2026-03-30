@@ -209,6 +209,14 @@ fi
 
 # Backup original version line
 ORIGINAL_VERSION=$(grep -E '^version = "' "$CARGO_TOML" | head -1)
+CARGO_LOCK="Cargo.lock"
+RESTORE_CARGO_LOCK=""
+
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if git diff --quiet -- "$CARGO_LOCK" && git diff --cached --quiet -- "$CARGO_LOCK"; then
+        RESTORE_CARGO_LOCK="1"
+    fi
+fi
 
 # Set custom version
 sedi 's/^version = ".*"/version = "'"$VERSION"'"/' "$CARGO_TOML"
@@ -216,6 +224,9 @@ sedi 's/^version = ".*"/version = "'"$VERSION"'"/' "$CARGO_TOML"
 # Ensure we restore Cargo.toml on exit
 cleanup() {
     sedi 's/^version = ".*"/'"$ORIGINAL_VERSION"'/' "$CARGO_TOML"
+    if [[ -n "$RESTORE_CARGO_LOCK" ]]; then
+        git checkout -- "$CARGO_LOCK"
+    fi
 }
 trap cleanup EXIT
 

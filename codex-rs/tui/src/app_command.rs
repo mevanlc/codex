@@ -126,7 +126,7 @@ impl AppCommand {
         Self::RealtimeConversationStart { transport, voice }
     }
 
-    #[cfg_attr(target_os = "linux", allow(dead_code))]
+    #[cfg_attr(any(target_os = "linux", target_os = "android"), allow(dead_code))]
     pub(crate) fn realtime_conversation_audio(frame: ThreadRealtimeAudioChunk) -> Self {
         Self::RealtimeConversationAudio(frame)
     }
