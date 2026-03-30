@@ -41,7 +41,10 @@ pub type SharedTurnDiffTracker = Arc<Mutex<TurnDiffTracker>>;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ToolCallSource {
     Direct,
-    #[cfg_attr(not(feature = "code-mode"), allow(dead_code))]
+    #[cfg_attr(
+        any(not(feature = "code-mode"), target_os = "android"),
+        allow(dead_code)
+    )]
     CodeMode {
         /// Runtime cell that issued the nested tool request.
         cell_id: String,
