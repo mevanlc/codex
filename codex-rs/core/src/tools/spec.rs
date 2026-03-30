@@ -367,6 +367,7 @@ impl ToolsConfig {
         self
     }
 
+    #[cfg_attr(target_os = "android", allow(dead_code))]
     pub fn for_code_mode_nested_tools(&self) -> Self {
         let mut nested = self.clone();
         nested.code_mode_enabled = false;

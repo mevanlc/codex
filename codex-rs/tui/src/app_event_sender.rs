@@ -64,7 +64,11 @@ impl AppEventSender {
     }
 
     #[cfg_attr(
-        any(target_os = "linux", not(feature = "voice-input")),
+        any(
+            target_os = "linux",
+            target_os = "android",
+            not(feature = "voice-input")
+        ),
         allow(dead_code)
     )]
     pub(crate) fn realtime_conversation_audio(&self, params: ConversationAudioParams) {

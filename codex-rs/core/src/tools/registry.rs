@@ -93,6 +93,7 @@ impl AnyToolResult {
         result.to_response_item(&call_id, &payload)
     }
 
+    #[cfg_attr(target_os = "android", allow(dead_code))]
     pub(crate) fn code_mode_result(self) -> serde_json::Value {
         let Self {
             payload, result, ..

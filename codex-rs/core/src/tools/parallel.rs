@@ -48,6 +48,7 @@ impl ToolCallRuntime {
         }
     }
 
+    #[cfg_attr(target_os = "android", allow(dead_code))]
     pub(crate) fn find_spec(&self, tool_name: &str) -> Option<ToolSpec> {
         self.router.find_spec(tool_name)
     }

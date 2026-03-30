@@ -105,6 +105,7 @@ impl ToolRouter {
         self.model_visible_specs.clone()
     }
 
+    #[cfg_attr(target_os = "android", allow(dead_code))]
     pub fn find_spec(&self, tool_name: &str) -> Option<ToolSpec> {
         self.specs
             .iter()
@@ -218,6 +219,7 @@ impl ToolRouter {
     }
 
     #[instrument(level = "trace", skip_all, err)]
+    #[cfg_attr(target_os = "android", allow(dead_code))]
     pub async fn dispatch_tool_call_with_code_mode_result(
         &self,
         session: Arc<Session>,

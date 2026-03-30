@@ -30,6 +30,7 @@ pub type SharedTurnDiffTracker = Arc<Mutex<TurnDiffTracker>>;
 pub enum ToolCallSource {
     Direct,
     JsRepl,
+    #[cfg_attr(target_os = "android", allow(dead_code))]
     CodeMode,
 }
 
@@ -88,6 +89,7 @@ pub trait ToolOutput: Send {
         None
     }
 
+    #[cfg_attr(target_os = "android", allow(dead_code))]
     fn code_mode_result(&self, payload: &ToolPayload) -> JsonValue {
         response_input_to_code_mode_result(self.to_response_item("", payload))
     }
@@ -397,6 +399,7 @@ impl ExecCommandToolOutput {
     }
 }
 
+#[cfg_attr(target_os = "android", allow(dead_code))]
 pub(crate) fn response_input_to_code_mode_result(response: ResponseInputItem) -> JsonValue {
     match response {
         ResponseInputItem::Message { content, .. } => content_items_to_code_mode_result(
@@ -434,6 +437,7 @@ pub(crate) fn response_input_to_code_mode_result(response: ResponseInputItem) ->
     }
 }
 
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn content_items_to_code_mode_result(items: &[FunctionCallOutputContentItem]) -> JsonValue {
     JsonValue::String(
         items

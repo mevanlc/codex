@@ -1,3 +1,5 @@
+#![cfg_attr(target_os = "android", allow(dead_code))]
+
 //! Stub replacement for the `code_mode` module when the `code-mode` Cargo
 //! feature is disabled.  Provides the same public surface so the rest of
 //! `codex-core` compiles without the `v8`/`codex-code-mode` dependency.
