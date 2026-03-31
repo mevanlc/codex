@@ -248,6 +248,26 @@ cargo build --bin codex --profile $PROFILE -p codex-cli $CARGO_NO_DEFAULT_FEATUR
 mkdir -p "$HOME/.local/bin"
 cp "$CODEX_DIR/target/$PROFILE/codex" "$HOME/.local/bin/codex"
 
+warn_if_installed_codex_is_not_first_on_path() {
+  local installed_codex first_codex
+  installed_codex="$HOME/.local/bin/codex"
+  first_codex="$(type -P codex || true)"
+
+  if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+    echo "Warning: $HOME/.local/bin is not on PATH, so running 'codex' will not use $installed_codex" >&2
+    return 0
+  fi
+
+  if [[ -z "$first_codex" ]]; then
+    echo "Warning: 'codex' does not resolve on PATH after installing $installed_codex" >&2
+    return 0
+  fi
+
+  if [[ "$first_codex" != "$installed_codex" ]]; then
+    echo "Warning: 'codex' resolves to $first_codex before $installed_codex" >&2
+  fi
+}
+
 maybe_prune_target() {
   [[ -n "$PRUNE_GB" ]] || return 0
   command -v cargo >/dev/null 2>&1 || return 0
@@ -311,5 +331,6 @@ maybe_prune_target() {
 }
 
 maybe_prune_target
+warn_if_installed_codex_is_not_first_on_path
 
 echo "Installed codex $VERSION to $HOME/.local/bin/codex"
