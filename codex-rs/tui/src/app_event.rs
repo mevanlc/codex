@@ -31,7 +31,7 @@ use crate::bottom_pane::StatusLineItem;
 use crate::bottom_pane::TerminalTitleItem;
 use crate::history_cell::HistoryCell;
 
-use codex_core::config::types::ApprovalsReviewer;
+use codex_config::types::ApprovalsReviewer;
 use codex_features::Feature;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::config_types::Personality;
@@ -137,9 +137,16 @@ pub(crate) enum AppEvent {
         matches: Vec<FileMatch>,
     },
 
-    /// Result of refreshing rate limits
-    #[allow(dead_code)]
-    RateLimitSnapshotFetched(RateLimitSnapshot),
+    /// Refresh account rate limits in the background.
+    RefreshRateLimits {
+        request_id: u64,
+    },
+
+    /// Result of refreshing rate limits.
+    RateLimitsLoaded {
+        request_id: u64,
+        result: Result<Vec<RateLimitSnapshot>, String>,
+    },
 
     /// Result of prefetching connectors.
     ConnectorsLoaded {
@@ -307,11 +314,7 @@ pub(crate) enum AppEvent {
 
     /// Persist the selected realtime microphone or speaker to top-level config.
     #[cfg_attr(
-        any(
-            target_os = "linux",
-            target_os = "android",
-            not(feature = "voice-input")
-        ),
+        any(target_os = "linux", target_os = "android"),
         allow(dead_code)
     )]
     PersistRealtimeAudioDeviceSelection {
