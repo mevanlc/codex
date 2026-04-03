@@ -46,7 +46,9 @@ pub use apply_patch_tool::create_apply_patch_freeform_tool;
 pub use apply_patch_tool::create_apply_patch_json_tool;
 #[cfg(feature = "code-mode")]
 pub use code_mode::augment_tool_spec_for_code_mode;
+#[cfg(feature = "code-mode")]
 pub use code_mode::collect_code_mode_tool_definitions;
+#[cfg(feature = "code-mode")]
 pub use code_mode::create_code_mode_tool;
 #[cfg(feature = "code-mode")]
 pub use code_mode::create_wait_tool;

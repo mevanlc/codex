@@ -3,6 +3,7 @@ use crate::DiscoverableTool;
 use crate::ToolSpec;
 use crate::ToolsConfig;
 use crate::WaitAgentTimeoutOptions;
+#[cfg(feature = "code-mode")]
 use crate::augment_tool_spec_for_code_mode;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use rmcp::model::Tool as McpTool;
@@ -14,7 +15,9 @@ pub enum ToolHandlerKind {
     ApplyPatch,
     CloseAgentV1,
     CloseAgentV2,
+    #[cfg(feature = "code-mode")]
     CodeModeExecute,
+    #[cfg(feature = "code-mode")]
     CodeModeWait,
     DynamicTool,
     FollowupTaskV2,
@@ -89,11 +92,14 @@ impl ToolRegistryPlan {
         supports_parallel_tool_calls: bool,
         code_mode_enabled: bool,
     ) {
+        #[cfg(feature = "code-mode")]
         let spec = if code_mode_enabled {
             augment_tool_spec_for_code_mode(spec)
         } else {
             spec
         };
+        #[cfg(not(feature = "code-mode"))]
+        let _ = code_mode_enabled;
         self.specs
             .push(ConfiguredToolSpec::new(spec, supports_parallel_tool_calls));
     }

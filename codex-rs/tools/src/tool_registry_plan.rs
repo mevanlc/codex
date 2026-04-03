@@ -13,6 +13,7 @@ use crate::ToolSpec;
 use crate::ToolsConfig;
 use crate::ViewImageToolOptions;
 use crate::WebSearchToolOptions;
+#[cfg(feature = "code-mode")]
 use crate::collect_code_mode_tool_definitions;
 use crate::collect_tool_search_app_infos;
 use crate::collect_tool_suggest_entries;
@@ -20,6 +21,7 @@ use crate::create_apply_patch_freeform_tool;
 use crate::create_apply_patch_json_tool;
 use crate::create_close_agent_tool_v1;
 use crate::create_close_agent_tool_v2;
+#[cfg(feature = "code-mode")]
 use crate::create_code_mode_tool;
 use crate::create_exec_command_tool;
 use crate::create_followup_task_tool;
@@ -50,6 +52,7 @@ use crate::create_update_plan_tool;
 use crate::create_view_image_tool;
 use crate::create_wait_agent_tool_v1;
 use crate::create_wait_agent_tool_v2;
+#[cfg(feature = "code-mode")]
 use crate::create_wait_tool;
 use crate::create_web_search_tool;
 use crate::create_write_stdin_tool;
@@ -69,6 +72,7 @@ pub fn build_tool_registry_plan(
     let mut plan = ToolRegistryPlan::new();
     let exec_permission_approvals_enabled = config.exec_permission_approvals_enabled;
 
+    #[cfg(feature = "code-mode")]
     if config.code_mode_enabled {
         let nested_config = config.for_code_mode_nested_tools();
         let nested_plan = build_tool_registry_plan(
