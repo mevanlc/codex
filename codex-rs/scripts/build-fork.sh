@@ -29,7 +29,7 @@ sedi() {
 
 usage() {
   cat <<'EOF' >&2
-Usage: build-codex.sh [options] [version]
+Usage: build-fork.sh [options] [version]
 
 Options:
   -u, --update               Fetch + ff-merge origin/main before build
