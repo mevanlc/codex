@@ -71,6 +71,38 @@ jobs:
           nproc
           df -h
 
+      - name: Patch rusty_v8 crate (missing known-target-triples.txt)
+        run: |
+          # Fix for rusty_v8 v146.4.0 packaging bug: build/rust/known-target-triples.txt
+          # was not included in the published crate. Fixed upstream in commit d55cd821.
+          # We inject the file into the cargo registry source after first fetch.
+          cargo fetch --target aarch64-linux-android
+          V8_SRC=$(find "$HOME/.cargo/registry/src" -type d -name "v8-146.4.0" | head -1)
+          mkdir -p "$V8_SRC/build/rust"
+          cat > "$V8_SRC/build/rust/known-target-triples.txt" << 'TRIPLES'
+          aarch64-apple-darwin
+          aarch64-apple-ios
+          aarch64-apple-ios-macabi
+          aarch64-apple-ios-sim
+          aarch64-linux-android
+          aarch64-pc-windows-msvc
+          aarch64-unknown-fuchsia
+          aarch64-unknown-linux-gnu
+          arm-unknown-linux-gnueabihf
+          armv7-linux-androideabi
+          i686-linux-android
+          i686-pc-windows-msvc
+          i686-unknown-linux-gnu
+          riscv64gc-unknown-linux-gnu
+          x86_64-apple-darwin
+          x86_64-apple-ios
+          x86_64-linux-android
+          x86_64-pc-windows-msvc
+          x86_64-unknown-fuchsia
+          x86_64-unknown-linux-gnu
+          TRIPLES
+          echo "Patched $V8_SRC/build/rust/known-target-triples.txt"
+
       - name: Build codex with code-mode for Android
         env:
           V8_FROM_SOURCE: "1"
