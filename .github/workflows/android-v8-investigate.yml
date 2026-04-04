@@ -1,0 +1,93 @@
+name: Investigate V8 Android Build
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-v8:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.0"
+          targets: aarch64-linux-android
+
+      - name: Install Android NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK 27
+        run: sdkmanager --install "ndk;27.2.12479018"
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libglib2.0-dev ninja-build
+
+      - name: Configure Android toolchain
+        run: |
+          NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          TOOLCHAIN="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
+          LINKER="$TOOLCHAIN/bin/aarch64-linux-android35-clang"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$LINKER" >> "$GITHUB_ENV"
+          echo "CC_aarch64_linux_android=$LINKER" >> "$GITHUB_ENV"
+          echo "CXX_aarch64_linux_android=$TOOLCHAIN/bin/aarch64-linux-android35-clang++" >> "$GITHUB_ENV"
+          echo "AR_aarch64_linux_android=$TOOLCHAIN/bin/llvm-ar" >> "$GITHUB_ENV"
+          echo "RANLIB_aarch64_linux_android=$TOOLCHAIN/bin/llvm-ranlib" >> "$GITHUB_ENV"
+          ln -sf "$TOOLCHAIN/bin/llvm-ranlib" "$TOOLCHAIN/bin/aarch64-linux-android-ranlib"
+          ln -sf "$TOOLCHAIN/bin/llvm-ar"     "$TOOLCHAIN/bin/aarch64-linux-android-ar"
+          echo "$TOOLCHAIN/bin" >> "$GITHUB_PATH"
+
+      - name: Add swap
+        run: |
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+        working-directory: /
+
+      - name: Show environment
+        run: |
+          echo "=== Rust ==="
+          rustc --version
+          cargo --version
+          echo "=== NDK ==="
+          ls "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/" | head -20
+          echo "=== System ==="
+          free -h
+          nproc
+          df -h
+
+      - name: Build codex with code-mode for Android
+        env:
+          V8_FROM_SOURCE: "1"
+          CARGO_BUILD_JOBS: "2"
+          CARGO_PROFILE_DEV_LTO: "off"
+          RUST_BACKTRACE: "1"
+        run: |
+          cargo build --bin codex --target aarch64-linux-android -p codex-cli 2>&1 | tee /tmp/v8-build.log
+        continue-on-error: true
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v8-android-build-log
+          path: /tmp/v8-build.log
+
+      - name: Show tail of build output on failure
+        if: failure()
+        run: tail -200 /tmp/v8-build.log
