@@ -1,60 +1,58 @@
-<p align="center"><code>npm i -g @openai/codex</code><br />or <code>brew install --cask codex</code></p>
-<p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
-<p align="center">
-  <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
-</p>
-</br>
-If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="https://developers.openai.com/codex/ide">install in your IDE.</a>
-</br>If you want the desktop app experience, run <code>codex app</code> or visit <a href="https://chatgpt.com/codex?app-landing-page=true">the Codex App page</a>.
-</br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, go to <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
+# Codex CLI — Termux Fork
 
----
+A fork of [OpenAI's Codex CLI](https://github.com/openai/codex) with Android/Termux support.
 
-## Quickstart
+> For full upstream documentation, see the [official Codex CLI README](https://github.com/openai/codex#readme) and [docs](https://developers.openai.com/codex).
 
-### Installing and running Codex CLI
+## What this fork does
 
-Install globally with your preferred package manager:
+This fork maintains a build of Codex CLI that runs natively on Android via [Termux](https://termux.dev), while keeping the codebase compilable for other platforms. It stays close to upstream through frequent merges.
+
+### Key changes
+
+- **Android aarch64 target** — CI workflow produces release binaries for `aarch64-linux-android`
+- **Optional code-mode/V8** — `code-mode` (JS REPL) is gated behind an optional compile-time feature flag, since it requires a custom cross-compiled Node build that isn't feasible for Android
+- **Termux-compatible build script** — `build-fork.sh` works across macOS, Linux, and Termux
+- **Build optimizations for constrained devices** — swap file management, thin LTO, job limits to avoid OOM on device
+- **Platform-specific fixes** — file locking fallback, `SHELL` env handling, voice input deps disabled on Android
+- **Small QOL additions** — chatbox placeholder tips toggle, model switch while MCP servers connect, PATH shadow warning
+
+## Goals
+
+- A mostly-vanilla build of Codex that runs on Termux
+- Codebase continues to compile for other platforms
+- Can be compiled within Termux on devices with high enough specs (e.g. Galaxy S25)
+- Frequent merges of upstream into the fork
+
+## Non-goals
+
+- **JS REPL / code-mode support** — would like to eventually, but cross-compiling a custom Node build is a major undertaking
+- **Substantial features not in upstream** — this is a platform port, not a feature fork
+
+## Install
+
+Grab the latest Android aarch64 binary from [Releases](https://github.com/mevanlc/codex/releases), or build from source:
 
 ```shell
-# Install using npm
-npm install -g @openai/codex
+# In Termux
+git clone https://github.com/mevanlc/codex.git
+cd codex
+./codex-rs/scripts/build-fork.sh
 ```
 
-```shell
-# Install using Homebrew
-brew install --cask codex
-```
+## Status
 
-Then simply run `codex` to get started.
+| Target | CI | Notes |
+|--------|----|-------|
+| Android aarch64 | Passing | Release binaries published automatically |
+| Other platforms | Failing | Investigating — upstream code-mode changes may need additional gating |
 
-<details>
-<summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
+## Fork stats
 
-Each GitHub Release contains many executables, but in practice, you likely want one of these:
+- ~30 original commits on top of upstream
+- 13 upstream merges to date
+- Tracking upstream actively
 
-- macOS
-  - Apple Silicon/arm64: `codex-aarch64-apple-darwin.tar.gz`
-  - x86_64 (older Mac hardware): `codex-x86_64-apple-darwin.tar.gz`
-- Linux
-  - x86_64: `codex-x86_64-unknown-linux-musl.tar.gz`
-  - arm64: `codex-aarch64-unknown-linux-musl.tar.gz`
+## License
 
-Each archive contains a single entry with the platform baked into the name (e.g., `codex-x86_64-unknown-linux-musl`), so you likely want to rename it to `codex` after extracting it.
-
-</details>
-
-### Using Codex with your ChatGPT plan
-
-Run `codex` and select **Sign in with ChatGPT**. We recommend signing into your ChatGPT account to use Codex as part of your Plus, Pro, Team, Edu, or Enterprise plan. [Learn more about what's included in your ChatGPT plan](https://help.openai.com/en/articles/11369540-codex-in-chatgpt).
-
-You can also use Codex with an API key, but this requires [additional setup](https://developers.openai.com/codex/auth#sign-in-with-an-api-key).
-
-## Docs
-
-- [**Codex Documentation**](https://developers.openai.com/codex)
-- [**Contributing**](./docs/contributing.md)
-- [**Installing & building**](./docs/install.md)
-- [**Open source fund**](./docs/open-source-fund.md)
-
-This repository is licensed under the [Apache-2.0 License](LICENSE).
+Same as upstream — [Apache-2.0](LICENSE).
