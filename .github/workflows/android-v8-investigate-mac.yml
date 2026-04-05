@@ -1,0 +1,80 @@
+name: Investigate V8 Android Build (macOS)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-v8:
+    runs-on: self-hosted
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure Rust target
+        run: rustup target add aarch64-linux-android
+
+      - name: Configure Android toolchain
+        run: |
+          NDK_HOME="$HOME/Library/Android/sdk/ndk/27.2.12479018"
+          # Apple Silicon uses darwin-x86_64 via Rosetta for the NDK toolchain
+          if [ -d "$NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64" ]; then
+            TOOLCHAIN="$NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64"
+          else
+            TOOLCHAIN="$NDK_HOME/toolchains/llvm/prebuilt/darwin-aarch64"
+          fi
+          LINKER="$TOOLCHAIN/bin/aarch64-linux-android35-clang"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$LINKER" >> "$GITHUB_ENV"
+          echo "CC_aarch64_linux_android=$LINKER" >> "$GITHUB_ENV"
+          echo "CXX_aarch64_linux_android=$TOOLCHAIN/bin/aarch64-linux-android35-clang++" >> "$GITHUB_ENV"
+          echo "AR_aarch64_linux_android=$TOOLCHAIN/bin/llvm-ar" >> "$GITHUB_ENV"
+          echo "RANLIB_aarch64_linux_android=$TOOLCHAIN/bin/llvm-ranlib" >> "$GITHUB_ENV"
+          ln -sf "$TOOLCHAIN/bin/llvm-ranlib" "$TOOLCHAIN/bin/aarch64-linux-android-ranlib"
+          ln -sf "$TOOLCHAIN/bin/llvm-ar"     "$TOOLCHAIN/bin/aarch64-linux-android-ar"
+          echo "$TOOLCHAIN/bin" >> "$GITHUB_PATH"
+          echo "ANDROID_HOME=$HOME/Library/Android/sdk" >> "$GITHUB_ENV"
+
+      - name: Show environment
+        run: |
+          echo "=== Rust ==="
+          rustc --version
+          cargo --version
+          echo "=== NDK ==="
+          ls "$HOME/Library/Android/sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/"
+          echo "=== System ==="
+          sysctl -n hw.memsize | awk '{printf "Memory: %.0f GB\n", $1/1073741824}'
+          sysctl -n hw.ncpu
+          df -h /
+
+      - name: Update Cargo.lock for git v8 source
+        run: cargo update -p v8
+
+      - name: Build codex with code-mode for Android
+        env:
+          V8_FROM_SOURCE: "1"
+          CARGO_BUILD_JOBS: "8"
+          CARGO_PROFILE_DEV_LTO: "off"
+          RUST_BACKTRACE: "1"
+        run: |
+          cargo build --bin codex --target aarch64-linux-android -p codex-cli 2>&1 | tee /tmp/v8-build.log
+        continue-on-error: true
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v8-android-build-log-mac
+          path: /tmp/v8-build.log
+
+      - name: Show tail of build output on failure
+        if: failure()
+        run: tail -200 /tmp/v8-build.log
