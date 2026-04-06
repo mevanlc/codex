@@ -102,7 +102,8 @@ jobs:
         env:
           CARGO_BUILD_JOBS: "2"
           CARGO_PROFILE_RELEASE_LTO: "thin"
-        run: cargo build --release --bin codex --target aarch64-linux-android --no-default-features
+          RUSTY_V8_MIRROR: https://github.com/mevanlc/rusty_v8/releases/download
+        run: cargo build --release --bin codex --target aarch64-linux-android
 
       - name: Compress binary
         run: |
@@ -136,7 +137,7 @@ jobs:
           make_latest: false
           files: codex-aarch64-linux-android.zst
           body: |
-            Codex CLI for Android aarch64 (Termux).
+            Codex CLI for Android aarch64 (Termux) — with code-mode (V8/JS REPL).
 
             Version: `${{ needs.build.outputs.version }}`
             Commit: `${{ github.sha }}`
