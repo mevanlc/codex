@@ -83,7 +83,7 @@ jobs:
             local name=$1 retries=5 delay=10
             for attempt in $(seq 1 $retries); do
               echo "::group::Fetching $name (attempt $attempt/$retries)"
-              if git submodule update --depth 1 -- "$name" 2>&1; then
+              if git submodule update --jobs 1 --depth 1 -- "$name" 2>&1; then
                 echo "::endgroup::"
                 return 0
               fi
@@ -108,7 +108,7 @@ jobs:
                        | grep 'googlesource\.com' | awk '{print $1}' \
                        | sed 's/submodule\.\(.*\)\.url/\1/'); do
             fetch_submodule "$mod"
-            sleep 5
+            sleep 15
           done
 
           echo "All submodules fetched."
