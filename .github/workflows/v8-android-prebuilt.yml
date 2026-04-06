@@ -66,6 +66,16 @@ jobs:
           sudo swapon /mnt/swapfile
           free -h
 
+      - name: Clone rusty_v8 with submodules
+        run: |
+          # Clone via git directly to avoid cargo's submodule fetch issues
+          # (chromium.googlesource.com returns 403 to GitHub Actions runners
+          # via cargo's fetch, but git clone --recurse-submodules works).
+          git clone --depth 1 --branch "v${V8_VERSION}" \
+            --recurse-submodules --shallow-submodules \
+            https://github.com/denoland/rusty_v8.git /tmp/rusty_v8
+          echo "V8_ROOT=/tmp/rusty_v8" >> "$GITHUB_ENV"
+
       - name: Create builder crate
         run: |
           mkdir -p v8-builder/src
@@ -76,21 +86,13 @@ jobs:
           edition = "2021"
 
           [dependencies]
-          v8 = { git = "https://github.com/denoland/rusty_v8", tag = "v${V8_VERSION}" }
+          v8 = { path = "/tmp/rusty_v8" }
           EOF
           echo 'fn main() {}' > v8-builder/src/main.rs
-
-      - name: Fetch V8 source
-        working-directory: v8-builder
-        run: cargo fetch --target aarch64-linux-android
 
       - name: Install V8 host sysroot
         run: |
           # V8's gn build needs a debian bullseye amd64 sysroot for host tools.
-          V8_ROOT=$(find ~/.cargo/git/checkouts -maxdepth 2 -name 'build.rs' \
-                    -path '*/rusty_v8*' -exec dirname {} \; | head -1)
-          echo "V8_ROOT=$V8_ROOT"
-          echo "V8_ROOT=$V8_ROOT" >> "$GITHUB_ENV"
           cd "$V8_ROOT"
           python3 build/linux/sysroot_scripts/install-sysroot.py --arch=amd64
 
