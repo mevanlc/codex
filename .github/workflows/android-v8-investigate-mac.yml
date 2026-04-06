@@ -57,6 +57,9 @@ jobs:
           sysctl -n hw.ncpu
           df -h /
 
+      - name: Patch v8 to git source for Android
+        run: sed -i '' 's/^# \(v8 = { git = "https:\/\/github.com\/mevanlc\/rusty_v8"\)/\1/' Cargo.toml
+
       - name: Update Cargo.lock for git v8 source
         run: cargo update -p v8
 

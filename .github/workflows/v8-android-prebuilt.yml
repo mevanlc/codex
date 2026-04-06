@@ -1,0 +1,184 @@
+name: Build V8 Android Prebuilt
+
+on:
+  workflow_dispatch:
+    inputs:
+      v8_version:
+        description: "V8 crate version (e.g. 146.4.0)"
+        required: true
+        default: "146.4.0"
+      num_jobs:
+        description: "Ninja parallelism (NUM_JOBS). Lower = less RAM."
+        required: true
+        default: "2"
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      V8_VERSION: ${{ inputs.v8_version }}
+    steps:
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.0"
+          targets: aarch64-linux-android
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3 pkg-config
+
+      - name: Install Android NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK 27
+        run: sdkmanager --install "ndk;27.2.12479018"
+
+      - name: Configure Android toolchain
+        run: |
+          NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          TOOLCHAIN="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
+          LINKER="$TOOLCHAIN/bin/aarch64-linux-android35-clang"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$LINKER" >> "$GITHUB_ENV"
+          echo "CC_aarch64_linux_android=$LINKER" >> "$GITHUB_ENV"
+          echo "CXX_aarch64_linux_android=$TOOLCHAIN/bin/aarch64-linux-android35-clang++" >> "$GITHUB_ENV"
+          echo "AR_aarch64_linux_android=$TOOLCHAIN/bin/llvm-ar" >> "$GITHUB_ENV"
+          echo "RANLIB_aarch64_linux_android=$TOOLCHAIN/bin/llvm-ranlib" >> "$GITHUB_ENV"
+          ln -sf "$TOOLCHAIN/bin/llvm-ranlib" "$TOOLCHAIN/bin/aarch64-linux-android-ranlib"
+          ln -sf "$TOOLCHAIN/bin/llvm-ar"     "$TOOLCHAIN/bin/aarch64-linux-android-ar"
+          echo "$TOOLCHAIN/bin" >> "$GITHUB_PATH"
+
+      - name: Add swap
+        run: |
+          sudo fallocate -l 16G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
+      - name: Create builder crate
+        run: |
+          mkdir -p v8-builder/src
+          cat > v8-builder/Cargo.toml << EOF
+          [package]
+          name = "v8-builder"
+          version = "0.0.0"
+          edition = "2021"
+
+          [dependencies]
+          v8 = { git = "https://github.com/denoland/rusty_v8", tag = "v${V8_VERSION}" }
+          EOF
+          echo 'fn main() {}' > v8-builder/src/main.rs
+
+      - name: Fetch V8 source
+        working-directory: v8-builder
+        run: cargo fetch --target aarch64-linux-android
+
+      - name: Install V8 host sysroot
+        run: |
+          # V8's gn build needs a debian bullseye amd64 sysroot for host tools.
+          V8_ROOT=$(find ~/.cargo/git/checkouts -maxdepth 2 -name 'build.rs' \
+                    -path '*/rusty_v8*' -exec dirname {} \; | head -1)
+          echo "V8_ROOT=$V8_ROOT"
+          echo "V8_ROOT=$V8_ROOT" >> "$GITHUB_ENV"
+          cd "$V8_ROOT"
+          python3 build/linux/sysroot_scripts/install-sysroot.py --arch=amd64
+
+      - name: Show environment
+        run: |
+          echo "=== Rust ===" && rustc --version && cargo --version
+          echo "=== System ===" && free -h && nproc && df -h /
+          echo "=== V8 root ===" && ls "$V8_ROOT"/build/linux/ | head -10
+
+      - name: Build V8 from source
+        working-directory: v8-builder
+        env:
+          V8_FROM_SOURCE: "1"
+          NUM_JOBS: ${{ inputs.num_jobs }}
+        run: |
+          cargo build --target aarch64-linux-android --release 2>&1 | tee /tmp/v8-build.log
+
+      - name: Extract artifacts
+        id: artifacts
+        run: |
+          # Find the built static library
+          LIB=$(find v8-builder/target -name 'librusty_v8.a' -path '*/gn_out/obj/*' | head -1)
+          echo "Found lib: $LIB ($(du -h "$LIB" | cut -f1))"
+
+          # Find the generated binding
+          BINDING=$(find v8-builder/target -name 'src_binding.rs' -path '*/gn_out/*' | head -1)
+          echo "Found binding: $BINDING ($(wc -l < "$BINDING") lines)"
+
+          # Rename per rusty_v8 convention
+          STAGING=/tmp/v8-artifacts
+          mkdir -p "$STAGING"
+          cp "$LIB"     "$STAGING/librusty_v8_release_aarch64-linux-android.a"
+          cp "$BINDING"  "$STAGING/src_binding_release_aarch64-linux-android.rs"
+          gzip -9 "$STAGING/librusty_v8_release_aarch64-linux-android.a"
+
+          ls -lh "$STAGING"/
+          echo "staging=$STAGING" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: v8-android-prebuilt-${{ inputs.v8_version }}
+          path: |
+            ${{ steps.artifacts.outputs.staging }}/librusty_v8_release_aarch64-linux-android.a.gz
+            ${{ steps.artifacts.outputs.staging }}/src_binding_release_aarch64-linux-android.rs
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v8-build-log
+          path: /tmp/v8-build.log
+
+      - name: Show tail on failure
+        if: failure()
+        run: tail -200 /tmp/v8-build.log
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: v8-android-prebuilt-${{ inputs.v8_version }}
+          path: artifacts
+
+      - name: Create release on mevanlc/rusty_v8
+        env:
+          GH_TOKEN: ${{ secrets.V8_RELEASE_TOKEN }}
+        run: |
+          TAG="v${{ inputs.v8_version }}"
+          REPO="mevanlc/rusty_v8"
+
+          # Create the release (or reuse existing)
+          gh release create "$TAG" \
+            --repo "$REPO" \
+            --title "v8 $TAG (Android aarch64 prebuilt)" \
+            --notes "Prebuilt \`librusty_v8\` static library and FFI bindings for \`aarch64-linux-android\`." \
+            --latest=false \
+            2>/dev/null || echo "Release $TAG already exists, uploading assets."
+
+          # Upload (--clobber overwrites if re-running)
+          gh release upload "$TAG" \
+            --repo "$REPO" \
+            --clobber \
+            artifacts/librusty_v8_release_aarch64-linux-android.a.gz \
+            artifacts/src_binding_release_aarch64-linux-android.rs
+
+          echo "### Uploaded to: https://github.com/$REPO/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
