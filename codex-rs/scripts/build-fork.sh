@@ -233,7 +233,7 @@ trap cleanup EXIT
 # Termux/Android: use prebuilt V8 from mevanlc/rusty_v8 releases and link C++
 # runtime for native C++ deps (oboe-sys, onig_sys).
 if [[ "$(uname -m)" == "aarch64" ]] && [[ -f /system/build.prop ]]; then
-	export RUSTY_V8_MIRROR="https://github.com/mevanlc/rusty_v8/releases/download"
+	export RUSTY_V8_MIRROR="https://github.com/mevanlc/codex/releases/download"
 	export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-lc++_static -C link-arg=-lc++abi"
 	echo "Termux detected: using prebuilt V8 from $RUSTY_V8_MIRROR"
 fi

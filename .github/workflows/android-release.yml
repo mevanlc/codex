@@ -102,7 +102,7 @@ jobs:
         env:
           CARGO_BUILD_JOBS: "2"
           CARGO_PROFILE_RELEASE_LTO: "thin"
-          RUSTY_V8_MIRROR: https://github.com/mevanlc/rusty_v8/releases/download
+          RUSTY_V8_MIRROR: https://github.com/mevanlc/codex/releases/download
         run: cargo build --release --bin codex --target aarch64-linux-android
 
       - name: Compress binary
