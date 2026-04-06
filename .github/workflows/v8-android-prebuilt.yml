@@ -25,6 +25,7 @@ jobs:
     timeout-minutes: 360
     env:
       V8_VERSION: ${{ inputs.v8_version }}
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
