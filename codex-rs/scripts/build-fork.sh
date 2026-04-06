@@ -6,7 +6,7 @@
 # Features:
 #   - Auto-detects version from git tags (rust-v*)
 #   - Stamps a custom version string into Cargo.toml for the build, restores on exit
-#   - Termux/Android: auto-disables code-mode (V8) and links C++ runtime
+#   - Termux/Android: auto-configures prebuilt V8 mirror and links C++ runtime
 #   - Optional: fetch + fast-forward merge before building
 #   - Optional: prune target dir if it exceeds a size cap
 #
@@ -63,8 +63,8 @@ Platform Notes
     on PATH. See also: codex-rs/scripts/setup-windows.ps1
 
   Termux / Android (aarch64-linux-android):
-    Auto-detected by this script. V8 has no prebuilt for this target, so
-    code-mode is disabled (--no-default-features). The C++ runtime is
+    Auto-detected by this script. V8 prebuilt is downloaded from
+    mevanlc/rusty_v8 releases (via RUSTY_V8_MIRROR). The C++ runtime is
     linked explicitly for native deps (oboe-sys, onig_sys).
     Prereqs: pkg install rust binutils cmake openssl pkg-config
 EOF
@@ -230,19 +230,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Termux/Android: disable code-mode (V8 has no prebuilt for aarch64-linux-android)
-# and link C++ runtime for native C++ deps (oboe-sys, onig_sys).
-CARGO_NO_DEFAULT_FEATURES=""
+# Termux/Android: use prebuilt V8 from mevanlc/rusty_v8 releases and link C++
+# runtime for native C++ deps (oboe-sys, onig_sys).
 if [[ "$(uname -m)" == "aarch64" ]] && [[ -f /system/build.prop ]]; then
-	CARGO_NO_DEFAULT_FEATURES="--no-default-features"
+	export RUSTY_V8_MIRROR="https://github.com/mevanlc/rusty_v8/releases/download"
 	export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-lc++_static -C link-arg=-lc++abi"
-	echo "Termux detected: disabling code-mode (V8), linking C++ runtime"
+	echo "Termux detected: using prebuilt V8 from $RUSTY_V8_MIRROR"
 fi
 
 # Build binary
 echo "Building codex $VERSION ($PROFILE)..."
 
-cargo build --bin codex --profile $PROFILE -p codex-cli $CARGO_NO_DEFAULT_FEATURES
+cargo build --bin codex --profile $PROFILE -p codex-cli
 
 # Copy to ~/.local/bin
 mkdir -p "$HOME/.local/bin"

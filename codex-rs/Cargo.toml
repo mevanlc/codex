@@ -559,6 +559,9 @@ crossterm = { git = "https://github.com/nornagon/crossterm", rev = "87db8bfa6dc9
 ratatui = { git = "https://github.com/nornagon/ratatui", rev = "9b2ad1298408c45918ee9f8241a6f95498cdbed2" }
 tokio-tungstenite = { git = "https://github.com/openai-oss-forks/tokio-tungstenite", rev = "0e5b2d73aa18dd9f0a50ee9ff199d5aef7594186" }
 tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f" }
+# Android builds need the git source for v8 (full build/ submodule).
+# Investigation workflows can uncomment this; normal Android builds use RUSTY_V8_MIRROR.
+# v8 = { git = "https://github.com/denoland/rusty_v8", tag = "v149.2.0" }
 
 # Uncomment to debug local changes.
 # rmcp = { path = "../../rust-sdk/crates/rmcp" }
