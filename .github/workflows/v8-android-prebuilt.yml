@@ -159,16 +159,14 @@ jobs:
           name: v8-android-prebuilt-${{ inputs.v8_version }}
           path: artifacts
 
-      - name: Create release on mevanlc/rusty_v8
+      - name: Create release with prebuilt artifacts
         env:
-          GH_TOKEN: ${{ secrets.V8_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v${{ inputs.v8_version }}"
-          REPO="mevanlc/rusty_v8"
 
           # Create the release (or reuse existing)
           gh release create "$TAG" \
-            --repo "$REPO" \
             --title "v8 $TAG (Android aarch64 prebuilt)" \
             --notes "Prebuilt \`librusty_v8\` static library and FFI bindings for \`aarch64-linux-android\`." \
             --latest=false \
@@ -176,9 +174,8 @@ jobs:
 
           # Upload (--clobber overwrites if re-running)
           gh release upload "$TAG" \
-            --repo "$REPO" \
             --clobber \
             artifacts/librusty_v8_release_aarch64-linux-android.a.gz \
             artifacts/src_binding_release_aarch64-linux-android.rs
 
-          echo "### Uploaded to: https://github.com/$REPO/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Uploaded to: https://github.com/${{ github.repository }}/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
