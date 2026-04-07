@@ -106,9 +106,19 @@ jobs:
             echo "::endgroup::"
           }
 
-          # Rewrite tools/clang to use our GitHub mirror (googlesource 429s)
+          # Rewrite googlesource.com submodules to GitHub mirrors (429 rate limits)
           git config --file .gitmodules submodule.tools/clang.url \
             https://github.com/mevanlc/chromium-tools-clang.git
+          git config --file .gitmodules submodule.buildtools.url \
+            https://github.com/mevanlc/chromium-buildtools.git
+          git config --file .gitmodules submodule.third_party/jinja2.url \
+            https://github.com/mevanlc/chromium-third_party-jinja2.git
+          git config --file .gitmodules submodule.third_party/markupsafe.url \
+            https://github.com/mevanlc/chromium-third_party-markupsafe.git
+          git config --file .gitmodules submodule.third_party/abseil-cpp.url \
+            https://github.com/mevanlc/chromium-third_party-abseil-cpp.git
+          git config --file .gitmodules submodule.third_party/rust.url \
+            https://github.com/mevanlc/chromium-third_party-rust.git
 
           # Split submodules by actual host (check URL column, not key)
           github_mods=()
