@@ -88,7 +88,7 @@ jobs:
           git submodule init
 
           fetch_one() {
-            local name=$1 retries=5 delay=15
+            local name=$1 retries=5 delay=30
             for attempt in $(seq 1 $retries); do
               echo "::group::$name (attempt $attempt)"
               if git submodule update --jobs 1 --depth 1 -- "$name" 2>&1; then
@@ -96,7 +96,7 @@ jobs:
                 return 0
               fi
               echo "::endgroup::"
-              echo "  ⏳ retry in ${delay}s..."
+              echo "  retry in ${delay}s..."
               sleep $delay
               delay=$((delay * 2))
             done
@@ -111,12 +111,12 @@ jobs:
             fetch_one "$mod"
           done
 
-          # googlesource.com submodules: one at a time, 20s pause between each
+          # googlesource.com submodules: one at a time, 30s pause between each
           for mod in $(git config --file .gitmodules --get-regexp 'url' \
                        | grep 'googlesource\.com' | awk '{print $1}' \
                        | sed 's/submodule\.\(.*\)\.url/\1/'); do
+            sleep 30
             fetch_one "$mod"
-            sleep 20
           done
 
           echo "All submodules fetched."
