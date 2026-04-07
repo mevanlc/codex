@@ -724,6 +724,15 @@ pub struct Tui {
     #[serde(default)]
     pub theme: Option<String>,
 
+    /// Overrides the default cyan accent used throughout the TUI.
+    ///
+    /// Supported formats:
+    /// - `r,g,b` where each channel is `0..255` (for example `0,170,255`)
+    /// - `#RRGGBB` (for example `#00AAFF`)
+    /// - `0..255` ANSI palette index (for example `14`)
+    #[serde(default)]
+    pub primary_accent: Option<String>,
+
     /// Pet id to preselect in the terminal pet picker.
     ///
     /// Custom pet ids resolve against CODEX_HOME/pets/<pet-id>/pet.json.

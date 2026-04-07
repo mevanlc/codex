@@ -715,6 +715,9 @@ pub struct Config {
     /// Syntax highlighting theme override (kebab-case name).
     pub tui_theme: Option<String>,
 
+    /// Overrides the default cyan accent used throughout the TUI.
+    pub tui_primary_accent: Option<String>,
+
     /// Pet id preselected by the terminal pet picker.
     pub tui_pet: Option<String>,
 
@@ -3552,6 +3555,7 @@ impl Config {
                 .unwrap_or(true),
             tui_terminal_title: cfg.tui.as_ref().and_then(|t| t.terminal_title.clone()),
             tui_theme: cfg.tui.as_ref().and_then(|t| t.theme.clone()),
+            tui_primary_accent: cfg.tui.as_ref().and_then(|t| t.primary_accent.clone()),
             tui_pet: cfg.tui.as_ref().and_then(|t| t.pet.clone()),
             tui_pet_anchor: cfg
                 .tui
