@@ -83,24 +83,33 @@ jobs:
       - name: Fetch submodules sequentially
         working-directory: /tmp/rusty_v8
         run: |
-          # googlesource.com rate-limits (429) parallel submodule fetches.
-          # Fetch one at a time with retry + exponential backoff.
-          git submodule init
+          # googlesource.com rate-limits (429) aggressively. git submodule
+          # update does internal immediate retries that burn rate budget.
+          # Use raw git clone instead for full control over timing.
 
-          fetch_one() {
-            local name=$1 retries=5 delay=30
+          clone_submodule() {
+            local path=$1
+            local url=$(git config --file .gitmodules --get "submodule.$path.url")
+            local sha=$(git ls-tree HEAD "$path" | awk '{print $3}')
+            local retries=6 delay=45
+
             for attempt in $(seq 1 $retries); do
-              echo "::group::$name (attempt $attempt)"
-              if git submodule update --jobs 1 --depth 1 -- "$name" 2>&1; then
+              echo "::group::$path (attempt $attempt/$retries)"
+              rm -rf "$path"
+              if git clone --depth 1 "$url" "$path" 2>&1 && \
+                 cd "$path" && git fetch --depth 1 origin "$sha" 2>&1 && \
+                 git checkout "$sha" 2>&1; then
+                cd ..
                 echo "::endgroup::"
                 return 0
               fi
+              cd /tmp/rusty_v8
               echo "::endgroup::"
               echo "  retry in ${delay}s..."
               sleep $delay
               delay=$((delay * 2))
             done
-            echo "::error::Failed to fetch $name after $retries attempts"
+            echo "::error::Failed to fetch $path after $retries attempts"
             return 1
           }
 
@@ -108,19 +117,18 @@ jobs:
           for mod in $(git config --file .gitmodules --get-regexp 'url' \
                        | grep 'github\.com' | awk '{print $1}' \
                        | sed 's/submodule\.\(.*\)\.url/\1/'); do
-            fetch_one "$mod"
+            clone_submodule "$mod"
           done
 
-          # googlesource.com submodules: one at a time, 30s pause between each
+          # googlesource.com submodules: one at a time, 45s pause before each
           for mod in $(git config --file .gitmodules --get-regexp 'url' \
                        | grep 'googlesource\.com' | awk '{print $1}' \
                        | sed 's/submodule\.\(.*\)\.url/\1/'); do
-            sleep 30
-            fetch_one "$mod"
+            sleep 45
+            clone_submodule "$mod"
           done
 
           echo "All submodules fetched."
-          git submodule status
 
       - name: Create builder crate
         run: |
