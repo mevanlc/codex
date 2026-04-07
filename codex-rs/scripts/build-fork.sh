@@ -241,7 +241,7 @@ if [[ "$(uname -m)" == "aarch64" ]] && [[ -f /system/build.prop ]]; then
 		curl -sL -o "$V8_BINDING" "${V8_PREBUILT_BASE}/${V8_PREBUILT_TAG}/src_binding_release_aarch64-linux-android.rs"
 	fi
 	export RUSTY_V8_SRC_BINDING_PATH="$V8_BINDING"
-	export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-lc++_static -C link-arg=-lc++abi"
+	export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-lc++_static -C link-arg=-lc++abi -C link-arg=-lcompiler_rt-extras"
 	echo "Termux detected: using prebuilt V8 from ${V8_PREBUILT_TAG}"
 fi
 
