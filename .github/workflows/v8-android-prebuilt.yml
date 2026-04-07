@@ -146,11 +146,14 @@ jobs:
 
           # Pre-populate repos that build.rs clones for Android targets
           # (not submodules — cloned directly by build.rs at build time)
+          # Pre-populate repos that build.rs clones for Android targets
+          # (not submodules — cloned directly by build.rs at build time)
           echo "::group::Pre-populating build.rs Android deps"
           curl -sL https://github.com/mevanlc/codex/releases/download/v8-deps/android_platform.tar.gz \
             | tar xz -C third_party/
-          git clone --depth 1 https://github.com/mevanlc/chromium-catapult.git \
-            third_party/catapult
+          curl -sL https://github.com/mevanlc/codex/releases/download/v8-deps/catapult.tar.gz \
+            | tar xz -C third_party/
+          ls third_party/android_platform/ third_party/catapult/tracing/BUILD.gn
           echo "::endgroup::"
 
           echo "All submodules fetched."
