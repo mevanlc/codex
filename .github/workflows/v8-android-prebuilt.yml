@@ -106,6 +106,10 @@ jobs:
             echo "::endgroup::"
           }
 
+          # Rewrite tools/clang to use our GitHub mirror (googlesource 429s)
+          git config --file .gitmodules submodule.tools/clang.url \
+            https://github.com/mevanlc/chromium-tools-clang.git
+
           # Split submodules by actual host (check URL column, not key)
           github_mods=()
           google_mods=()
