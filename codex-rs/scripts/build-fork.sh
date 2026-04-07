@@ -64,7 +64,7 @@ Platform Notes
 
   Termux / Android (aarch64-linux-android):
     Auto-detected by this script. V8 prebuilt is downloaded from
-    mevanlc/rusty_v8 releases (via RUSTY_V8_MIRROR). The C++ runtime is
+    mevanlc/codex releases (via RUSTY_V8_ARCHIVE). The C++ runtime is
     linked explicitly for native deps (oboe-sys, onig_sys).
     Prereqs: pkg install rust binutils cmake openssl pkg-config
 EOF
@@ -230,12 +230,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Termux/Android: use prebuilt V8 from mevanlc/rusty_v8 releases and link C++
+# Termux/Android: use prebuilt V8 from mevanlc/codex releases and link C++
 # runtime for native C++ deps (oboe-sys, onig_sys).
+V8_PREBUILT_BASE="https://github.com/mevanlc/codex/releases/download"
+V8_PREBUILT_TAG="v8-v146.4.0"
 if [[ "$(uname -m)" == "aarch64" ]] && [[ -f /system/build.prop ]]; then
-	export RUSTY_V8_MIRROR="https://github.com/mevanlc/codex/releases/download"
+	export RUSTY_V8_ARCHIVE="${V8_PREBUILT_BASE}/${V8_PREBUILT_TAG}/librusty_v8_release_aarch64-linux-android.a.gz"
+	V8_BINDING="/tmp/v8_src_binding.rs"
+	if [[ ! -f "$V8_BINDING" ]]; then
+		curl -sL -o "$V8_BINDING" "${V8_PREBUILT_BASE}/${V8_PREBUILT_TAG}/src_binding_release_aarch64-linux-android.rs"
+	fi
+	export RUSTY_V8_SRC_BINDING_PATH="$V8_BINDING"
 	export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-lc++_static -C link-arg=-lc++abi"
-	echo "Termux detected: using prebuilt V8 from $RUSTY_V8_MIRROR"
+	echo "Termux detected: using prebuilt V8 from ${V8_PREBUILT_TAG}"
 fi
 
 # Build binary
