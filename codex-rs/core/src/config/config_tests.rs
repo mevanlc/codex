@@ -829,6 +829,7 @@ fn config_toml_deserializes_model_availability_nux() {
             status_line_use_colors: true,
             terminal_title: None,
             theme: None,
+            primary_accent: None,
             pet: None,
             pet_anchor: TuiPetAnchor::Composer,
             session_picker_view: None,
@@ -3554,6 +3555,37 @@ fn tui_theme_defaults_to_none() {
 }
 
 #[test]
+fn tui_primary_accent_deserializes_from_toml() {
+    let cfg = r##"
+[tui]
+primary_accent = "#00AAFF"
+"##;
+    let parsed = toml::from_str::<ConfigToml>(cfg).expect("TOML deserialization should succeed");
+    assert_eq!(
+        parsed
+            .tui
+            .as_ref()
+            .and_then(|t| t.primary_accent.as_deref()),
+        Some("#00AAFF"),
+    );
+}
+
+#[test]
+fn tui_primary_accent_defaults_to_none() {
+    let cfg = r#"
+[tui]
+"#;
+    let parsed = toml::from_str::<ConfigToml>(cfg).expect("TOML deserialization should succeed");
+    assert_eq!(
+        parsed
+            .tui
+            .as_ref()
+            .and_then(|t| t.primary_accent.as_deref()),
+        None,
+    );
+}
+
+#[test]
 fn tui_session_picker_view_deserializes_from_toml() {
     let cfg = r#"
 [tui]
@@ -3665,6 +3697,7 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             status_line_use_colors: true,
             terminal_title: None,
             theme: None,
+            primary_accent: None,
             pet: None,
             pet_anchor: TuiPetAnchor::Composer,
             session_picker_view: None,

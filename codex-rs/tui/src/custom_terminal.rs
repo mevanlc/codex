@@ -651,6 +651,7 @@ fn draw<I>(writer: &mut impl Write, commands: I) -> io::Result<()>
 where
     I: Iterator<Item = DrawCommand>,
 {
+    let primary_accent = crate::primary_accent::current_primary_accent();
     let mut fg = Color::Reset;
     let mut bg = Color::Reset;
     let mut modifier = Modifier::empty();
@@ -667,6 +668,8 @@ where
         last_pos = Some(Position { x, y });
         match command {
             DrawCommand::Put { cell, .. } => {
+                let cell_fg = crate::primary_accent::remap_cyan(cell.fg, primary_accent);
+                let cell_bg = crate::primary_accent::remap_cyan(cell.bg, primary_accent);
                 if cell.modifier != modifier {
                     let diff = ModifierDiff {
                         from: modifier,
@@ -675,18 +678,19 @@ where
                     diff.queue(writer)?;
                     modifier = cell.modifier;
                 }
-                if cell.fg != fg || cell.bg != bg {
+                if cell_fg != fg || cell_bg != bg {
                     queue!(
                         writer,
-                        SetColors(Colors::new(cell.fg.into(), cell.bg.into()))
+                        SetColors(Colors::new(cell_fg.into(), cell_bg.into()))
                     )?;
-                    fg = cell.fg;
-                    bg = cell.bg;
+                    fg = cell_fg;
+                    bg = cell_bg;
                 }
 
                 queue!(writer, Print(cell.symbol()))?;
             }
             DrawCommand::ClearToEnd { bg: clear_bg, .. } => {
+                let clear_bg = crate::primary_accent::remap_cyan(clear_bg, primary_accent);
                 queue!(writer, SetAttribute(crossterm::style::Attribute::Reset))?;
                 modifier = Modifier::empty();
                 queue!(writer, SetBackgroundColor(clear_bg.into()))?;

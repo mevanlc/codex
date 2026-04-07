@@ -3259,6 +3259,11 @@
           "default": null,
           "description": "Preferred layout for resume/fork session picker results."
         },
+        "primary_accent": {
+          "default": null,
+          "description": "Overrides the default cyan accent used throughout the TUI.\n\nSupported formats: - `r,g,b` where each channel is `0..255` (for example `0,170,255`) - `#RRGGBB` (for example `#00AAFF`) - `0..255` ANSI palette index (for example `14`)",
+          "type": "string"
+        },
         "show_tooltips": {
           "default": true,
           "description": "Show startup tooltips in the TUI welcome screen. Defaults to `true`.",

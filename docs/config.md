@@ -22,3 +22,10 @@ To disable the rotating "tip" placeholders in the chatbox, set:
 [tui]
 chatbox_placeholder_tips = "off"
 ```
+
+To override the default cyan accent used across TUI highlights, set:
+
+```toml
+[tui]
+primary_accent = "#00AAFF" # r,g,b | #RRGGBB | 0..255
+```
