@@ -113,17 +113,24 @@ jobs:
             return 1
           }
 
+          # Split submodules by actual host (check URL column, not key)
+          github_mods=()
+          google_mods=()
+          while IFS=' ' read -r key url; do
+            mod=$(echo "$key" | sed 's/submodule\.\(.*\)\.url/\1/')
+            case "$url" in
+              https://github.com/*) github_mods+=("$mod") ;;
+              *)                    google_mods+=("$mod") ;;
+            esac
+          done < <(git config --file .gitmodules --get-regexp 'url')
+
           # GitHub-hosted submodules first (no rate issues)
-          for mod in $(git config --file .gitmodules --get-regexp 'url' \
-                       | grep 'github\.com' | awk '{print $1}' \
-                       | sed 's/submodule\.\(.*\)\.url/\1/'); do
+          for mod in "${github_mods[@]}"; do
             clone_submodule "$mod"
           done
 
           # googlesource.com submodules: one at a time, 45s pause before each
-          for mod in $(git config --file .gitmodules --get-regexp 'url' \
-                       | grep 'googlesource\.com' | awk '{print $1}' \
-                       | sed 's/submodule\.\(.*\)\.url/\1/'); do
+          for mod in "${google_mods[@]}"; do
             sleep 45
             clone_submodule "$mod"
           done
