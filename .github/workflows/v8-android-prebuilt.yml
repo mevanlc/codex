@@ -141,6 +141,8 @@ jobs:
 
           [dependencies]
           v8 = { path = "/tmp/rusty_v8" }
+          # Pin icu_calendar to a version compatible with temporal_rs 0.1.2
+          icu_calendar = "=2.1.0"
           EOF
           echo 'fn main() {}' > v8-builder/src/main.rs
 
