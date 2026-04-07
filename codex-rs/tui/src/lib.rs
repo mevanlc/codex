@@ -134,6 +134,7 @@ pub(crate) mod onboarding;
 mod oss_selection;
 mod pager_overlay;
 pub(crate) mod public_widgets;
+mod primary_accent;
 mod render;
 mod resume_picker;
 mod selection_list;
@@ -977,6 +978,12 @@ async fn run_ratatui_app(
 
     tooltips::announcement::prewarm();
 
+    if let Err(err) =
+        crate::primary_accent::configure_from_config(initial_config.tui_primary_accent.as_deref())
+    {
+        tracing::warn!(error = %err, "invalid [tui].primary_accent; using default cyan accent");
+    }
+
     // Forward panic reports through tracing so they appear in the UI status
     // line, but do not swallow the default/color-eyre panic handler.
     // Chain to the previous hook so users still get a rich panic report
@@ -1314,6 +1321,8 @@ async fn run_ratatui_app(
         }
         _ => config,
     };
+    apply_primary_accent(&mut config);
+    tui.terminal.invalidate_viewport();
 
     // Configure syntax highlighting theme from the final config — onboarding
     // and resume/fork can both reload config with a different tui_theme, so
@@ -1553,6 +1562,18 @@ impl TerminalRestoreGuard {
 impl Drop for TerminalRestoreGuard {
     fn drop(&mut self) {
         self.restore_silently();
+    }
+}
+
+fn apply_primary_accent(config: &mut Config) {
+    if let Err(err) =
+        crate::primary_accent::configure_from_config(config.tui_primary_accent.as_deref())
+    {
+        let warning =
+            format!("Invalid [tui].primary_accent ({err}). Falling back to default cyan accent.");
+        tracing::warn!(warning = %warning);
+        config.startup_warnings.push(warning);
+        crate::primary_accent::set_primary_accent(None);
     }
 }
 

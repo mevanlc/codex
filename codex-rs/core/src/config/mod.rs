@@ -346,6 +346,9 @@ pub struct Config {
     /// Syntax highlighting theme override (kebab-case name).
     pub tui_theme: Option<String>,
 
+    /// Overrides the default cyan accent used throughout the TUI.
+    pub tui_primary_accent: Option<String>,
+
     /// The absolute directory that should be treated as the current working
     /// directory for the session. All relative paths inside the business-logic
     /// layer are resolved against this path.
@@ -2167,6 +2170,7 @@ impl Config {
             tui_status_line: cfg.tui.as_ref().and_then(|t| t.status_line.clone()),
             tui_terminal_title: cfg.tui.as_ref().and_then(|t| t.terminal_title.clone()),
             tui_theme: cfg.tui.as_ref().and_then(|t| t.theme.clone()),
+            tui_primary_accent: cfg.tui.as_ref().and_then(|t| t.primary_accent.clone()),
             otel: {
                 let t: OtelConfigToml = cfg.otel.unwrap_or_default();
                 let log_user_prompt = t.log_user_prompt.unwrap_or(false);
