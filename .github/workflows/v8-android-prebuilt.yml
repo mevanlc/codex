@@ -74,12 +74,53 @@ jobs:
           chmod 600 ~/.gitcookies
           git config --global http.cookiefile ~/.gitcookies
 
-      - name: Clone rusty_v8 with submodules
+      - name: Clone rusty_v8
         run: |
           git clone --depth 1 --branch "v${V8_VERSION}" \
-            --recurse-submodules --shallow-submodules --jobs 4 \
             https://github.com/denoland/rusty_v8.git /tmp/rusty_v8
           echo "V8_ROOT=/tmp/rusty_v8" >> "$GITHUB_ENV"
+
+      - name: Fetch submodules sequentially
+        working-directory: /tmp/rusty_v8
+        run: |
+          # googlesource.com rate-limits (429) parallel submodule fetches.
+          # Fetch one at a time with retry + exponential backoff.
+          git submodule init
+
+          fetch_one() {
+            local name=$1 retries=5 delay=15
+            for attempt in $(seq 1 $retries); do
+              echo "::group::$name (attempt $attempt)"
+              if git submodule update --jobs 1 --depth 1 -- "$name" 2>&1; then
+                echo "::endgroup::"
+                return 0
+              fi
+              echo "::endgroup::"
+              echo "  ⏳ retry in ${delay}s..."
+              sleep $delay
+              delay=$((delay * 2))
+            done
+            echo "::error::Failed to fetch $name after $retries attempts"
+            return 1
+          }
+
+          # GitHub-hosted submodules first (no rate issues)
+          for mod in $(git config --file .gitmodules --get-regexp 'url' \
+                       | grep 'github\.com' | awk '{print $1}' \
+                       | sed 's/submodule\.\(.*\)\.url/\1/'); do
+            fetch_one "$mod"
+          done
+
+          # googlesource.com submodules: one at a time, 20s pause between each
+          for mod in $(git config --file .gitmodules --get-regexp 'url' \
+                       | grep 'googlesource\.com' | awk '{print $1}' \
+                       | sed 's/submodule\.\(.*\)\.url/\1/'); do
+            fetch_one "$mod"
+            sleep 20
+          done
+
+          echo "All submodules fetched."
+          git submodule status
 
       - name: Create builder crate
         run: |
