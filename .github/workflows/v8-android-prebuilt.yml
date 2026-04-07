@@ -119,6 +119,8 @@ jobs:
             https://github.com/mevanlc/chromium-third_party-abseil-cpp.git
           git config --file .gitmodules submodule.third_party/rust.url \
             https://github.com/mevanlc/chromium-third_party-rust.git
+          git config --file .gitmodules submodule.third_party/simdutf.url \
+            https://github.com/mevanlc/chromium-third_party-simdutf.git
 
           # Split submodules by actual host (check URL column, not key)
           github_mods=()
