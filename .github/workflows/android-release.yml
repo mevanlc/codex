@@ -106,9 +106,25 @@ jobs:
           RUSTY_V8_SRC_BINDING_PATH: /tmp/v8_binding.rs
           RUSTFLAGS: -C link-arg=/usr/local/lib/android/sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/libclang_rt.builtins-aarch64-android.a
         run: |
-          curl -sL -o /tmp/v8_binding.rs \
+          set -euxo pipefail
+          trap 'status=$?; echo "Build codex failed with status $status"; echo "V8-related files under target:"; find target -maxdepth 10 \( -path "*/build/v8-*/out/*" -o -name "librusty_v8*.a" -o -name "*.sum" \) -print 2>/dev/null | sort || true; exit "$status"' ERR
+          echo "Rusty V8 environment:"
+          env | sort | grep -E '^(AR_|CC_|CARGO_TARGET_AARCH64|RANLIB_|RUSTFLAGS|RUSTY_V8_)' || true
+          echo "Rusty V8 archive headers:"
+          curl -fLI "$RUSTY_V8_ARCHIVE"
+          curl -fLsS -o /tmp/rusty_v8_archive.a.gz "$RUSTY_V8_ARCHIVE"
+          echo "Downloaded archive details:"
+          ls -l /tmp/rusty_v8_archive.a.gz
+          gzip -l /tmp/rusty_v8_archive.a.gz
+          curl -fLsS -o /tmp/v8_binding.rs \
             https://github.com/mevanlc/codex/releases/download/v8-v146.4.0/src_binding_release_aarch64-linux-android.rs
-          cargo build --release --bin codex --target aarch64-linux-android
+          echo "Downloaded binding details:"
+          ls -l /tmp/v8_binding.rs
+          wc -c /tmp/v8_binding.rs
+          sed -n '1,5p' /tmp/v8_binding.rs
+          cargo build --verbose --release --bin codex --target aarch64-linux-android
+          echo "Post-build V8-related files under target:"
+          find target -maxdepth 10 \( -path "*/build/v8-*/out/*" -o -name "librusty_v8*.a" -o -name "*.sum" \) -print 2>/dev/null | sort
 
       - name: Compress binary
         run: |
@@ -139,7 +155,7 @@ jobs:
           tag_name: android-${{ needs.build.outputs.version }}
           name: Android aarch64 ${{ needs.build.outputs.version }}
           prerelease: false
-          make_latest: false
+          make_latest: true
           files: codex-aarch64-linux-android.zst
           body: |
             Codex CLI for Android aarch64 (Termux) — with code-mode (V8/JS REPL).
