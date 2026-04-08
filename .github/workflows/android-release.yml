@@ -49,13 +49,9 @@ jobs:
           if [ -n "$best_tag" ]; then
             # Extract the version portion after 'rust-v'
             tag_ver=$(echo "$best_tag" | sed 's/.*rust-v//')
-            if [ "$best_dist" -eq 0 ]; then
-              version="$tag_ver"
-            else
-              version="${tag_ver}-${best_dist}-g${short}"
-            fi
+            version="${tag_ver}-${short}"
           else
-            version="0.0.0-g${short}"
+            version="0.0.0-${short}"
           fi
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -165,6 +161,9 @@ jobs:
           gzip -dc /tmp/rusty_v8_archive.a.gz > "$V8_STAGE_DIR/librusty_v8.a"
           printf '%s' "$RUSTY_V8_ARCHIVE" > "$V8_STAGE_DIR/librusty_v8.sum"
           ls -l "$V8_STAGE_DIR/librusty_v8.a" "$V8_STAGE_DIR/librusty_v8.sum"
+          echo "Stamping Cargo workspace version to ${{ steps.version.outputs.version }}"
+          sed -i 's/^version = ".*"$/version = "${{ steps.version.outputs.version }}"/' Cargo.toml
+          rg -n '^version = "' Cargo.toml | head -1
           cargo build --verbose --release --bin codex --target aarch64-linux-android
           echo "Post-build V8-related files under target:"
           find target -maxdepth 10 \( -path "*/build/v8-*/out/*" -o -name "librusty_v8*.a" -o -name "*.sum" \) -print 2>/dev/null | sort
