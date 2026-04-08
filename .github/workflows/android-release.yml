@@ -90,6 +90,42 @@ jobs:
         with:
           workspaces: codex-rs -> target
 
+      - name: Install sccache
+        uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2
+        with:
+          tool: sccache
+          version: 0.7.5
+
+      - name: Configure sccache backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SCCACHE_CACHE_SIZE=10G" >> "$GITHUB_ENV"
+          if [[ -n "${ACTIONS_CACHE_URL:-}" && -n "${ACTIONS_RUNTIME_TOKEN:-}" ]]; then
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+            echo "Using sccache GitHub backend"
+          else
+            echo "SCCACHE_GHA_ENABLED=false" >> "$GITHUB_ENV"
+            echo "SCCACHE_DIR=${{ github.workspace }}/.sccache" >> "$GITHUB_ENV"
+            echo "Using sccache local disk + actions/cache fallback"
+          fi
+
+      - name: Enable sccache wrapper
+        shell: bash
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+
+      - name: Restore sccache cache (fallback)
+        if: ${{ env.SCCACHE_GHA_ENABLED != 'true' }}
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: ${{ github.workspace }}/.sccache/
+          key: sccache-${{ runner.os }}-aarch64-linux-android-release-${{ hashFiles('codex-rs/Cargo.lock') }}-${{ github.run_id }}
+          restore-keys: |
+            sccache-${{ runner.os }}-aarch64-linux-android-release-${{ hashFiles('codex-rs/Cargo.lock') }}-
+            sccache-${{ runner.os }}-aarch64-linux-android-release-
+
       - name: Add swap for linker
         run: |
           sudo fallocate -l 8G /mnt/swapfile
@@ -122,6 +158,13 @@ jobs:
           ls -l /tmp/v8_binding.rs
           wc -c /tmp/v8_binding.rs
           sed -n '1,5p' /tmp/v8_binding.rs
+          V8_STAGE_DIR=target/aarch64-linux-android/release/gn_out/obj
+          echo "Pre-staging fresh rusty_v8 into $V8_STAGE_DIR"
+          rm -rf target/aarch64-linux-android/release/gn_out
+          mkdir -p "$V8_STAGE_DIR"
+          gzip -dc /tmp/rusty_v8_archive.a.gz > "$V8_STAGE_DIR/librusty_v8.a"
+          printf '%s' "$RUSTY_V8_ARCHIVE" > "$V8_STAGE_DIR/librusty_v8.sum"
+          ls -l "$V8_STAGE_DIR/librusty_v8.a" "$V8_STAGE_DIR/librusty_v8.sum"
           cargo build --verbose --release --bin codex --target aarch64-linux-android
           echo "Post-build V8-related files under target:"
           find target -maxdepth 10 \( -path "*/build/v8-*/out/*" -o -name "librusty_v8*.a" -o -name "*.sum" \) -print 2>/dev/null | sort
@@ -136,6 +179,19 @@ jobs:
         with:
           name: codex-aarch64-linux-android
           path: codex-rs/codex-aarch64-linux-android.zst
+
+      - name: Save sccache cache (fallback)
+        if: ${{ always() && !cancelled() && env.SCCACHE_GHA_ENABLED != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: ${{ github.workspace }}/.sccache/
+          key: sccache-${{ runner.os }}-aarch64-linux-android-release-${{ hashFiles('codex-rs/Cargo.lock') }}-${{ github.run_id }}
+
+      - name: sccache stats
+        if: ${{ always() }}
+        continue-on-error: true
+        run: sccache --show-stats || true
 
     outputs:
       version: ${{ steps.version.outputs.version }}
