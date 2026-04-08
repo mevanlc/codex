@@ -11,7 +11,7 @@ This fork maintains a build of Codex CLI that runs natively on Android via [Term
 ### Key changes
 
 - **Android aarch64 target** — CI workflow produces release binaries for `aarch64-linux-android`
-- **Optional code-mode/V8** — `code-mode` (JS REPL) is gated behind an optional compile-time feature flag, since it requires a custom cross-compiled Node build that isn't feasible for Android
+- **Android code-mode/V8** — Android builds now include working `code-mode` and JS REPL support via prebuilt `rusty_v8` artifacts
 - **Termux-compatible build script** — `build-fork.sh` works across macOS, Linux, and Termux
 - **Build optimizations for constrained devices** — swap file management, thin LTO, job limits to avoid OOM on device
 - **Platform-specific fixes** — file locking fallback, `SHELL` env handling, voice input deps disabled on Android
@@ -26,12 +26,11 @@ This fork maintains a build of Codex CLI that runs natively on Android via [Term
 
 ## Non-goals
 
-- **JS REPL / code-mode support** — would like to eventually, but cross-compiling a custom Node build is a major undertaking
 - **Substantial features not in upstream** — this is a platform port, not a feature fork
 
 ## Install
 
-Grab the latest Android aarch64 binary from [Releases](https://github.com/mevanlc/codex/releases), or build from source:
+Grab the latest Android aarch64 binary from [Releases](https://github.com/mevanlc/codex/releases), or build from source. Current Android release builds include working code-mode / JS REPL support:
 
 ```shell
 # In Termux
@@ -44,7 +43,7 @@ cd codex
 
 | Target | CI | Notes |
 |--------|----|-------|
-| Android aarch64 | Passing | Release binaries published automatically |
+| Android aarch64 | Passing | Release binaries published automatically, including code-mode / JS REPL |
 | Other platforms | Failing | Investigating — upstream code-mode changes may need additional gating |
 
 ## Fork stats
