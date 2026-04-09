@@ -330,10 +330,7 @@ pub(crate) enum AppEvent {
     },
 
     /// Persist the selected realtime microphone or speaker to top-level config.
-    #[cfg_attr(
-        any(target_os = "linux", target_os = "android"),
-        allow(dead_code)
-    )]
+    #[cfg_attr(any(target_os = "linux", target_os = "android"), allow(dead_code))]
     PersistRealtimeAudioDeviceSelection {
         kind: RealtimeAudioDeviceKind,
         name: Option<String>,

@@ -30,7 +30,6 @@ pub(crate) fn tool_user_shell_type(user_shell: &Shell) -> ToolUserShellType {
     }
 }
 
-
 pub(crate) fn build_specs_with_discoverable_tools(
     config: &ToolsConfig,
     mcp_tools: Option<HashMap<String, rmcp::model::Tool>>,
