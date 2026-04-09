@@ -254,6 +254,11 @@ cargo build --bin codex --profile $PROFILE -p codex-cli
 mkdir -p "$HOME/.local/bin"
 cp "$CODEX_DIR/target/$PROFILE/codex" "$HOME/.local/bin/codex"
 
+# macOS: re-sign after copy so the ad-hoc signature covers the installed path
+if [[ "$(uname)" == "Darwin" ]]; then
+  codesign --force --sign - "$HOME/.local/bin/codex"
+fi
+
 warn_if_installed_codex_is_not_first_on_path() {
   local installed_codex first_codex
   installed_codex="$HOME/.local/bin/codex"
