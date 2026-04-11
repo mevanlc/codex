@@ -24,6 +24,7 @@ pub(super) use codex_app_server_protocol::AdditionalFileSystemPermissions as App
 pub(super) use codex_app_server_protocol::AdditionalNetworkPermissions as AppServerAdditionalNetworkPermissions;
 pub(super) use codex_app_server_protocol::AdditionalPermissionProfile as AppServerAdditionalPermissionProfile;
 pub(super) use codex_app_server_protocol::AppSummary;
+pub(super) use codex_app_server_protocol::AutoReviewDecisionSource as AppServerGuardianApprovalReviewDecisionSource;
 pub(super) use codex_app_server_protocol::CollabAgentState as AppServerCollabAgentState;
 pub(super) use codex_app_server_protocol::CollabAgentStatus as AppServerCollabAgentStatus;
 pub(super) use codex_app_server_protocol::CollabAgentTool as AppServerCollabAgentTool;
@@ -39,6 +40,7 @@ pub(super) use codex_app_server_protocol::GuardianApprovalReviewAction as AppSer
 pub(super) use codex_app_server_protocol::GuardianApprovalReviewStatus;
 pub(super) use codex_app_server_protocol::GuardianCommandSource as AppServerGuardianCommandSource;
 pub(super) use codex_app_server_protocol::GuardianRiskLevel as AppServerGuardianRiskLevel;
+pub(super) use codex_app_server_protocol::GuardianUserAuthorization as AppServerGuardianUserAuthorization;
 pub(super) use codex_app_server_protocol::HookCompletedNotification as AppServerHookCompletedNotification;
 pub(super) use codex_app_server_protocol::HookEventName as AppServerHookEventName;
 pub(super) use codex_app_server_protocol::HookExecutionMode as AppServerHookExecutionMode;
@@ -148,10 +150,12 @@ pub(super) use codex_protocol::protocol::ExecPolicyAmendment;
 pub(super) use codex_protocol::protocol::ExitedReviewModeEvent;
 pub(super) use codex_protocol::protocol::FileChange;
 pub(super) use codex_protocol::protocol::GuardianAssessmentAction;
+pub(super) use codex_protocol::protocol::GuardianAssessmentDecisionSource;
 pub(super) use codex_protocol::protocol::GuardianAssessmentEvent;
 pub(super) use codex_protocol::protocol::GuardianAssessmentStatus;
 pub(super) use codex_protocol::protocol::GuardianCommandSource;
 pub(super) use codex_protocol::protocol::GuardianRiskLevel;
+pub(super) use codex_protocol::protocol::GuardianUserAuthorization;
 pub(super) use codex_protocol::protocol::ImageGenerationEndEvent;
 pub(super) use codex_protocol::protocol::ItemCompletedEvent;
 pub(super) use codex_protocol::protocol::McpStartupCompleteEvent;

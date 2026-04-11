@@ -1115,6 +1115,24 @@
       },
       "type": "object"
     },
+    "NotificationCondition": {
+      "oneOf": [
+        {
+          "description": "Emit TUI notifications only while the terminal is unfocused.",
+          "enum": [
+            "unfocused"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Emit TUI notifications regardless of terminal focus.",
+          "enum": [
+            "always"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "NotificationMethod": {
       "enum": [
         "auto",
@@ -1504,14 +1522,51 @@
     "RealtimeToml": {
       "additionalProperties": false,
       "properties": {
+        "transport": {
+          "$ref": "#/definitions/RealtimeTransport"
+        },
         "type": {
           "$ref": "#/definitions/RealtimeWsMode"
         },
         "version": {
           "$ref": "#/definitions/RealtimeConversationVersion"
+        },
+        "voice": {
+          "$ref": "#/definitions/RealtimeVoice"
         }
       },
       "type": "object"
+    },
+    "RealtimeTransport": {
+      "enum": [
+        "webrtc",
+        "websocket"
+      ],
+      "type": "string"
+    },
+    "RealtimeVoice": {
+      "enum": [
+        "alloy",
+        "arbor",
+        "ash",
+        "ballad",
+        "breeze",
+        "cedar",
+        "coral",
+        "cove",
+        "echo",
+        "ember",
+        "juniper",
+        "maple",
+        "marin",
+        "sage",
+        "shimmer",
+        "sol",
+        "spruce",
+        "vale",
+        "verse"
+      ],
+      "type": "string"
     },
     "RealtimeWsMode": {
       "enum": [
@@ -1791,6 +1846,15 @@
           "default": {},
           "description": "Startup tooltip availability NUX state persisted by the TUI."
         },
+        "notification_condition": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/NotificationCondition"
+            }
+          ],
+          "default": "unfocused",
+          "description": "Controls whether TUI notifications are delivered only when the terminal is unfocused or regardless of focus. Defaults to `unfocused`."
+        },
         "notification_method": {
           "allOf": [
             {
@@ -1798,7 +1862,7 @@
             }
           ],
           "default": "auto",
-          "description": "Notification method to use for unfocused terminal notifications. Defaults to `auto`."
+          "description": "Notification method to use for terminal notifications. Defaults to `auto`."
         },
         "notifications": {
           "allOf": [
@@ -1807,7 +1871,7 @@
             }
           ],
           "default": true,
-          "description": "Enable desktop notifications from the TUI when the terminal is unfocused. Defaults to `true`."
+          "description": "Enable desktop notifications from the TUI. Defaults to `true`."
         },
         "primary_accent": {
           "default": null,
@@ -1821,7 +1885,7 @@
         },
         "status_line": {
           "default": null,
-          "description": "Ordered list of status line item identifiers.\n\nWhen set, the TUI renders the selected items as the status line. When unset, the TUI defaults to: `model-with-reasoning`, `context-remaining`, and `current-dir`.",
+          "description": "Ordered list of status line item identifiers.\n\nWhen set, the TUI renders the selected items as the status line. When unset, the TUI defaults to: `model-with-reasoning` and `current-dir`.",
           "items": {
             "type": "string"
           },

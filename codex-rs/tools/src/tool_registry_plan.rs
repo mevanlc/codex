@@ -8,14 +8,14 @@ use crate::TOOL_SUGGEST_TOOL_NAME;
 use crate::ToolHandlerKind;
 use crate::ToolRegistryPlan;
 use crate::ToolRegistryPlanParams;
-use crate::ToolSearchAppSource;
+use crate::ToolSearchSource;
 use crate::ToolSpec;
 use crate::ToolsConfig;
 use crate::ViewImageToolOptions;
 use crate::WebSearchToolOptions;
 #[cfg(feature = "code-mode")]
-use crate::collect_code_mode_tool_definitions;
-use crate::collect_tool_search_app_infos;
+use crate::collect_code_mode_exec_prompt_tool_definitions;
+use crate::collect_tool_search_source_infos;
 use crate::collect_tool_suggest_entries;
 use crate::create_apply_patch_freeform_tool;
 use crate::create_apply_patch_json_tool;
@@ -64,6 +64,7 @@ use crate::tool_registry_plan_types::agent_type_description;
 use codex_protocol::openai_models::ApplyPatchToolType;
 use codex_protocol::openai_models::ConfigShellToolType;
 use rmcp::model::Tool as McpTool;
+#[cfg(feature = "code-mode")]
 use std::collections::BTreeMap;
 
 pub fn build_tool_registry_plan(
@@ -97,17 +98,14 @@ pub fn build_tool_registry_plan(
                 ..params
             },
         );
-        let mut enabled_tools = collect_code_mode_tool_definitions(
+        let mut enabled_tools = collect_code_mode_exec_prompt_tool_definitions(
             nested_plan
                 .specs
                 .iter()
                 .map(|configured_tool| &configured_tool.spec),
-        )
-        .into_iter()
-        .map(|tool| (tool.name, tool.description))
-        .collect::<Vec<_>>();
-        enabled_tools.sort_by(|(left_name, _), (right_name, _)| {
-            compare_code_mode_tool_names(left_name, right_name, &namespace_descriptions)
+        );
+        enabled_tools.sort_by(|left, right| {
+            compare_code_mode_tool_names(&left.name, &right.name, &namespace_descriptions)
         });
         plan.push_spec(
             create_code_mode_tool(
@@ -254,24 +252,24 @@ pub fn build_tool_registry_plan(
     }
 
     if config.search_tool
-        && let Some(app_tools) = params.app_tools
+        && let Some(deferred_mcp_tools) = params.deferred_mcp_tools
     {
-        let search_app_infos = collect_tool_search_app_infos(
-            app_tools.iter().map(|tool| ToolSearchAppSource {
-                server_name: tool.server_name,
-                connector_name: tool.connector_name,
-                connector_description: tool.connector_description,
-            }),
-            params.codex_apps_mcp_server_name,
-        );
+        let search_source_infos =
+            collect_tool_search_source_infos(deferred_mcp_tools.iter().map(|tool| {
+                ToolSearchSource {
+                    server_name: tool.server_name,
+                    connector_name: tool.connector_name,
+                    connector_description: tool.connector_description,
+                }
+            }));
         plan.push_spec(
-            create_tool_search_tool(&search_app_infos, TOOL_SEARCH_DEFAULT_LIMIT),
+            create_tool_search_tool(&search_source_infos, TOOL_SEARCH_DEFAULT_LIMIT),
             /*supports_parallel_tool_calls*/ true,
             config.code_mode_enabled,
         );
         plan.register_handler(TOOL_SEARCH_TOOL_NAME, ToolHandlerKind::ToolSearch);
 
-        for tool in app_tools {
+        for tool in deferred_mcp_tools {
             plan.register_handler(
                 format!("{}:{}", tool.tool_namespace, tool.tool_name),
                 ToolHandlerKind::Mcp,
@@ -524,6 +522,7 @@ pub fn build_tool_registry_plan(
     plan
 }
 
+#[cfg(feature = "code-mode")]
 fn compare_code_mode_tool_names(
     left_name: &str,
     right_name: &str,
@@ -541,6 +540,7 @@ fn compare_code_mode_tool_names(
         .then_with(|| left_name.cmp(right_name))
 }
 
+#[cfg(feature = "code-mode")]
 fn code_mode_namespace_name<'a>(
     name: &str,
     namespace_descriptions: &'a BTreeMap<String, codex_code_mode::ToolNamespaceDescription>,
@@ -550,6 +550,7 @@ fn code_mode_namespace_name<'a>(
         .map(|namespace_description| namespace_description.name.as_str())
 }
 
+#[cfg(feature = "code-mode")]
 fn code_mode_function_name<'a>(name: &'a str, namespace: Option<&str>) -> &'a str {
     namespace
         .and_then(|namespace| {

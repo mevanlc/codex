@@ -133,7 +133,7 @@ Example with notification opt-out:
 
 ## API Overview
 
-- `thread/start` — create a new thread; emits `thread/started` (including the current `thread.status`) and auto-subscribes you to turn/item events for that thread. When the request includes a `cwd` and the resolved sandbox is `workspace-write` or full access, app-server also marks that project as trusted in the user `config.toml`.
+- `thread/start` — create a new thread; emits `thread/started` (including the current `thread.status`) and auto-subscribes you to turn/item events for that thread. When the request includes a `cwd` and the resolved sandbox is `workspace-write` or full access, app-server also marks that project as trusted in the user `config.toml`. Pass `sessionStartSource: "clear"` when starting a replacement thread after clearing the current session so `SessionStart` hooks receive `source: "clear"` instead of the default `"startup"`.
 - `thread/resume` — reopen an existing thread by id so subsequent `turn/start` calls append to it.
 - `thread/fork` — fork an existing thread into a new thread id by copying the stored history; if the source thread is currently mid-turn, the fork records the same interruption marker as `turn/interrupt` instead of inheriting an unmarked partial turn suffix. The returned `thread.forkedFromId` points at the source thread when known. Accepts `ephemeral: true` for an in-memory temporary fork, emits `thread/started` (including the current `thread.status`), and auto-subscribes you to turn/item events for the new thread.
 - `thread/list` — page through stored rollouts; supports cursor-based pagination and optional `modelProviders`, `sourceKinds`, `archived`, `cwd`, and `searchTerm` filters. Each returned `thread` includes `status` (`ThreadStatus`), defaulting to `notLoaded` when the thread is not currently loaded.
@@ -212,6 +212,7 @@ Start a fresh thread when you need a new Codex conversation.
     "sandbox": "workspaceWrite",
     "personality": "friendly",
     "serviceName": "my_app_server_client", // optional metrics tag (`service_name`)
+    "sessionStartSource": "startup", // optional: "startup" (default) or "clear"
     // Experimental: requires opt-in
     "dynamicTools": [
         {
@@ -601,6 +602,9 @@ Then send `offer.sdp` to app-server. Core uses `experimental_realtime_ws_backend
 } }
 ```
 
+Omit `prompt` to use Codex's default realtime backend prompt. Send `prompt: null` or
+`prompt: ""` when the session should start without that default backend prompt.
+
 ```javascript
 await pc.setRemoteDescription({
   type: "answer",
@@ -963,7 +967,7 @@ All items emit shared lifecycle events:
 - `item/autoApprovalReview/started` — [UNSTABLE] temporary guardian notification carrying `{threadId, turnId, targetItemId, review, action}` when guardian approval review begins. This shape is expected to change soon.
 - `item/autoApprovalReview/completed` — [UNSTABLE] temporary guardian notification carrying `{threadId, turnId, targetItemId, review, action}` when guardian approval review resolves. This shape is expected to change soon.
 
-`review` is [UNSTABLE] and currently has `{status, riskScore?, riskLevel?, rationale?}`, where `status` is one of `inProgress`, `approved`, `denied`, or `aborted`. `action` is a tagged union with `type: "command" | "execve" | "applyPatch" | "networkAccess" | "mcpToolCall"`. Command-like actions include a `source` discriminator (`"shell"` or `"unifiedExec"`). These notifications are separate from the target item's own `item/completed` lifecycle and are intentionally temporary while the guardian app protocol is still being designed.
+`review` is [UNSTABLE] and currently has `{status, riskLevel?, userAuthorization?, rationale?}`, where `status` is one of `inProgress`, `approved`, `denied`, or `aborted`. `riskLevel` is one of `"low"`, `"medium"`, `"high"`, or `"critical"` when present. `userAuthorization` is one of `"unknown"`, `"low"`, `"medium"`, or `"high"` when present. `action` is a tagged union with `type: "command" | "execve" | "applyPatch" | "networkAccess" | "mcpToolCall"`. Command-like actions include a `source` discriminator (`"shell"` or `"unifiedExec"`). These notifications are separate from the target item's own `item/completed` lifecycle and are intentionally temporary while the guardian app protocol is still being designed.
 
 There are additional item-specific events:
 
