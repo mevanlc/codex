@@ -27,16 +27,18 @@ jobs:
       - name: Compute version
         id: version
         run: |
-          # Find the tag with the most commits in common with HEAD
+          set -euo pipefail
+
+          upstream_url="https://github.com/openai/codex.git"
+          git fetch --force --prune "$upstream_url" 'refs/tags/*:refs/tags/upstream/*'
+
+          # Find the upstream tag with the most commits in common with HEAD
           # (i.e. whose merge-base with HEAD is closest to HEAD).
           best_tag=""
           best_dist=999999999
           short=$(git rev-parse --short=7 HEAD)
 
-          for tag in $(git tag -l); do
-            # Only consider tags containing a rust-v version
-            case "$tag" in *rust-v*) ;; *) continue ;; esac
-
+          while IFS= read -r tag; do
             mb=$(git merge-base HEAD "$tag" 2>/dev/null) || continue
             dist=$(git rev-list --count "$mb..HEAD" 2>/dev/null) || continue
 
@@ -44,18 +46,18 @@ jobs:
               best_dist=$dist
               best_tag=$tag
             fi
-          done
+          done < <(git tag -l 'upstream/rust-v*')
 
           if [ -n "$best_tag" ]; then
-            # Extract the version portion after 'rust-v'
-            tag_ver=$(echo "$best_tag" | sed 's/.*rust-v//')
+            # Extract the version portion after 'upstream/rust-v'
+            tag_ver=${best_tag#upstream/rust-v}
             version="${tag_ver}-${short}"
           else
             version="0.0.0-${short}"
           fi
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Version: $version (tag: ${best_tag:-none}, distance: ${best_dist})"
+          echo "Version: $version (upstream tag: ${best_tag:-none}, distance: ${best_dist})"
 
       - uses: dtolnay/rust-toolchain@master
         with:
