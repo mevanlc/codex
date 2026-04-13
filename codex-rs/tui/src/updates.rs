@@ -175,12 +175,13 @@ fn parse_version(v: &str) -> Option<Version> {
 }
 
 fn is_source_build_version(version: &str) -> bool {
-    parse_version(version) == Some((0, 0, 0))
+    parse_version(version) == Some(Version::new(0, 0, 0))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn extract_version_from_brew_api_json() {
@@ -238,5 +239,11 @@ mod tests {
             parse_version("v0.123.0-a1b2c3d").map(|v| v.to_string()),
             Some("0.123.0-a1b2c3d".to_string())
         );
+    }
+
+    #[test]
+    fn source_build_version_detection_uses_semver() {
+        assert_eq!(is_source_build_version("0.0.0"), true);
+        assert_eq!(is_source_build_version("0.121.0-alpha.3-8957130"), false);
     }
 }
