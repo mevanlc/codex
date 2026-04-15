@@ -492,6 +492,9 @@
             "steer": {
               "type": "boolean"
             },
+            "telepathy": {
+              "type": "boolean"
+            },
             "tool_call_mcp_elicitation": {
               "type": "boolean"
             },
@@ -814,7 +817,8 @@
     },
     "MarketplaceSourceType": {
       "enum": [
-        "git"
+        "git",
+        "local"
       ],
       "type": "string"
     },
@@ -1528,6 +1532,10 @@
           "default": null,
           "format": "double",
           "type": "number"
+        },
+        "supports_parallel_tool_calls": {
+          "default": null,
+          "type": "boolean"
         },
         "tool_timeout_sec": {
           "default": null,
@@ -2353,6 +2361,9 @@
           "type": "boolean"
         },
         "steer": {
+          "type": "boolean"
+        },
+        "telepathy": {
           "type": "boolean"
         },
         "tool_call_mcp_elicitation": {
