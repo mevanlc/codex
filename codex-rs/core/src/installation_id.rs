@@ -29,7 +29,11 @@ pub async fn resolve_installation_id(codex_home: &AbsolutePathBuf) -> Result<Str
         }
 
         let mut file = options.open(&path)?;
-        file.lock()?;
+        // Best-effort advisory lock; some Android filesystems (f2fs on certain
+        // kernels) return EOPNOTSUPP for flock(). The lock only prevents two
+        // concurrent starts from racing on UUID generation — if it fails, the
+        // later writer wins, which is acceptable.
+        let _ = file.lock();
 
         #[cfg(unix)]
         {
