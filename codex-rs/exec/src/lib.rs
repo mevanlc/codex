@@ -481,6 +481,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         loader_overrides: run_loader_overrides,
         cloud_requirements: run_cloud_requirements,
         feedback: CodexFeedback::new(),
+        log_db: None,
         environment_manager: std::sync::Arc::new(EnvironmentManager::from_env_with_runtime_paths(
             Some(local_runtime_paths),
         )),
@@ -1233,6 +1234,7 @@ async fn resolve_resume_thread_id(
                         cursor,
                         limit: Some(100),
                         sort_key: Some(ThreadSortKey::UpdatedAt),
+                        sort_direction: None,
                         model_providers: model_providers.clone(),
                         source_kinds: Some(all_thread_source_kinds()),
                         archived: Some(false),
@@ -1295,6 +1297,7 @@ async fn resolve_resume_thread_id(
                     cursor,
                     limit: Some(100),
                     sort_key: Some(ThreadSortKey::UpdatedAt),
+                    sort_direction: None,
                     model_providers: model_providers.clone(),
                     source_kinds: Some(all_thread_source_kinds()),
                     archived: Some(false),

@@ -235,6 +235,7 @@ async fn rate_limit_snapshot_keeps_prior_credits_when_missing_from_headers() {
             balance: Some("17.5".to_string()),
         }),
         plan_type: None,
+        rate_limit_reached_type: None,
     }));
     let initial_balance = chat
         .rate_limit_snapshots_by_limit_id
@@ -254,6 +255,7 @@ async fn rate_limit_snapshot_keeps_prior_credits_when_missing_from_headers() {
         secondary: None,
         credits: None,
         plan_type: None,
+        rate_limit_reached_type: None,
     }));
 
     let display = chat
@@ -292,6 +294,7 @@ async fn rate_limit_snapshot_updates_and_retains_plan_type() {
         }),
         credits: None,
         plan_type: Some(PlanType::Plus),
+        rate_limit_reached_type: None,
     }));
     assert_eq!(chat.plan_type, Some(PlanType::Plus));
 
@@ -310,6 +313,7 @@ async fn rate_limit_snapshot_updates_and_retains_plan_type() {
         }),
         credits: None,
         plan_type: Some(PlanType::Pro),
+        rate_limit_reached_type: None,
     }));
     assert_eq!(chat.plan_type, Some(PlanType::Pro));
 
@@ -328,6 +332,7 @@ async fn rate_limit_snapshot_updates_and_retains_plan_type() {
         }),
         credits: None,
         plan_type: None,
+        rate_limit_reached_type: None,
     }));
     assert_eq!(chat.plan_type, Some(PlanType::Pro));
 }
@@ -351,6 +356,7 @@ async fn rate_limit_snapshots_keep_separate_entries_per_limit_id() {
             balance: Some("5.00".to_string()),
         }),
         plan_type: Some(PlanType::Pro),
+        rate_limit_reached_type: None,
     }));
 
     chat.on_rate_limit_snapshot(Some(RateLimitSnapshot {
@@ -364,6 +370,7 @@ async fn rate_limit_snapshots_keep_separate_entries_per_limit_id() {
         secondary: None,
         credits: None,
         plan_type: Some(PlanType::Pro),
+        rate_limit_reached_type: None,
     }));
 
     let codex = chat
@@ -416,6 +423,7 @@ async fn rate_limit_switch_prompt_skips_non_codex_limit() {
         secondary: None,
         credits: None,
         plan_type: None,
+        rate_limit_reached_type: None,
     }));
 
     assert!(matches!(
@@ -915,24 +923,6 @@ async fn status_line_legacy_context_usage_renders_context_used_percent() {
 }
 
 #[tokio::test]
-async fn status_line_context_remaining_percent_renders_labeled_percent() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.thread_id = Some(ThreadId::new());
-    chat.config.tui_status_line = Some(vec!["context-remaining-percent".to_string()]);
-
-    chat.refresh_status_line();
-
-    assert_eq!(
-        status_line_text(&chat),
-        Some("Context 100% left".to_string())
-    );
-    assert!(
-        drain_insert_history(&mut rx).is_empty(),
-        "context-remaining-percent should remain a valid status line item"
-    );
-}
-
-#[tokio::test]
 async fn status_line_branch_state_resets_when_git_branch_disabled() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.status_line_branch = Some("main".to_string());
@@ -1200,7 +1190,7 @@ async fn status_line_model_with_reasoning_fast_footer_snapshot() {
 }
 
 #[tokio::test]
-async fn status_line_model_with_reasoning_context_remaining_percent_footer_snapshot() {
+async fn status_line_model_with_reasoning_context_remaining_footer_snapshot() {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -1211,7 +1201,7 @@ async fn status_line_model_with_reasoning_context_remaining_percent_footer_snaps
     chat.config.cwd = test_project_path().abs();
     chat.config.tui_status_line = Some(vec![
         "model-with-reasoning".to_string(),
-        "context-remaining-percent".to_string(),
+        "context-remaining".to_string(),
         "current-dir".to_string(),
     ]);
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::XHigh));
@@ -1228,7 +1218,7 @@ async fn status_line_model_with_reasoning_context_remaining_percent_footer_snaps
         .draw(|f| chat.render(f.area(), f.buffer_mut()))
         .expect("draw model-with-reasoning footer");
     assert_chatwidget_snapshot!(
-        "status_line_model_with_reasoning_context_remaining_percent_footer",
+        "status_line_model_with_reasoning_context_remaining_footer",
         normalized_backend_snapshot(terminal.backend())
     );
 }
@@ -1443,6 +1433,7 @@ async fn user_prompt_submit_app_server_hook_notifications_render_snapshot() {
                 execution_mode: AppServerHookExecutionMode::Sync,
                 scope: AppServerHookScope::Turn,
                 source_path: PathBuf::from(test_path_display("/tmp/hooks.json")).abs(),
+                source: codex_app_server_protocol::HookSource::User,
                 display_order: 0,
                 status: AppServerHookRunStatus::Running,
                 status_message: Some("checking go-workflow input policy".to_string()),
@@ -1465,6 +1456,7 @@ async fn user_prompt_submit_app_server_hook_notifications_render_snapshot() {
                 execution_mode: AppServerHookExecutionMode::Sync,
                 scope: AppServerHookScope::Turn,
                 source_path: PathBuf::from(test_path_display("/tmp/hooks.json")).abs(),
+                source: codex_app_server_protocol::HookSource::User,
                 display_order: 0,
                 status: AppServerHookRunStatus::Stopped,
                 status_message: Some("checking go-workflow input policy".to_string()),
@@ -1535,6 +1527,7 @@ async fn completed_hook_with_no_entries_stays_out_of_history() {
                 execution_mode: codex_protocol::protocol::HookExecutionMode::Sync,
                 scope: codex_protocol::protocol::HookScope::Turn,
                 source_path: PathBuf::from(test_path_display("/tmp/hooks.json")).abs(),
+                source: codex_protocol::protocol::HookSource::User,
                 display_order: 0,
                 status: codex_protocol::protocol::HookRunStatus::Running,
                 status_message: None,
@@ -1560,6 +1553,7 @@ async fn completed_hook_with_no_entries_stays_out_of_history() {
                 execution_mode: codex_protocol::protocol::HookExecutionMode::Sync,
                 scope: codex_protocol::protocol::HookScope::Turn,
                 source_path: PathBuf::from(test_path_display("/tmp/hooks.json")).abs(),
+                source: codex_protocol::protocol::HookSource::User,
                 display_order: 0,
                 status: codex_protocol::protocol::HookRunStatus::Completed,
                 status_message: None,
@@ -2035,6 +2029,7 @@ fn hook_run_summary(
         execution_mode: codex_protocol::protocol::HookExecutionMode::Sync,
         scope: codex_protocol::protocol::HookScope::Turn,
         source_path: PathBuf::from(test_path_display("/tmp/hooks.json")).abs(),
+        source: codex_protocol::protocol::HookSource::User,
         display_order: 0,
         status,
         status_message: status_message.map(str::to_string),

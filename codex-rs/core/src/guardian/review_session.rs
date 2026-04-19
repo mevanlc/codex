@@ -22,9 +22,6 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use crate::codex::Codex;
-use crate::codex::Session;
-use crate::codex::TurnContext;
 use crate::codex_delegate::run_codex_thread_interactive;
 use crate::config::Config;
 use crate::config::Constrained;
@@ -32,6 +29,9 @@ use crate::config::ManagedFeatures;
 use crate::config::NetworkProxySpec;
 use crate::config::Permissions;
 use crate::rollout::recorder::RolloutRecorder;
+use crate::session::Codex;
+use crate::session::session::Session;
+use crate::session::turn_context::TurnContext;
 use codex_config::types::McpServerConfig;
 use codex_features::Feature;
 use codex_model_provider_info::ModelProviderInfo;
@@ -823,9 +823,9 @@ async fn interrupt_and_drain_turn(codex: &Codex) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn guardian_review_session_config_change_invalidates_cached_session() {
-        let parent_config = crate::config::test_config();
+    #[tokio::test]
+    async fn guardian_review_session_config_change_invalidates_cached_session() {
+        let parent_config = crate::config::test_config().await;
         let cached_spawn_config = build_guardian_review_session_config(
             &parent_config,
             /*live_network_config*/ None,
@@ -855,9 +855,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn guardian_review_session_config_disables_hooks() {
-        let mut parent_config = crate::config::test_config();
+    #[tokio::test]
+    async fn guardian_review_session_config_disables_hooks() {
+        let mut parent_config = crate::config::test_config().await;
         parent_config
             .features
             .enable(Feature::CodexHooks)

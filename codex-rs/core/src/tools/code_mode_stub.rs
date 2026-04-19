@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use serde_json::Value as JsonValue;
 
-use crate::codex::Session;
-use crate::codex::TurnContext;
+use crate::session::session::Session;
+use crate::session::turn_context::TurnContext;
 use crate::tools::ToolRouter;
 use crate::tools::context::SharedTurnDiffTracker;
 
