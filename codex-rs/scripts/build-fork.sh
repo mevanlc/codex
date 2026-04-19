@@ -241,7 +241,11 @@ if [[ "$(uname -m)" == "aarch64" ]] && [[ -f /system/build.prop ]]; then
 		curl -sL -o "$V8_BINDING" "${V8_PREBUILT_BASE}/${V8_PREBUILT_TAG}/src_binding_release_aarch64-linux-android.rs"
 	fi
 	export RUSTY_V8_SRC_BINDING_PATH="$V8_BINDING"
-	export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-lc++_static -C link-arg=-lc++abi"
+	# V8's arm64 codegen references __clear_cache; rustc passes -nodefaultlibs
+	# so clang's compiler-rt is not linked automatically. Link the builtins
+	# archive by absolute path (resolved from clang's resource dir).
+	clang_rt_builtins="$(clang --print-resource-dir)/lib/linux/libclang_rt.builtins-aarch64-android.a"
+	export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-lc++_static -C link-arg=-lc++abi -C link-arg=${clang_rt_builtins}"
 	echo "Termux detected: using prebuilt V8 from ${V8_PREBUILT_TAG}"
 fi
 
