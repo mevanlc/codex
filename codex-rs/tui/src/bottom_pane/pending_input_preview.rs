@@ -10,14 +10,14 @@ use crate::render::renderable::Renderable;
 use crate::wrapping::RtOptions;
 use crate::wrapping::adaptive_wrap_lines;
 
-/// Widget that displays pending steers plus follow-up inputs held while a turn is in progress.
+/// Widget that displays retractable follow-up inputs held while a turn is in progress.
 ///
 /// The widget renders pending steers first, then rejected steers that will be
 /// resubmitted at end of turn, then ordinary queued user messages. Pending
 /// steers explain that they will be submitted after the next tool/result
 /// boundary unless the user invokes the interrupt binding to send them
-/// immediately. The edit hint at the bottom only appears when there are actual
-/// queued user inputs to pop back into the composer. Because some terminals
+/// immediately. The edit hint at the bottom appears whenever there are pending
+/// or queued user inputs to pop back into the composer. Because some terminals
 /// intercept certain modifier-key combinations, the displayed binding is
 /// configurable via [`set_edit_binding`](Self::set_edit_binding).
 pub(crate) struct PendingInputPreview {
@@ -74,6 +74,12 @@ impl PendingInputPreview {
             std::iter::once(Line::from(spans)),
             RtOptions::new(width as usize).subsequent_indent(Line::from("  ".dim())),
         ));
+    }
+
+    fn has_retractable_inputs(&self) -> bool {
+        !self.pending_steers.is_empty()
+            || !self.rejected_steers.is_empty()
+            || !self.queued_messages.is_empty()
     }
 
     fn as_renderable(&self, width: u16) -> Box<dyn Renderable> {
@@ -151,7 +157,7 @@ impl PendingInputPreview {
             }
         }
 
-        if !self.queued_messages.is_empty()
+        if self.has_retractable_inputs()
             && let Some(edit_binding) = self.edit_binding
         {
             lines.push(
