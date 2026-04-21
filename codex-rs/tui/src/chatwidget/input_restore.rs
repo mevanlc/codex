@@ -60,7 +60,7 @@ impl ChatWidget {
         }
     }
 
-    pub(super) fn pop_latest_queued_user_message(&mut self) -> Option<UserMessage> {
+    pub(super) fn pop_latest_retractable_user_message(&mut self) -> Option<UserMessage> {
         if let Some(user_message) = self.input_queue.queued_user_messages.pop_back() {
             let history_record = self
                 .input_queue
@@ -71,14 +71,18 @@ impl ChatWidget {
                 user_message.into_user_message(),
                 &history_record,
             ))
-        } else {
-            let user_message = self.input_queue.rejected_steers_queue.pop_back()?;
+        } else if let Some(user_message) = self.input_queue.rejected_steers_queue.pop_back() {
             let history_record = self
                 .input_queue
                 .rejected_steer_history_records
                 .pop_back()
                 .unwrap_or(UserMessageHistoryRecord::UserMessageText);
             Some(user_message_for_restore(user_message, &history_record))
+        } else {
+            self.input_queue
+                .pending_steers
+                .pop_back()
+                .map(|pending| user_message_for_restore(pending.user_message, &pending.history_record))
         }
     }
 

@@ -767,6 +767,26 @@ async fn manual_interrupt_restores_pending_steers_to_composer() {
 }
 
 #[tokio::test]
+async fn queued_message_shortcut_restores_pending_steer_to_composer() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.chat_keymap.edit_queued_message = vec![crate::key_hint::alt(KeyCode::Up)];
+    chat.queued_message_edit_hint_binding = Some(crate::key_hint::alt(KeyCode::Up));
+    chat.bottom_pane
+        .set_queued_message_edit_binding(chat.queued_message_edit_hint_binding);
+    chat.bottom_pane.set_task_running(/*running*/ true);
+
+    chat.input_queue
+        .pending_steers
+        .push_back(pending_steer("pending steer"));
+    chat.refresh_pending_input_preview();
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
+
+    assert!(chat.input_queue.pending_steers.is_empty());
+    assert_eq!(chat.bottom_pane.composer_text(), "pending steer");
+}
+
+#[tokio::test]
 async fn esc_interrupt_sends_all_pending_steers_immediately_and_keeps_existing_draft() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
