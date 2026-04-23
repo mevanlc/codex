@@ -37,6 +37,8 @@ pub enum ConfigEdit {
     SetNoticeHideFullAccessWarning(bool),
     /// Toggle the Windows world-writable directories warning acknowledgement flag.
     SetNoticeHideWorldWritableWarning(bool),
+    /// Toggle the opt-out marker for Codex-managed fast defaults.
+    SetNoticeFastDefaultOptOut(bool),
     /// Toggle the rate limit model nudge acknowledgement flag.
     SetNoticeHideRateLimitModelNudge(bool),
     /// Toggle the Windows onboarding acknowledgement flag.
@@ -136,6 +138,7 @@ pub fn model_availability_nux_count_edits(shown_count: &HashMap<String, u32>) ->
 mod document_helpers {
     use codex_config::types::AppToolApproval;
     use codex_config::types::McpServerConfig;
+    use codex_config::types::McpServerEnvVar;
     use codex_config::types::McpServerToolConfig;
     use codex_config::types::McpServerTransportConfig;
     use toml_edit::Array as TomlArray;
@@ -198,7 +201,7 @@ mod document_helpers {
                     entry["env"] = table_from_pairs(env.iter());
                 }
                 if !env_vars.is_empty() {
-                    entry["env_vars"] = array_from_iter(env_vars.iter().cloned());
+                    entry["env_vars"] = array_from_env_vars(env_vars);
                 }
                 if let Some(cwd) = cwd {
                     entry["cwd"] = value(cwd.to_string_lossy().to_string());
@@ -348,6 +351,24 @@ mod document_helpers {
         TomlItem::Value(array.into())
     }
 
+    fn array_from_env_vars(env_vars: &[McpServerEnvVar]) -> TomlItem {
+        let mut array = TomlArray::new();
+        for env_var in env_vars {
+            match env_var {
+                McpServerEnvVar::Name(name) => array.push(name.clone()),
+                McpServerEnvVar::Config { name, source } => {
+                    let mut table = InlineTable::new();
+                    table.insert("name", name.clone().into());
+                    if let Some(source) = source {
+                        table.insert("source", source.clone().into());
+                    }
+                    array.push(table);
+                }
+            }
+        }
+        TomlItem::Value(array.into())
+    }
+
     fn table_from_pairs<'a, I>(pairs: I) -> TomlItem
     where
         I: IntoIterator<Item = (&'a String, &'a String)>,
@@ -416,6 +437,11 @@ impl ConfigDocument {
                 Scope::Global,
                 &[NOTICE_TABLE_KEY, "hide_world_writable_warning"],
                 value(*acknowledged),
+            )),
+            ConfigEdit::SetNoticeFastDefaultOptOut(opted_out) => Ok(self.write_value(
+                Scope::Global,
+                &[NOTICE_TABLE_KEY, "fast_default_opt_out"],
+                value(*opted_out),
             )),
             ConfigEdit::SetNoticeHideRateLimitModelNudge(acknowledged) => Ok(self.write_value(
                 Scope::Global,
@@ -956,6 +982,12 @@ impl ConfigEditsBuilder {
     pub fn set_hide_world_writable_warning(mut self, acknowledged: bool) -> Self {
         self.edits
             .push(ConfigEdit::SetNoticeHideWorldWritableWarning(acknowledged));
+        self
+    }
+
+    pub fn set_fast_default_opt_out(mut self, opted_out: bool) -> Self {
+        self.edits
+            .push(ConfigEdit::SetNoticeFastDefaultOptOut(opted_out));
         self
     }
 

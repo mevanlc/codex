@@ -6,6 +6,7 @@
 pub use crate::mcp_types::AppToolApproval;
 pub use crate::mcp_types::McpServerConfig;
 pub use crate::mcp_types::McpServerDisabledReason;
+pub use crate::mcp_types::McpServerEnvVar;
 pub use crate::mcp_types::McpServerToolConfig;
 pub use crate::mcp_types::McpServerTransportConfig;
 pub use crate::mcp_types::RawMcpServerConfig;
@@ -637,6 +638,8 @@ pub struct Notice {
     pub hide_full_access_warning: Option<bool>,
     /// Tracks whether the user has acknowledged the Windows world-writable directories warning.
     pub hide_world_writable_warning: Option<bool>,
+    /// Tracks whether the user opted out of Codex-managed fast defaults.
+    pub fast_default_opt_out: Option<bool>,
     /// Tracks whether the user opted out of the rate limit model switch reminder.
     pub hide_rate_limit_model_nudge: Option<bool>,
     /// Tracks whether the user has seen the model migration prompt

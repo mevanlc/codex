@@ -1423,23 +1423,36 @@ fn search_tool_registers_for_deferred_dynamic_tools() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
     });
-    let dynamic_tool = DynamicToolSpec {
-        name: "automation_update".to_string(),
-        description: "Create, update, view, or delete recurring automations.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "mode": { "type": "string" },
-            },
-        }),
-        defer_loading: true,
-    };
+    let dynamic_tools = vec![
+        DynamicToolSpec {
+            namespace: Some("codex_app".to_string()),
+            name: "automation_update".to_string(),
+            description: "Create, update, view, or delete recurring automations.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "mode": { "type": "string" },
+                },
+            }),
+            defer_loading: true,
+        },
+        DynamicToolSpec {
+            namespace: Some("codex_app".to_string()),
+            name: "automation_list".to_string(),
+            description: "List recurring automations.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+            }),
+            defer_loading: true,
+        },
+    ];
 
     let (tools, handlers) = build_specs(
         &tools_config,
         /*mcp_tools*/ None,
         /*deferred_mcp_tools*/ None,
-        &[dynamic_tool],
+        &dynamic_tools,
     );
 
     let search_tool = find_tool(&tools, TOOL_SEARCH_TOOL_NAME);
@@ -1447,13 +1460,35 @@ fn search_tool_registers_for_deferred_dynamic_tools() {
         panic!("expected tool_search tool");
     };
     assert!(description.contains("- Dynamic tools: Tools provided by the current Codex thread."));
-    assert_contains_tool_names(&tools, &[TOOL_SEARCH_TOOL_NAME, "automation_update"]);
+    assert_contains_tool_names(&tools, &[TOOL_SEARCH_TOOL_NAME, "codex_app"]);
+    assert_eq!(
+        tools
+            .iter()
+            .filter(|tool| tool.name() == "codex_app")
+            .count(),
+        1
+    );
+    assert_eq!(
+        namespace_function_names(&tools, "codex_app"),
+        vec![
+            "automation_update".to_string(),
+            "automation_list".to_string()
+        ]
+    );
+    for tool_name in ["automation_update", "automation_list"] {
+        let dynamic_tool = find_namespace_function_tool(&tools, "codex_app", tool_name);
+        assert_eq!(dynamic_tool.defer_loading, Some(true));
+    }
     assert!(handlers.contains(&ToolHandlerSpec {
         name: ToolName::plain(TOOL_SEARCH_TOOL_NAME),
         kind: ToolHandlerKind::ToolSearch,
     }));
     assert!(handlers.contains(&ToolHandlerSpec {
-        name: ToolName::plain("automation_update"),
+        name: ToolName::namespaced("codex_app", "automation_update"),
+        kind: ToolHandlerKind::DynamicTool,
+    }));
+    assert!(handlers.contains(&ToolHandlerSpec {
+        name: ToolName::namespaced("codex_app", "automation_list"),
         kind: ToolHandlerKind::DynamicTool,
     }));
 }
@@ -1647,6 +1682,7 @@ fn tool_suggest_description_lists_discoverable_tools() {
     );
 }
 
+#[cfg(feature = "code-mode")]
 #[test]
 fn code_mode_augments_mcp_tool_descriptions_with_namespaced_sample() {
     let model_info = model_info();
@@ -1701,6 +1737,7 @@ declare const tools: { mcp__sample__echo(args: { message: string; }): Promise<Ca
     );
 }
 
+#[cfg(feature = "code-mode")]
 #[test]
 fn code_mode_preserves_nullable_and_literal_mcp_input_shapes() {
     let model_info = model_info();
@@ -1784,6 +1821,7 @@ declare const tools: { mcp__sample__fn(args: { open?: Array<{ lineno?: number | 
     ));
 }
 
+#[cfg(feature = "code-mode")]
 #[test]
 fn code_mode_augments_builtin_tool_descriptions_with_typed_sample() {
     let model_info = model_info();
@@ -1820,6 +1858,7 @@ fn code_mode_augments_builtin_tool_descriptions_with_typed_sample() {
     );
 }
 
+#[cfg(feature = "code-mode")]
 #[test]
 fn code_mode_only_exec_description_includes_full_nested_tool_details() {
     let model_info = model_info();
@@ -1858,6 +1897,7 @@ fn code_mode_only_exec_description_includes_full_nested_tool_details() {
     assert!(description.contains("### `view_image`"));
 }
 
+#[cfg(feature = "code-mode")]
 #[test]
 fn code_mode_exec_description_omits_nested_tool_details_when_not_code_mode_only() {
     let model_info = model_info();
@@ -2013,6 +2053,7 @@ fn mcp_tool(name: &str, description: &str, input_schema: serde_json::Value) -> r
     }
 }
 
+#[cfg(feature = "code-mode")]
 #[test]
 fn code_mode_augments_mcp_tool_descriptions_with_structured_output_sample() {
     let model_info = model_info();
