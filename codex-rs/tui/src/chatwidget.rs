@@ -941,8 +941,9 @@ pub(crate) struct ChatWidget {
     // When set, the next interrupt should resubmit all pending steers as one
     // fresh user turn instead of restoring them into the composer.
     submit_pending_steers_after_interrupt: bool,
-    /// Terminal-appropriate keybinding for popping the most-recently queued
-    /// message back into the composer.  Determined once at construction time via
+    /// Terminal-appropriate keybinding for popping the most-recently queued or
+    /// pending follow-up message back into the composer. Determined once at
+    /// construction time via
     /// [`queued_message_edit_binding_for_terminal`] and propagated to
     /// `BottomPane` so the hint text matches the actual shortcut.
     queued_message_edit_binding: KeyBinding,
@@ -2701,6 +2702,10 @@ impl ChatWidget {
         !self.rejected_steers_queue.is_empty() || !self.queued_user_messages.is_empty()
     }
 
+    fn has_retractable_follow_up_messages(&self) -> bool {
+        !self.pending_steers.is_empty() || self.has_queued_follow_up_messages()
+    }
+
     fn pop_next_queued_user_message(&mut self) -> Option<QueuedUserMessage> {
         if self.rejected_steers_queue.is_empty() {
             self.queued_user_messages.pop_front()
@@ -2711,11 +2716,16 @@ impl ChatWidget {
         }
     }
 
-    fn pop_latest_queued_user_message(&mut self) -> Option<UserMessage> {
+    fn pop_latest_retractable_user_message(&mut self) -> Option<UserMessage> {
         self.queued_user_messages
             .pop_back()
             .map(QueuedUserMessage::into_user_message)
             .or_else(|| self.rejected_steers_queue.pop_back())
+            .or_else(|| {
+                self.pending_steers
+                    .pop_back()
+                    .map(|pending| pending.user_message)
+            })
     }
 
     pub(crate) fn enqueue_rejected_steer(&mut self) -> bool {
@@ -5124,8 +5134,7 @@ impl ChatWidget {
         let prevent_idle_sleep = config.features.enabled(Feature::PreventIdleSleep);
         let mut rng = rand::rng();
         let placeholder = select_chatbox_placeholder(&config, &mut rng);
-        let side_placeholder =
-            SIDE_PLACEHOLDERS[rng.random_range(0..SIDE_PLACEHOLDERS.len())].to_string();
+        let side_placeholder = select_side_chatbox_placeholder(&config, &mut rng);
 
         let model_override = model.as_deref();
         let model_for_header = model
@@ -5407,9 +5416,9 @@ impl ChatWidget {
 
         if key_event.kind == KeyEventKind::Press
             && self.queued_message_edit_binding.is_press(key_event)
-            && self.has_queued_follow_up_messages()
+            && self.has_retractable_follow_up_messages()
         {
-            if let Some(user_message) = self.pop_latest_queued_user_message() {
+            if let Some(user_message) = self.pop_latest_retractable_user_message() {
                 self.restore_user_message_to_composer(user_message);
                 self.refresh_pending_input_preview();
                 self.request_redraw();
@@ -11521,20 +11530,33 @@ const PLACEHOLDERS: [&str; 8] = [
     "Use /skills to list available skills",
 ];
 
-fn select_chatbox_placeholder<R: Rng + ?Sized>(config: &Config, rng: &mut R) -> String {
-    match config.chatbox_placeholder_tips {
-        ChatboxPlaceholderTips::On => {
-            PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string()
-        }
-        ChatboxPlaceholderTips::Off => String::new(),
-    }
-}
-
 const SIDE_PLACEHOLDERS: [&str; 3] = [
     "Check recently modified functions for compatibility",
     "How many files have been modified?",
     "Will this algorithm scale well?",
 ];
+
+fn select_chatbox_placeholder<R: Rng + ?Sized>(config: &Config, rng: &mut R) -> String {
+    select_placeholder_from(&PLACEHOLDERS, config, rng)
+}
+
+fn select_side_chatbox_placeholder<R: Rng + ?Sized>(config: &Config, rng: &mut R) -> String {
+    select_placeholder_from(&SIDE_PLACEHOLDERS, config, rng)
+}
+
+fn select_placeholder_from<R: Rng + ?Sized>(
+    placeholders: &[&str],
+    config: &Config,
+    rng: &mut R,
+) -> String {
+    match config.chatbox_placeholder_tips {
+        ChatboxPlaceholderTips::On => {
+            placeholders[rng.random_range(0..placeholders.len())].to_string()
+        }
+        ChatboxPlaceholderTips::Off => String::new(),
+    }
+}
+
 // Extract the first bold (Markdown) element in the form **...** from `s`.
 // Returns the inner text if found; otherwise `None`.
 fn extract_first_bold(s: &str) -> Option<String> {
