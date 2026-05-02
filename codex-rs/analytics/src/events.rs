@@ -23,7 +23,7 @@ use codex_app_server_protocol::CodexErrorInfo;
 use codex_login::default_client::originator;
 use codex_plugin::PluginTelemetryMetadata;
 use codex_protocol::approvals::NetworkApprovalProtocol;
-use codex_protocol::models::PermissionProfile;
+use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::models::SandboxPermissions;
 use codex_protocol::protocol::GuardianAssessmentOutcome;
 use codex_protocol::protocol::GuardianCommandSource;
@@ -180,17 +180,17 @@ pub enum GuardianApprovalRequestSource {
 pub enum GuardianReviewedAction {
     Shell {
         sandbox_permissions: SandboxPermissions,
-        additional_permissions: Option<PermissionProfile>,
+        additional_permissions: Option<AdditionalPermissionProfile>,
     },
     UnifiedExec {
         sandbox_permissions: SandboxPermissions,
-        additional_permissions: Option<PermissionProfile>,
+        additional_permissions: Option<AdditionalPermissionProfile>,
         tty: bool,
     },
     Execve {
         source: GuardianCommandSource,
         program: String,
-        additional_permissions: Option<PermissionProfile>,
+        additional_permissions: Option<AdditionalPermissionProfile>,
     },
     ApplyPatch {},
     NetworkAccess {
@@ -587,11 +587,16 @@ pub(crate) fn codex_app_metadata(
 }
 
 pub(crate) fn codex_plugin_metadata(plugin: PluginTelemetryMetadata) -> CodexPluginMetadata {
-    let capability_summary = plugin.capability_summary;
+    let PluginTelemetryMetadata {
+        plugin_id,
+        remote_plugin_id,
+        capability_summary,
+    } = plugin;
+    let event_plugin_id = remote_plugin_id.unwrap_or_else(|| plugin_id.as_key());
     CodexPluginMetadata {
-        plugin_id: Some(plugin.plugin_id.as_key()),
-        plugin_name: Some(plugin.plugin_id.plugin_name),
-        marketplace_name: Some(plugin.plugin_id.marketplace_name),
+        plugin_id: Some(event_plugin_id),
+        plugin_name: Some(plugin_id.plugin_name),
+        marketplace_name: Some(plugin_id.marketplace_name),
         has_skills: capability_summary
             .as_ref()
             .map(|summary| summary.has_skills),
@@ -684,6 +689,8 @@ fn analytics_hook_source(source: HookSource) -> &'static str {
         HookSource::Project => "project",
         HookSource::Mdm => "mdm",
         HookSource::SessionFlags => "session_flags",
+        HookSource::Plugin => "plugin",
+        HookSource::CloudRequirements => "cloud_requirements",
         HookSource::LegacyManagedConfigFile => "legacy_managed_config_file",
         HookSource::LegacyManagedConfigMdm => "legacy_managed_config_mdm",
         HookSource::Unknown => "unknown",
