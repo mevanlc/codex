@@ -1,0 +1,217 @@
+name: Android aarch64 Release (A1A)
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Show runner environment
+        run: |
+          uname -a
+          echo "RUNNER_NAME=${RUNNER_NAME:-}"
+          echo "RUNNER_OS=${RUNNER_OS:-}"
+          echo "RUNNER_ARCH=${RUNNER_ARCH:-}"
+          echo "ANDROID_HOME=${ANDROID_HOME:-}"
+
+      - name: Compute version
+        id: version
+        run: |
+          set -euo pipefail
+
+          upstream_url="https://github.com/openai/codex.git"
+          git fetch --force --prune "$upstream_url" 'refs/tags/*:refs/tags/upstream/*'
+
+          # Find the upstream tag with the most commits in common with HEAD
+          # (i.e. whose merge-base with HEAD is closest to HEAD).
+          best_tag=""
+          best_dist=999999999
+          short=$(git rev-parse --short=7 HEAD)
+
+          while IFS= read -r tag; do
+            mb=$(git merge-base HEAD "$tag" 2>/dev/null) || continue
+            dist=$(git rev-list --count "$mb..HEAD" 2>/dev/null) || continue
+
+            if [ "$dist" -lt "$best_dist" ]; then
+              best_dist=$dist
+              best_tag=$tag
+            fi
+          done < <(git tag -l 'upstream/rust-v*')
+
+          if [ -n "$best_tag" ]; then
+            # Extract the version portion after 'upstream/rust-v'
+            tag_ver=${best_tag#upstream/rust-v}
+            version="${tag_ver}-${short}"
+          else
+            version="0.0.0-${short}"
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version (upstream tag: ${best_tag:-none}, distance: ${best_dist})"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.0"
+          targets: aarch64-linux-android
+
+      - name: Install Android NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK 27
+        run: sdkmanager --install "ndk;27.2.12479018"
+
+      - name: Configure Android toolchain
+        run: |
+          set -euo pipefail
+          NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          HOST_TAG="linux-x86_64"
+          if [ -d "$NDK_HOME/toolchains/llvm/prebuilt/linux-aarch64" ]; then
+            HOST_TAG="linux-aarch64"
+          fi
+          TOOLCHAIN="$NDK_HOME/toolchains/llvm/prebuilt/$HOST_TAG"
+          LINKER="$TOOLCHAIN/bin/aarch64-linux-android35-clang"
+          file "$LINKER" || true
+          "$LINKER" --version
+          {
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$LINKER"
+            echo "CC_aarch64_linux_android=$LINKER"
+            echo "AR_aarch64_linux_android=$TOOLCHAIN/bin/llvm-ar"
+            echo "RANLIB_aarch64_linux_android=$TOOLCHAIN/bin/llvm-ranlib"
+            echo "RUSTFLAGS=-C link-arg=$TOOLCHAIN/lib/clang/18/lib/linux/libclang_rt.builtins-aarch64-android.a"
+          } >> "$GITHUB_ENV"
+          # Create prefixed symlinks that vendored OpenSSL expects
+          ln -sf "$TOOLCHAIN/bin/llvm-ranlib" "$TOOLCHAIN/bin/aarch64-linux-android-ranlib"
+          ln -sf "$TOOLCHAIN/bin/llvm-ar"     "$TOOLCHAIN/bin/aarch64-linux-android-ar"
+          echo "$TOOLCHAIN/bin" >> "$GITHUB_PATH"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: codex-rs -> target
+
+      - name: Install sccache
+        uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2
+        with:
+          tool: sccache
+          version: 0.7.5
+
+      - name: Configure sccache backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SCCACHE_CACHE_SIZE=10G" >> "$GITHUB_ENV"
+          if [[ -n "${ACTIONS_CACHE_URL:-}" && -n "${ACTIONS_RUNTIME_TOKEN:-}" ]]; then
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+            echo "Using sccache GitHub backend"
+          else
+            echo "SCCACHE_GHA_ENABLED=false" >> "$GITHUB_ENV"
+            echo "SCCACHE_DIR=${{ github.workspace }}/.sccache" >> "$GITHUB_ENV"
+            echo "Using sccache local disk + actions/cache fallback"
+          fi
+
+      - name: Enable sccache wrapper
+        shell: bash
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+
+      - name: Restore sccache cache (fallback)
+        if: ${{ env.SCCACHE_GHA_ENABLED != 'true' }}
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: ${{ github.workspace }}/.sccache/
+          key: sccache-${{ runner.os }}-aarch64-linux-android-release-${{ hashFiles('codex-rs/Cargo.lock') }}-${{ github.run_id }}
+          restore-keys: |
+            sccache-${{ runner.os }}-aarch64-linux-android-release-${{ hashFiles('codex-rs/Cargo.lock') }}-
+            sccache-${{ runner.os }}-aarch64-linux-android-release-
+
+      - name: Add swap for linker
+        run: |
+          set -euo pipefail
+          SWAPFILE=/mnt/codex-android-release-a1a.swap
+          if ! swapon --show=NAME | grep -Fxq "$SWAPFILE"; then
+            sudo fallocate -l 8G "$SWAPFILE" || sudo dd if=/dev/zero of="$SWAPFILE" bs=1M count=8192
+            sudo chmod 600 "$SWAPFILE"
+            sudo mkswap "$SWAPFILE"
+            sudo swapon "$SWAPFILE"
+          fi
+          free -h
+        working-directory: /
+
+      - name: Build codex
+        env:
+          CARGO_BUILD_JOBS: "2"
+          CARGO_PROFILE_RELEASE_LTO: "thin"
+          RUSTY_V8_ARCHIVE: https://github.com/mevanlc/codex/releases/download/v8-v146.4.0/librusty_v8_release_aarch64-linux-android.a.gz
+          RUSTY_V8_SRC_BINDING_PATH: /tmp/v8_binding.rs
+        run: |
+          set -euxo pipefail
+          trap 'status=$?; echo "Build codex failed with status $status"; echo "V8-related files under target:"; find target -maxdepth 10 \( -path "*/build/v8-*/out/*" -o -name "librusty_v8*.a" -o -name "*.sum" \) -print 2>/dev/null | sort || true; exit "$status"' ERR
+          echo "Rusty V8 environment:"
+          env | sort | grep -E '^(AR_|CC_|CARGO_TARGET_AARCH64|RANLIB_|RUSTFLAGS|RUSTY_V8_)' || true
+          echo "Rusty V8 archive headers:"
+          curl -fLI "$RUSTY_V8_ARCHIVE"
+          curl -fLsS -o /tmp/rusty_v8_archive.a.gz "$RUSTY_V8_ARCHIVE"
+          echo "Downloaded archive details:"
+          ls -l /tmp/rusty_v8_archive.a.gz
+          gzip -l /tmp/rusty_v8_archive.a.gz
+          curl -fLsS -o /tmp/v8_binding.rs \
+            https://github.com/mevanlc/codex/releases/download/v8-v146.4.0/src_binding_release_aarch64-linux-android.rs
+          echo "Downloaded binding details:"
+          ls -l /tmp/v8_binding.rs
+          wc -c /tmp/v8_binding.rs
+          sed -n '1,5p' /tmp/v8_binding.rs
+          V8_STAGE_DIR=target/aarch64-linux-android/release/gn_out/obj
+          echo "Pre-staging fresh rusty_v8 into $V8_STAGE_DIR"
+          rm -rf target/aarch64-linux-android/release/gn_out
+          mkdir -p "$V8_STAGE_DIR"
+          gzip -dc /tmp/rusty_v8_archive.a.gz > "$V8_STAGE_DIR/librusty_v8.a"
+          printf '%s' "$RUSTY_V8_ARCHIVE" > "$V8_STAGE_DIR/librusty_v8.sum"
+          ls -l "$V8_STAGE_DIR/librusty_v8.a" "$V8_STAGE_DIR/librusty_v8.sum"
+          echo "Stamping Cargo workspace version to ${{ steps.version.outputs.version }}"
+          sed -i 's/^version = ".*"$/version = "${{ steps.version.outputs.version }}"/' Cargo.toml
+          grep -n '^version = "' Cargo.toml | head -1
+          cargo build --verbose --release --bin codex --target aarch64-linux-android
+          echo "Post-build V8-related files under target:"
+          find target -maxdepth 10 \( -path "*/build/v8-*/out/*" -o -name "librusty_v8*.a" -o -name "*.sum" \) -print 2>/dev/null | sort
+
+      - name: Compress binary
+        run: |
+          zstd -19 target/aarch64-linux-android/release/codex \
+            -o codex-aarch64-linux-android.zst
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-aarch64-linux-android
+          path: codex-rs/codex-aarch64-linux-android.zst
+
+      - name: Save sccache cache (fallback)
+        if: ${{ always() && !cancelled() && env.SCCACHE_GHA_ENABLED != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        with:
+          path: ${{ github.workspace }}/.sccache/
+          key: sccache-${{ runner.os }}-aarch64-linux-android-release-${{ hashFiles('codex-rs/Cargo.lock') }}-${{ github.run_id }}
+
+      - name: sccache stats
+        if: ${{ always() }}
+        continue-on-error: true
+        run: sccache --show-stats || true
