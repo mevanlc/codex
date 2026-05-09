@@ -72,17 +72,12 @@ jobs:
           toolchain: "1.93.0"
           targets: aarch64-linux-android
 
-      - name: Install host dependencies
+      - name: Verify host dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            ca-certificates \
-            curl \
-            file \
-            gzip \
-            pkg-config \
-            unzip \
-            zstd
+          set -euo pipefail
+          for tool in curl file gzip pkg-config unzip zstd; do
+            command -v "$tool"
+          done
 
       - name: Install Android NDK
         uses: android-actions/setup-android@v3
