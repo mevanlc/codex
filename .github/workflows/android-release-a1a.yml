@@ -75,7 +75,7 @@ jobs:
       - name: Verify host dependencies
         run: |
           set -euo pipefail
-          for tool in curl file gzip pkg-config unzip zstd; do
+          for tool in curl file gzip java pkg-config unzip zstd; do
             command -v "$tool"
           done
 
