@@ -179,19 +179,6 @@ jobs:
             sccache-${{ runner.os }}-aarch64-linux-android-release-${{ hashFiles('codex-rs/Cargo.lock') }}-
             sccache-${{ runner.os }}-aarch64-linux-android-release-
 
-      - name: Add swap for linker
-        run: |
-          set -euo pipefail
-          SWAPFILE=/mnt/codex-android-release-a1a.swap
-          if ! swapon --show=NAME | grep -Fxq "$SWAPFILE"; then
-            sudo fallocate -l 8G "$SWAPFILE" || sudo dd if=/dev/zero of="$SWAPFILE" bs=1M count=8192
-            sudo chmod 600 "$SWAPFILE"
-            sudo mkswap "$SWAPFILE"
-            sudo swapon "$SWAPFILE"
-          fi
-          free -h
-        working-directory: /
-
       - name: Build codex
         env:
           CARGO_BUILD_JOBS: "2"
