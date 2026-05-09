@@ -4,7 +4,6 @@
 //! feature is disabled.  Provides the same public surface so the rest of
 //! `codex-core` compiles without the `v8`/`codex-code-mode` dependency.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::Value as JsonValue;
@@ -21,7 +20,7 @@ pub(crate) const WAIT_TOOL_NAME: &str = "wait";
 pub(crate) struct CodeModeService;
 
 impl CodeModeService {
-    pub(crate) fn new(_js_repl_node_path: Option<PathBuf>) -> Self {
+    pub(crate) fn new() -> Self {
         Self
     }
 
