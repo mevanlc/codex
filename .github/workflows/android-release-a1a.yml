@@ -75,7 +75,7 @@ jobs:
       - name: Verify host dependencies
         run: |
           set -euo pipefail
-          for tool in curl file gzip java pkg-config unzip zstd; do
+          for tool in clang clang++ curl file gzip java ld.lld llvm-ar llvm-ranlib pkg-config unzip zstd; do
             command -v "$tool"
           done
 
@@ -91,25 +91,53 @@ jobs:
         run: |
           set -euo pipefail
           NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
-          HOST_TAG="linux-x86_64"
+          NDK_HOST_TAG="linux-x86_64"
           if [ -d "$NDK_HOME/toolchains/llvm/prebuilt/linux-aarch64" ]; then
-            HOST_TAG="linux-aarch64"
+            NDK_HOST_TAG="linux-aarch64"
           fi
-          TOOLCHAIN="$NDK_HOME/toolchains/llvm/prebuilt/$HOST_TAG"
-          LINKER="$TOOLCHAIN/bin/aarch64-linux-android35-clang"
+          NDK_TOOLCHAIN="$NDK_HOME/toolchains/llvm/prebuilt/$NDK_HOST_TAG"
+          SYSROOT="$NDK_TOOLCHAIN/sysroot"
+          RESOURCE_DIR="$NDK_TOOLCHAIN/lib/clang/18"
+          BUILTINS="$RESOURCE_DIR/lib/linux/libclang_rt.builtins-aarch64-android.a"
+
+          if [ "$NDK_HOST_TAG" = "linux-aarch64" ]; then
+            TOOLCHAIN_BIN="$NDK_TOOLCHAIN/bin"
+            LINKER="$TOOLCHAIN_BIN/aarch64-linux-android35-clang"
+            CXX="$TOOLCHAIN_BIN/aarch64-linux-android35-clang++"
+            AR="$TOOLCHAIN_BIN/llvm-ar"
+            RANLIB="$TOOLCHAIN_BIN/llvm-ranlib"
+          else
+            TOOLCHAIN_BIN="$RUNNER_TEMP/android-a1a-toolchain"
+            mkdir -p "$TOOLCHAIN_BIN"
+            LINKER="$TOOLCHAIN_BIN/aarch64-linux-android35-clang"
+            CXX="$TOOLCHAIN_BIN/aarch64-linux-android35-clang++"
+            cat > "$LINKER" <<EOF
+          #!/usr/bin/env bash
+          exec clang --target=aarch64-linux-android35 --sysroot="$SYSROOT" -resource-dir "$RESOURCE_DIR" -fuse-ld=lld --rtlib=compiler-rt "\$@"
+          EOF
+            cat > "$CXX" <<EOF
+          #!/usr/bin/env bash
+          exec clang++ --target=aarch64-linux-android35 --sysroot="$SYSROOT" -resource-dir "$RESOURCE_DIR" -fuse-ld=lld --rtlib=compiler-rt "\$@"
+          EOF
+            chmod +x "$LINKER" "$CXX"
+            AR="$(command -v llvm-ar)"
+            RANLIB="$(command -v llvm-ranlib)"
+          fi
+
           file "$LINKER" || true
           "$LINKER" --version
           {
             echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$LINKER"
             echo "CC_aarch64_linux_android=$LINKER"
-            echo "AR_aarch64_linux_android=$TOOLCHAIN/bin/llvm-ar"
-            echo "RANLIB_aarch64_linux_android=$TOOLCHAIN/bin/llvm-ranlib"
-            echo "RUSTFLAGS=-C link-arg=$TOOLCHAIN/lib/clang/18/lib/linux/libclang_rt.builtins-aarch64-android.a"
+            echo "CXX_aarch64_linux_android=$CXX"
+            echo "AR_aarch64_linux_android=$AR"
+            echo "RANLIB_aarch64_linux_android=$RANLIB"
+            echo "RUSTFLAGS=-C link-arg=$BUILTINS"
           } >> "$GITHUB_ENV"
           # Create prefixed symlinks that vendored OpenSSL expects
-          ln -sf "$TOOLCHAIN/bin/llvm-ranlib" "$TOOLCHAIN/bin/aarch64-linux-android-ranlib"
-          ln -sf "$TOOLCHAIN/bin/llvm-ar"     "$TOOLCHAIN/bin/aarch64-linux-android-ar"
-          echo "$TOOLCHAIN/bin" >> "$GITHUB_PATH"
+          ln -sf "$RANLIB" "$TOOLCHAIN_BIN/aarch64-linux-android-ranlib"
+          ln -sf "$AR"     "$TOOLCHAIN_BIN/aarch64-linux-android-ar"
+          echo "$TOOLCHAIN_BIN" >> "$GITHUB_PATH"
 
       - uses: Swatinem/rust-cache@v2
         with:
