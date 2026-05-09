@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -239,3 +239,34 @@ jobs:
         if: ${{ always() }}
         continue-on-error: true
         run: sccache --show-stats || true
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: codex-aarch64-linux-android
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-a1a-${{ needs.build.outputs.version }}
+          name: Android aarch64 A1A ${{ needs.build.outputs.version }}
+          prerelease: false
+          make_latest: true
+          files: codex-aarch64-linux-android.zst
+          body: |
+            Codex CLI for Android aarch64 (Termux) — with code-mode (V8/JS REPL).
+
+            Version: `${{ needs.build.outputs.version }}`
+            Commit: `${{ github.sha }}`
+
+            ```sh
+            zstd -d codex-aarch64-linux-android.zst -o codex
+            chmod +x codex
+            ```
