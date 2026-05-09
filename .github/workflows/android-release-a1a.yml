@@ -81,6 +81,8 @@ jobs:
 
       - name: Install Android NDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: ""
 
       - name: Install NDK 27
         run: sdkmanager --install "ndk;27.2.12479018"
