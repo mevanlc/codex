@@ -180,6 +180,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use tokio::task::JoinHandle;
 use toml::Value as TomlValue;
 use uuid::Uuid;
+mod agent_message_consolidation;
 mod agent_navigation;
 mod app_server_event_targets;
 mod app_server_events;
@@ -244,6 +245,26 @@ fn collab_receiver_thread_ids(notification: &ServerNotification) -> Option<&[Str
             _ => None,
         },
         _ => None,
+    }
+}
+
+fn collab_receiver_is_not_found(
+    notification: &ServerNotification,
+    receiver_thread_id: &str,
+) -> bool {
+    match notification {
+        ServerNotification::ItemCompleted(notification) => match &notification.item {
+            ThreadItem::CollabAgentToolCall { agents_states, .. } => {
+                agents_states.get(receiver_thread_id).is_some_and(|state| {
+                    matches!(
+                        &state.status,
+                        codex_app_server_protocol::CollabAgentStatus::NotFound
+                    )
+                })
+            }
+            _ => false,
+        },
+        _ => false,
     }
 }
 
