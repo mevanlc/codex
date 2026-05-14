@@ -56,6 +56,7 @@ use codex_config::types::ToolSuggestDiscoverableType;
 use codex_config::types::Tui;
 use codex_config::types::TuiKeymap;
 use codex_config::types::TuiNotificationSettings;
+use codex_config::types::TuiPetAnchor;
 use codex_config::types::WindowsSandboxModeToml;
 use codex_config::types::WindowsToml;
 use codex_core_plugins::PluginsManager;
@@ -376,13 +377,7 @@ web_search = true
     )
     .expect("TOML deserialization should succeed");
 
-    assert_eq!(
-        cfg.tools,
-        Some(ToolsToml {
-            web_search: None,
-            view_image: None,
-        })
-    );
+    assert_eq!(cfg.tools, Some(ToolsToml { web_search: None }));
 }
 
 #[test]
@@ -395,13 +390,7 @@ web_search = false
     )
     .expect("TOML deserialization should succeed");
 
-    assert_eq!(
-        cfg.tools,
-        Some(ToolsToml {
-            web_search: None,
-            view_image: None,
-        })
-    );
+    assert_eq!(cfg.tools, Some(ToolsToml { web_search: None }));
 }
 
 #[test]
@@ -569,6 +558,8 @@ fn config_toml_deserializes_model_availability_nux() {
             terminal_title: None,
             theme: None,
             primary_accent: None,
+            pet: None,
+            pet_anchor: TuiPetAnchor::Composer,
             session_picker_view: None,
             keymap: TuiKeymap::default(),
             model_availability_nux: ModelAvailabilityNuxConfig {
@@ -2565,6 +2556,19 @@ session_picker_view = "dense"
 }
 
 #[test]
+fn tui_pet_deserializes_from_toml() {
+    let cfg = r#"
+[tui]
+pet = "chefito"
+"#;
+    let parsed = toml::from_str::<ConfigToml>(cfg).expect("TOML deserialization should succeed");
+    assert_eq!(
+        parsed.tui.as_ref().and_then(|t| t.pet.as_deref()),
+        Some("chefito"),
+    );
+}
+
+#[test]
 fn tui_session_picker_view_defaults_to_none() {
     let cfg = r#"
 [tui]
@@ -2573,6 +2577,56 @@ fn tui_session_picker_view_defaults_to_none() {
     assert_eq!(
         parsed.tui.as_ref().and_then(|t| t.session_picker_view),
         None,
+    );
+}
+
+#[test]
+fn tui_pet_defaults_to_none() {
+    let cfg = r#"
+[tui]
+"#;
+    let parsed = toml::from_str::<ConfigToml>(cfg).expect("TOML deserialization should succeed");
+    assert_eq!(parsed.tui.as_ref().and_then(|t| t.pet.as_deref()), None);
+}
+
+#[test]
+fn tui_pet_anchor_deserializes_from_toml() {
+    let cfg = r#"
+[tui]
+pet_anchor = "screen-bottom"
+"#;
+    let parsed = toml::from_str::<ConfigToml>(cfg).expect("TOML deserialization should succeed");
+    assert_eq!(
+        parsed.tui.as_ref().map(|t| t.pet_anchor),
+        Some(TuiPetAnchor::ScreenBottom),
+    );
+}
+
+#[test]
+fn tui_pet_anchor_defaults_to_composer() {
+    let cfg = r#"
+[tui]
+"#;
+    let parsed = toml::from_str::<ConfigToml>(cfg).expect("TOML deserialization should succeed");
+    assert_eq!(
+        parsed.tui.as_ref().map(|t| t.pet_anchor),
+        Some(TuiPetAnchor::Composer),
+    );
+}
+
+#[test]
+fn tui_pet_anchor_rejects_unknown_value() {
+    let cfg = r#"
+[tui]
+pet_anchor = "bottom"
+"#;
+    let err = toml::from_str::<ConfigToml>(cfg).expect_err("reject unknown pet anchor");
+    let err = err.to_string();
+    assert!(
+        err.contains("unknown variant `bottom`")
+            && err.contains("composer")
+            && err.contains("screen-bottom"),
+        "unexpected error: {err}"
     );
 }
 
@@ -2601,6 +2655,8 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             terminal_title: None,
             theme: None,
             primary_accent: None,
+            pet: None,
+            pet_anchor: TuiPetAnchor::Composer,
             session_picker_view: None,
             keymap: TuiKeymap::default(),
             model_availability_nux: ModelAvailabilityNuxConfig::default(),
@@ -4217,7 +4273,6 @@ async fn legacy_toggles_map_to_features() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let cfg = ConfigToml {
         experimental_use_unified_exec_tool: Some(true),
-        experimental_use_freeform_apply_patch: Some(true),
         ..Default::default()
     };
 
@@ -4228,10 +4283,7 @@ async fn legacy_toggles_map_to_features() -> std::io::Result<()> {
     )
     .await?;
 
-    assert!(config.features.enabled(Feature::ApplyPatchFreeform));
     assert!(config.features.enabled(Feature::UnifiedExec));
-
-    assert!(config.include_apply_patch_tool);
 
     assert!(config.use_experimental_unified_exec_tool);
 
@@ -7218,8 +7270,7 @@ model_verbosity = "high"
 /// 2. as part of a profile, where the `--profile` is specified via a CLI
 ///    (or in the config file itself)
 /// 3. as an entry in `config.toml`, e.g. `model = "o3"`
-/// 4. the default value for a required field defined in code, e.g.,
-///    `crate::flags::OPENAI_DEFAULT_MODEL`
+/// 4. the default value for a required field defined in code.
 ///
 /// Note that profiles are the recommended way to specify a group of
 /// configuration options together.
@@ -7291,6 +7342,7 @@ async fn test_precedence_fixture_with_o3_profile() -> std::io::Result<()> {
             startup_warnings: Vec::new(),
             history: History::default(),
             ephemeral: false,
+            bypass_hook_trust: false,
             file_opener: UriBasedFileOpener::VsCode,
             codex_self_exe: None,
             codex_linux_sandbox_exe: None,
@@ -7321,10 +7373,10 @@ async fn test_precedence_fixture_with_o3_profile() -> std::io::Result<()> {
             guardian_policy_config: None,
             include_permissions_instructions: true,
             include_apps_instructions: true,
+            include_collaboration_mode_instructions: true,
             include_skill_instructions: true,
             include_environment_context: true,
             compact_prompt: None,
-            commit_attribution: None,
             forced_chatgpt_workspace_id: None,
             forced_login_method: None,
             include_apply_patch_tool: true,
@@ -7360,6 +7412,8 @@ async fn test_precedence_fixture_with_o3_profile() -> std::io::Result<()> {
             tui_terminal_title: None,
             tui_theme: None,
             tui_primary_accent: None,
+            tui_pet: None,
+            tui_pet_anchor: TuiPetAnchor::Composer,
             tui_session_picker_view: SessionPickerViewMode::Dense,
             otel: OtelConfig::default(),
         },
@@ -7737,6 +7791,7 @@ async fn test_precedence_fixture_with_gpt3_profile() -> std::io::Result<()> {
         startup_warnings: Vec::new(),
         history: History::default(),
         ephemeral: false,
+        bypass_hook_trust: false,
         file_opener: UriBasedFileOpener::VsCode,
         codex_self_exe: None,
         codex_linux_sandbox_exe: None,
@@ -7767,10 +7822,10 @@ async fn test_precedence_fixture_with_gpt3_profile() -> std::io::Result<()> {
         guardian_policy_config: None,
         include_permissions_instructions: true,
         include_apps_instructions: true,
+        include_collaboration_mode_instructions: true,
         include_skill_instructions: true,
         include_environment_context: true,
         compact_prompt: None,
-        commit_attribution: None,
         forced_chatgpt_workspace_id: None,
         forced_login_method: None,
         include_apply_patch_tool: true,
@@ -7806,6 +7861,8 @@ async fn test_precedence_fixture_with_gpt3_profile() -> std::io::Result<()> {
         tui_terminal_title: None,
         tui_theme: None,
         tui_primary_accent: None,
+        tui_pet: None,
+        tui_pet_anchor: TuiPetAnchor::Composer,
         tui_session_picker_view: SessionPickerViewMode::Dense,
         otel: OtelConfig::default(),
     };
@@ -7897,6 +7954,7 @@ async fn test_precedence_fixture_with_zdr_profile() -> std::io::Result<()> {
         startup_warnings: Vec::new(),
         history: History::default(),
         ephemeral: false,
+        bypass_hook_trust: false,
         file_opener: UriBasedFileOpener::VsCode,
         codex_self_exe: None,
         codex_linux_sandbox_exe: None,
@@ -7927,10 +7985,10 @@ async fn test_precedence_fixture_with_zdr_profile() -> std::io::Result<()> {
         guardian_policy_config: None,
         include_permissions_instructions: true,
         include_apps_instructions: true,
+        include_collaboration_mode_instructions: true,
         include_skill_instructions: true,
         include_environment_context: true,
         compact_prompt: None,
-        commit_attribution: None,
         forced_chatgpt_workspace_id: None,
         forced_login_method: None,
         include_apply_patch_tool: true,
@@ -7966,6 +8024,8 @@ async fn test_precedence_fixture_with_zdr_profile() -> std::io::Result<()> {
         tui_terminal_title: None,
         tui_theme: None,
         tui_primary_accent: None,
+        tui_pet: None,
+        tui_pet_anchor: TuiPetAnchor::Composer,
         tui_session_picker_view: SessionPickerViewMode::Dense,
         otel: OtelConfig::default(),
     };
@@ -8042,6 +8102,7 @@ async fn test_precedence_fixture_with_gpt5_profile() -> std::io::Result<()> {
         startup_warnings: Vec::new(),
         history: History::default(),
         ephemeral: false,
+        bypass_hook_trust: false,
         file_opener: UriBasedFileOpener::VsCode,
         codex_self_exe: None,
         codex_linux_sandbox_exe: None,
@@ -8072,10 +8133,10 @@ async fn test_precedence_fixture_with_gpt5_profile() -> std::io::Result<()> {
         guardian_policy_config: None,
         include_permissions_instructions: true,
         include_apps_instructions: true,
+        include_collaboration_mode_instructions: true,
         include_skill_instructions: true,
         include_environment_context: true,
         compact_prompt: None,
-        commit_attribution: None,
         forced_chatgpt_workspace_id: None,
         forced_login_method: None,
         include_apply_patch_tool: true,
@@ -8111,6 +8172,8 @@ async fn test_precedence_fixture_with_gpt5_profile() -> std::io::Result<()> {
         tui_terminal_title: None,
         tui_theme: None,
         tui_primary_accent: None,
+        tui_pet: None,
+        tui_pet_anchor: TuiPetAnchor::Composer,
         tui_session_picker_view: SessionPickerViewMode::Dense,
         otel: OtelConfig::default(),
     };
@@ -8131,6 +8194,7 @@ async fn test_requirements_web_search_mode_allowlist_does_not_warn_when_unset() 
         allowed_sandbox_modes: None,
         remote_sandbox_config: None,
         allowed_web_search_modes: Some(vec![codex_config::WebSearchModeRequirement::Cached]),
+        allow_managed_hooks_only: None,
         feature_requirements: None,
         hooks: None,
         mcp_servers: None,
@@ -8730,6 +8794,58 @@ path = "/custom/mcp"
 }
 
 #[tokio::test]
+async fn config_defaults_enabled_apps_mcp_path_override_to_plugin_service() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let toml = r#"
+model = "gpt-5.4"
+
+[features]
+apps_mcp_path_override = true
+"#;
+    let cfg: ConfigToml =
+        toml::from_str(toml).expect("TOML deserialization should succeed for apps MCP feature");
+
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+
+    assert!(config.features.enabled(Feature::AppsMcpPathOverride));
+    assert_eq!(config.apps_mcp_path_override.as_deref(), Some("/ps/mcp"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn config_preserves_explicit_apps_mcp_path_override_path() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let toml = r#"
+model = "gpt-5.4"
+
+[features.apps_mcp_path_override]
+enabled = true
+path = "/custom/mcp"
+"#;
+    let cfg: ConfigToml =
+        toml::from_str(toml).expect("TOML deserialization should succeed for apps MCP feature");
+
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+
+    assert_eq!(
+        config.apps_mcp_path_override.as_deref(),
+        Some("/custom/mcp")
+    );
+    assert!(config.features.enabled(Feature::AppsMcpPathOverride));
+    Ok(())
+}
+
+#[tokio::test]
 async fn config_loads_mcp_oauth_callback_url_from_toml() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let toml = r#"
@@ -8843,6 +8959,7 @@ async fn explicit_sandbox_mode_falls_back_when_disallowed_by_requirements() -> s
         allowed_sandbox_modes: Some(vec![codex_config::SandboxModeRequirement::ReadOnly]),
         remote_sandbox_config: None,
         allowed_web_search_modes: None,
+        allow_managed_hooks_only: None,
         feature_requirements: None,
         hooks: None,
         mcp_servers: None,
@@ -8930,6 +9047,29 @@ async fn active_profile_is_cleared_when_requirements_force_fallback() -> std::io
     assert!(
         config.startup_warnings.iter().any(|warning| warning
             .contains("Configured value for `permission_profile` is disallowed by requirements")),
+        "{:?}",
+        config.startup_warnings
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn bypass_hook_trust_adds_startup_warning() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+
+    let config = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .harness_overrides(ConfigOverrides {
+            bypass_hook_trust: Some(true),
+            ..Default::default()
+        })
+        .build()
+        .await?;
+
+    assert!(
+        config.startup_warnings.iter().any(|warning| warning
+            == "`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."),
         "{:?}",
         config.startup_warnings
     );
@@ -9309,6 +9449,7 @@ async fn prompt_instruction_blocks_can_be_disabled_from_config_and_profiles() ->
         codex_home.path().join(CONFIG_TOML_FILE),
         r#"include_permissions_instructions = false
 include_apps_instructions = false
+include_collaboration_mode_instructions = false
 include_environment_context = false
 profile = "chatty"
 
@@ -9317,6 +9458,7 @@ include_instructions = false
 
 [profiles.chatty]
 include_permissions_instructions = true
+include_collaboration_mode_instructions = true
 include_environment_context = true
 "#,
     )?;
@@ -9329,6 +9471,7 @@ include_environment_context = true
 
     assert!(config.include_permissions_instructions);
     assert!(!config.include_apps_instructions);
+    assert!(config.include_collaboration_mode_instructions);
     assert!(!config.include_skill_instructions);
     assert!(config.include_environment_context);
     Ok(())
@@ -9584,11 +9727,14 @@ async fn multi_agent_v2_config_from_feature_table() -> std::io::Result<()> {
 enabled = true
 max_concurrent_threads_per_session = 5
 min_wait_timeout_ms = 2500
+max_wait_timeout_ms = 120000
+default_wait_timeout_ms = 30000
 usage_hint_enabled = false
 usage_hint_text = "Custom delegation guidance."
 root_agent_usage_hint_text = "Root guidance."
 subagent_usage_hint_text = "Subagent guidance."
 hide_spawn_agent_metadata = true
+non_code_mode_only = true
 "#,
     )?;
 
@@ -9601,6 +9747,8 @@ hide_spawn_agent_metadata = true
     assert!(config.features.enabled(Feature::MultiAgentV2));
     assert_eq!(config.multi_agent_v2.max_concurrent_threads_per_session, 5);
     assert_eq!(config.multi_agent_v2.min_wait_timeout_ms, 2500);
+    assert_eq!(config.multi_agent_v2.max_wait_timeout_ms, 120000);
+    assert_eq!(config.multi_agent_v2.default_wait_timeout_ms, 30000);
     assert_eq!(config.agent_max_threads, Some(4));
     assert!(!config.multi_agent_v2.usage_hint_enabled);
     assert_eq!(
@@ -9616,6 +9764,7 @@ hide_spawn_agent_metadata = true
         Some("Subagent guidance.")
     );
     assert!(config.multi_agent_v2.hide_spawn_agent_metadata);
+    assert!(config.multi_agent_v2.non_code_mode_only);
 
     Ok(())
 }
@@ -9630,20 +9779,26 @@ async fn profile_multi_agent_v2_config_overrides_base() -> std::io::Result<()> {
 [features.multi_agent_v2]
 max_concurrent_threads_per_session = 4
 min_wait_timeout_ms = 3000
+max_wait_timeout_ms = 120000
+default_wait_timeout_ms = 30000
 usage_hint_enabled = true
 usage_hint_text = "base hint"
 root_agent_usage_hint_text = "base root hint"
 subagent_usage_hint_text = "base subagent hint"
 hide_spawn_agent_metadata = true
+non_code_mode_only = false
 
 [profiles.no_hint.features.multi_agent_v2]
 max_concurrent_threads_per_session = 6
 min_wait_timeout_ms = 1500
+max_wait_timeout_ms = 90000
+default_wait_timeout_ms = 15000
 usage_hint_enabled = false
 usage_hint_text = "profile hint"
 root_agent_usage_hint_text = "profile root hint"
 subagent_usage_hint_text = "profile subagent hint"
 hide_spawn_agent_metadata = false
+non_code_mode_only = true
 "#,
     )?;
 
@@ -9655,6 +9810,8 @@ hide_spawn_agent_metadata = false
 
     assert_eq!(config.multi_agent_v2.max_concurrent_threads_per_session, 6);
     assert_eq!(config.multi_agent_v2.min_wait_timeout_ms, 1500);
+    assert_eq!(config.multi_agent_v2.max_wait_timeout_ms, 90000);
+    assert_eq!(config.multi_agent_v2.default_wait_timeout_ms, 15000);
     assert!(!config.multi_agent_v2.usage_hint_enabled);
     assert_eq!(
         config.multi_agent_v2.usage_hint_text.as_deref(),
@@ -9669,6 +9826,7 @@ hide_spawn_agent_metadata = false
         Some("profile subagent hint")
     );
     assert!(!config.multi_agent_v2.hide_spawn_agent_metadata);
+    assert!(config.multi_agent_v2.non_code_mode_only);
 
     Ok(())
 }
@@ -9691,7 +9849,10 @@ enabled = true
 
     assert_eq!(config.multi_agent_v2.max_concurrent_threads_per_session, 4);
     assert_eq!(config.multi_agent_v2.min_wait_timeout_ms, 10_000);
+    assert_eq!(config.multi_agent_v2.max_wait_timeout_ms, 3_600_000);
+    assert_eq!(config.multi_agent_v2.default_wait_timeout_ms, 30_000);
     assert_eq!(config.agent_max_threads, Some(3));
+    assert!(!config.multi_agent_v2.non_code_mode_only);
 
     Ok(())
 }
@@ -9726,13 +9887,33 @@ max_threads = 3
 }
 
 #[tokio::test]
-async fn multi_agent_v2_rejects_invalid_min_wait_timeout() -> std::io::Result<()> {
+async fn multi_agent_v2_rejects_invalid_wait_timeouts() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     std::fs::write(
         codex_home.path().join(CONFIG_TOML_FILE),
         r#"[features.multi_agent_v2]
 enabled = true
 min_wait_timeout_ms = 0
+max_wait_timeout_ms = 0
+default_wait_timeout_ms = 0
+"#,
+    )?;
+
+    let config = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .build()
+        .await?;
+
+    assert_eq!(config.multi_agent_v2.min_wait_timeout_ms, 0);
+    assert_eq!(config.multi_agent_v2.max_wait_timeout_ms, 0);
+    assert_eq!(config.multi_agent_v2.default_wait_timeout_ms, 0);
+
+    std::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        r#"[features.multi_agent_v2]
+enabled = true
+min_wait_timeout_ms = -1
 "#,
     )?;
 
@@ -9741,12 +9922,12 @@ min_wait_timeout_ms = 0
         .fallback_cwd(Some(codex_home.path().to_path_buf()))
         .build()
         .await
-        .expect_err("zero min_wait_timeout_ms should be rejected");
+        .expect_err("negative min_wait_timeout_ms should be rejected");
 
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     assert_eq!(
         err.to_string(),
-        "features.multi_agent_v2.min_wait_timeout_ms must be at least 1"
+        "features.multi_agent_v2.min_wait_timeout_ms must be at least 0"
     );
 
     std::fs::write(
@@ -9768,6 +9949,137 @@ min_wait_timeout_ms = 3600001
     assert_eq!(
         err.to_string(),
         "features.multi_agent_v2.min_wait_timeout_ms must be at most 3600000"
+    );
+
+    std::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        r#"[features.multi_agent_v2]
+enabled = true
+max_wait_timeout_ms = -1
+"#,
+    )?;
+
+    let err = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .build()
+        .await
+        .expect_err("negative max_wait_timeout_ms should be rejected");
+
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert_eq!(
+        err.to_string(),
+        "features.multi_agent_v2.max_wait_timeout_ms must be at least 0"
+    );
+
+    std::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        r#"[features.multi_agent_v2]
+enabled = true
+max_wait_timeout_ms = 3600001
+"#,
+    )?;
+
+    let err = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .build()
+        .await
+        .expect_err("too large max_wait_timeout_ms should be rejected");
+
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert_eq!(
+        err.to_string(),
+        "features.multi_agent_v2.max_wait_timeout_ms must be at most 3600000"
+    );
+
+    std::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        r#"[features.multi_agent_v2]
+enabled = true
+default_wait_timeout_ms = -1
+"#,
+    )?;
+
+    let err = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .build()
+        .await
+        .expect_err("negative default_wait_timeout_ms should be rejected");
+
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert_eq!(
+        err.to_string(),
+        "features.multi_agent_v2.default_wait_timeout_ms must be at least 0"
+    );
+
+    std::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        r#"[features.multi_agent_v2]
+enabled = true
+min_wait_timeout_ms = 1000
+max_wait_timeout_ms = 500
+"#,
+    )?;
+
+    let err = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .build()
+        .await
+        .expect_err("min greater than max should be rejected");
+
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert_eq!(
+        err.to_string(),
+        "features.multi_agent_v2.min_wait_timeout_ms must be at most features.multi_agent_v2.max_wait_timeout_ms"
+    );
+
+    std::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        r#"[features.multi_agent_v2]
+enabled = true
+min_wait_timeout_ms = 1000
+max_wait_timeout_ms = 2000
+default_wait_timeout_ms = 500
+"#,
+    )?;
+
+    let err = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .build()
+        .await
+        .expect_err("default less than min should be rejected");
+
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert_eq!(
+        err.to_string(),
+        "features.multi_agent_v2.default_wait_timeout_ms must be at least features.multi_agent_v2.min_wait_timeout_ms"
+    );
+
+    std::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        r#"[features.multi_agent_v2]
+enabled = true
+min_wait_timeout_ms = 1000
+max_wait_timeout_ms = 2000
+default_wait_timeout_ms = 2500
+"#,
+    )?;
+
+    let err = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .build()
+        .await
+        .expect_err("default greater than max should be rejected");
+
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert_eq!(
+        err.to_string(),
+        "features.multi_agent_v2.default_wait_timeout_ms must be at most features.multi_agent_v2.max_wait_timeout_ms"
     );
 
     Ok(())

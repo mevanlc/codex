@@ -90,6 +90,7 @@ pub(crate) fn remap_cyan(color: Color, primary_accent: Option<Color>) -> Color {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

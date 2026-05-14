@@ -22,7 +22,6 @@ use crate::tools::router::ToolCallSource;
 use crate::tools::router::ToolRouter;
 use codex_protocol::error::CodexErr;
 use codex_protocol::models::ResponseInputItem;
-use codex_tools::ToolSpec;
 
 #[derive(Clone)]
 pub(crate) struct ToolCallRuntime {
@@ -47,11 +46,6 @@ impl ToolCallRuntime {
             tracker,
             parallel_execution: Arc::new(RwLock::new(())),
         }
-    }
-
-    #[cfg_attr(target_os = "android", allow(dead_code))]
-    pub(crate) fn find_spec(&self, tool_name: &codex_tools::ToolName) -> Option<ToolSpec> {
-        self.router.find_spec(tool_name)
     }
 
     pub(crate) fn create_diff_consumer(
@@ -186,7 +180,7 @@ impl ToolCallRuntime {
         if call.tool_name.namespace.is_none()
             && matches!(
                 call.tool_name.name.as_str(),
-                "shell" | "container.exec" | "local_shell" | "shell_command" | "unified_exec"
+                "shell_command" | "unified_exec"
             )
         {
             format!("Wall time: {secs:.1} seconds\naborted by user")

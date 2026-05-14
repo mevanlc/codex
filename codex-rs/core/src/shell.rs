@@ -156,9 +156,7 @@ fn get_user_shell_path() -> Option<PathBuf> {
 
 #[cfg(all(unix, any(test, target_os = "android")))]
 fn shell_path_from_env(shell_env: Option<std::ffi::OsString>) -> Option<PathBuf> {
-    let Some(shell_env) = shell_env else {
-        return None;
-    };
+    let shell_env = shell_env?;
 
     let shell_path = PathBuf::from(shell_env);
     if std::fs::metadata(&shell_path).is_ok_and(|metadata| metadata.is_file()) {

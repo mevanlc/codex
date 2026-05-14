@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,36 +18,26 @@ use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::flat_tool_name;
-use crate::tools::handlers::extension_tools::BundledToolHandler;
-use crate::tools::handlers::extension_tools::extension_tool_spec;
 use crate::tools::hook_names::HookToolName;
 use crate::tools::tool_dispatch_trace::ToolDispatchTrace;
+use crate::tools::tool_search_entry::ToolSearchInfo;
 use crate::util::error_or_panic;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::protocol::EventMsg;
-use codex_tool_api::ToolBundle as ExtensionToolBundle;
-use codex_tools::ConfiguredToolSpec;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
-use codex_utils_readiness::Readiness;
 use futures::future::BoxFuture;
 use serde_json::Value;
 use tracing::warn;
 
 pub(crate) type ToolTelemetryTags = Vec<(&'static str, String)>;
 
-pub trait ToolHandler: Send + Sync {
-    type Output: ToolOutput + 'static;
+pub use codex_tools::ToolExecutor;
+pub use codex_tools::ToolExposure;
 
-    /// The concrete tool name handled by this handler instance.
-    fn tool_name(&self) -> ToolName;
-
-    fn spec(&self) -> Option<ToolSpec> {
+pub trait ToolHandler: ToolExecutor<ToolInvocation> {
+    fn search_info(&self) -> Option<ToolSearchInfo> {
         None
-    }
-
-    fn supports_parallel_tool_calls(&self) -> bool {
-        false
     }
 
     fn matches_kind(&self, payload: &ToolPayload) -> bool {
@@ -59,19 +50,8 @@ pub trait ToolHandler: Send + Sync {
     fn telemetry_tags(
         &self,
         _invocation: &ToolInvocation,
-    ) -> impl std::future::Future<Output = ToolTelemetryTags> + Send {
+    ) -> impl Future<Output = ToolTelemetryTags> + Send {
         async { Vec::new() }
-    }
-
-    /// Returns `true` if the [ToolInvocation] *might* mutate the environment of the
-    /// user (through file system, OS operations, ...).
-    /// This function must remains defensive and return `true` if a doubt exist on the
-    /// exact effect of a ToolInvocation.
-    fn is_mutating(
-        &self,
-        _invocation: &ToolInvocation,
-    ) -> impl std::future::Future<Output = bool> + Send {
-        async { false }
     }
 
     fn post_tool_use_payload(
@@ -104,13 +84,6 @@ pub trait ToolHandler: Send + Sync {
     fn create_diff_consumer(&self) -> Option<Box<dyn ToolArgumentDiffConsumer>> {
         None
     }
-
-    /// Perform the actual [ToolInvocation] and returns a [ToolOutput] containing
-    /// the final output to return to the model.
-    fn handle(
-        &self,
-        invocation: ToolInvocation,
-    ) -> impl std::future::Future<Output = Result<Self::Output, FunctionCallError>> + Send;
 }
 
 /// Consumes streamed argument diffs for a tool call and emits protocol events
@@ -144,7 +117,7 @@ impl AnyToolResult {
         result.to_response_item(&call_id, &payload)
     }
 
-    #[cfg_attr(target_os = "android", allow(dead_code))]
+    #[cfg_attr(not(feature = "code-mode"), allow(dead_code))]
     pub(crate) fn code_mode_result(self) -> serde_json::Value {
         let Self {
             payload, result, ..
@@ -182,12 +155,22 @@ pub(crate) struct PostToolUsePayload {
     pub(crate) tool_response: Value,
 }
 
-trait AnyToolHandler: Send + Sync {
+/// Object-safe registry entry for heterogeneous tool handlers.
+///
+/// Concrete handlers keep their typed `ToolExecutor::Output`; the registry
+/// boxes that output only after typed hooks have run.
+pub(crate) trait RegisteredTool: Send + Sync {
+    fn tool_name(&self) -> ToolName;
+
+    fn spec(&self) -> Option<ToolSpec>;
+
+    fn exposure(&self) -> ToolExposure;
+
+    fn search_info(&self) -> Option<ToolSearchInfo>;
+
     fn supports_parallel_tool_calls(&self) -> bool;
 
     fn matches_kind(&self, payload: &ToolPayload) -> bool;
-
-    fn is_mutating<'a>(&'a self, invocation: &'a ToolInvocation) -> BoxFuture<'a, bool>;
 
     fn pre_tool_use_payload(&self, invocation: &ToolInvocation) -> Option<PreToolUsePayload>;
 
@@ -209,20 +192,32 @@ trait AnyToolHandler: Send + Sync {
     ) -> BoxFuture<'a, Result<AnyToolResult, FunctionCallError>>;
 }
 
-impl<T> AnyToolHandler for T
+impl<T> RegisteredTool for T
 where
     T: ToolHandler,
 {
+    fn tool_name(&self) -> ToolName {
+        ToolExecutor::tool_name(self)
+    }
+
+    fn spec(&self) -> Option<ToolSpec> {
+        ToolExecutor::spec(self)
+    }
+
+    fn exposure(&self) -> ToolExposure {
+        ToolExecutor::exposure(self)
+    }
+
+    fn search_info(&self) -> Option<ToolSearchInfo> {
+        ToolHandler::search_info(self)
+    }
+
     fn supports_parallel_tool_calls(&self) -> bool {
-        ToolHandler::supports_parallel_tool_calls(self)
+        ToolExecutor::supports_parallel_tool_calls(self)
     }
 
     fn matches_kind(&self, payload: &ToolPayload) -> bool {
         ToolHandler::matches_kind(self, payload)
-    }
-
-    fn is_mutating<'a>(&'a self, invocation: &'a ToolInvocation) -> BoxFuture<'a, bool> {
-        Box::pin(ToolHandler::is_mutating(self, invocation))
     }
 
     fn pre_tool_use_payload(&self, invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
@@ -254,7 +249,7 @@ where
         Box::pin(async move {
             let call_id = invocation.call_id.clone();
             let payload = invocation.payload.clone();
-            let output = self.handle(invocation.clone()).await?;
+            let output = ToolExecutor::handle(self, invocation.clone()).await?;
             let post_tool_use_payload =
                 ToolHandler::post_tool_use_payload(self, &invocation, &output);
             Ok(AnyToolResult {
@@ -267,12 +262,85 @@ where
     }
 }
 
+pub(crate) fn override_tool_exposure(
+    handler: Arc<dyn RegisteredTool>,
+    exposure: ToolExposure,
+) -> Arc<dyn RegisteredTool> {
+    if handler.exposure() == exposure {
+        return handler;
+    }
+
+    Arc::new(ExposureOverride { handler, exposure })
+}
+
+struct ExposureOverride {
+    handler: Arc<dyn RegisteredTool>,
+    exposure: ToolExposure,
+}
+
+impl RegisteredTool for ExposureOverride {
+    fn tool_name(&self) -> ToolName {
+        self.handler.tool_name()
+    }
+
+    fn spec(&self) -> Option<ToolSpec> {
+        self.handler.spec()
+    }
+
+    fn exposure(&self) -> ToolExposure {
+        self.exposure
+    }
+
+    fn search_info(&self) -> Option<ToolSearchInfo> {
+        self.handler.search_info()
+    }
+
+    fn supports_parallel_tool_calls(&self) -> bool {
+        self.handler.supports_parallel_tool_calls()
+    }
+
+    fn matches_kind(&self, payload: &ToolPayload) -> bool {
+        self.handler.matches_kind(payload)
+    }
+
+    fn pre_tool_use_payload(&self, invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
+        self.handler.pre_tool_use_payload(invocation)
+    }
+
+    fn with_updated_hook_input(
+        &self,
+        invocation: ToolInvocation,
+        updated_input: Value,
+    ) -> Result<ToolInvocation, FunctionCallError> {
+        self.handler
+            .with_updated_hook_input(invocation, updated_input)
+    }
+
+    fn telemetry_tags<'a>(
+        &'a self,
+        invocation: &'a ToolInvocation,
+    ) -> BoxFuture<'a, ToolTelemetryTags> {
+        self.handler.telemetry_tags(invocation)
+    }
+
+    fn create_diff_consumer(&self) -> Option<Box<dyn ToolArgumentDiffConsumer>> {
+        self.handler.create_diff_consumer()
+    }
+
+    fn handle_any<'a>(
+        &'a self,
+        invocation: ToolInvocation,
+    ) -> BoxFuture<'a, Result<AnyToolResult, FunctionCallError>> {
+        self.handler.handle_any(invocation)
+    }
+}
+
 pub struct ToolRegistry {
-    handlers: HashMap<ToolName, Arc<dyn AnyToolHandler>>,
+    handlers: HashMap<ToolName, Arc<dyn RegisteredTool>>,
 }
 
 impl ToolRegistry {
-    fn new(handlers: HashMap<ToolName, Arc<dyn AnyToolHandler>>) -> Self {
+    fn new(handlers: HashMap<ToolName, Arc<dyn RegisteredTool>>) -> Self {
         Self { handlers }
     }
 
@@ -287,11 +355,16 @@ impl ToolRegistry {
         T: ToolHandler + 'static,
     {
         let name = handler.tool_name();
-        Self::new(HashMap::from([(name, handler as Arc<dyn AnyToolHandler>)]))
+        Self::new(HashMap::from([(name, handler as Arc<dyn RegisteredTool>)]))
     }
 
-    fn handler(&self, name: &ToolName) -> Option<Arc<dyn AnyToolHandler>> {
+    fn handler(&self, name: &ToolName) -> Option<Arc<dyn RegisteredTool>> {
         self.handlers.get(name).map(Arc::clone)
+    }
+
+    #[cfg_attr(not(feature = "code-mode"), allow(dead_code))]
+    pub(crate) fn tool_exposure(&self, name: &ToolName) -> Option<ToolExposure> {
+        self.handlers.get(name).map(|handler| handler.exposure())
     }
 
     #[cfg(test)]
@@ -307,7 +380,8 @@ impl ToolRegistry {
     }
 
     pub(crate) fn supports_parallel_tool_calls(&self, name: &ToolName) -> Option<bool> {
-        Some(self.handler(name)?.supports_parallel_tool_calls())
+        let handler = self.handler(name)?;
+        Some(handler.supports_parallel_tool_calls())
     }
 
     #[expect(
@@ -335,6 +409,7 @@ impl ToolRegistry {
                 "sandbox_policy",
                 permission_profile_policy_tag(
                     &invocation.turn.permission_profile,
+                    #[allow(deprecated)]
                     invocation.turn.cwd.as_path(),
                 ),
             ),
@@ -426,7 +501,6 @@ impl ToolRegistry {
             }
         }
 
-        let is_mutating = handler.is_mutating(&invocation).await;
         let response_cell = tokio::sync::Mutex::new(None);
         let invocation_for_tool = invocation.clone();
         let log_payload = invocation.payload.log_payload();
@@ -442,11 +516,6 @@ impl ToolRegistry {
                     let handler = handler.clone();
                     let response_cell = &response_cell;
                     async move {
-                        if is_mutating {
-                            tracing::trace!("waiting for tool gate");
-                            invocation_for_tool.turn.tool_call_gate.wait_ready().await;
-                            tracing::trace!("tool gate released");
-                        }
                         match handler.handle_any(invocation_for_tool).await {
                             Ok(result) => {
                                 let preview = result.result.log_preview();
@@ -554,82 +623,55 @@ impl ToolRegistry {
 }
 
 pub struct ToolRegistryBuilder {
-    handlers: HashMap<ToolName, Arc<dyn AnyToolHandler>>,
-    specs: Vec<ConfiguredToolSpec>,
-    code_mode_enabled: bool,
+    handlers: HashMap<ToolName, Arc<dyn RegisteredTool>>,
+    specs: Vec<ToolSpec>,
 }
 
 impl ToolRegistryBuilder {
-    pub fn new(code_mode_enabled: bool) -> Self {
+    pub fn new() -> Self {
         Self {
             handlers: HashMap::new(),
             specs: Vec::new(),
-            code_mode_enabled,
         }
     }
 
-    pub(crate) fn push_spec(&mut self, spec: ToolSpec, supports_parallel_tool_calls: bool) {
-        #[cfg(feature = "code-mode")]
-        let spec = if self.code_mode_enabled {
-            codex_tools::augment_tool_spec_for_code_mode(spec)
-        } else {
-            spec
-        };
-        #[cfg(not(feature = "code-mode"))]
-        let spec = {
-            let _ = self.code_mode_enabled;
-            spec
-        };
-        self.specs
-            .push(ConfiguredToolSpec::new(spec, supports_parallel_tool_calls));
+    pub(crate) fn push_spec(&mut self, spec: ToolSpec) {
+        self.specs.push(spec);
     }
 
     pub fn register_handler<H>(&mut self, handler: Arc<H>)
     where
         H: ToolHandler + 'static,
     {
+        self.register_tool(handler);
+    }
+
+    pub(crate) fn register_tool(&mut self, handler: Arc<dyn RegisteredTool>) {
+        self.register_tool_internal(handler, /*include_spec*/ true);
+    }
+
+    pub(crate) fn register_tool_without_spec(&mut self, handler: Arc<dyn RegisteredTool>) {
+        self.register_tool_internal(handler, /*include_spec*/ false);
+    }
+
+    fn register_tool_internal(&mut self, handler: Arc<dyn RegisteredTool>, include_spec: bool) {
         let name = handler.tool_name();
         if self.handlers.contains_key(&name) {
             error_or_panic(format!("handler for tool {name} already registered"));
             return;
         }
 
-        if let Some(spec) = handler.spec() {
-            let supports_parallel_tool_calls = handler.supports_parallel_tool_calls();
-            self.push_spec(spec, supports_parallel_tool_calls);
+        if include_spec
+            && handler.exposure().is_direct()
+            && let Some(spec) = handler.spec()
+        {
+            self.push_spec(spec);
         }
 
-        let handler: Arc<dyn AnyToolHandler> = handler;
         self.handlers.insert(name, handler);
     }
 
-    pub fn register_tool_bundle(&mut self, bundle: ExtensionToolBundle) {
-        let tool_name = ToolName::plain(bundle.tool_name());
-        if self.handlers.contains_key(&tool_name) {
-            warn!("Skipping extension tool `{tool_name}`: handler already registered");
-            return;
-        }
-
-        let spec = match extension_tool_spec(bundle.spec()) {
-            Ok(spec) => spec,
-            Err(error) => {
-                error_or_panic(format!(
-                    "failed to convert extension tool `{tool_name}` to a host spec: {error}"
-                ));
-                return;
-            }
-        };
-        self.push_spec(spec.clone(), /*supports_parallel_tool_calls*/ false);
-
-        let handler: Arc<dyn AnyToolHandler> = Arc::new(BundledToolHandler::new(bundle, spec));
-        self.handlers.insert(tool_name, handler);
-    }
-
-    pub(crate) fn specs(&self) -> &[ConfiguredToolSpec] {
-        &self.specs
-    }
-
-    pub fn build(self) -> (Vec<ConfiguredToolSpec>, ToolRegistry) {
+    pub fn build(self) -> (Vec<ToolSpec>, ToolRegistry) {
         let registry = ToolRegistry::new(self.handlers);
         (self.specs, registry)
     }
@@ -641,7 +683,6 @@ fn unsupported_tool_call_message(payload: &ToolPayload, tool_name: &ToolName) ->
         _ => format!("unsupported call: {tool_name}"),
     }
 }
-
 #[cfg(test)]
 #[path = "registry_tests.rs"]
 mod tests;
