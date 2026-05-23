@@ -212,7 +212,7 @@ jobs:
           echo "Stamping Cargo workspace version to ${{ steps.version.outputs.version }}"
           sed -i 's/^version = ".*"$/version = "${{ steps.version.outputs.version }}"/' Cargo.toml
           grep -n '^version = "' Cargo.toml | head -1
-          cargo build --verbose --release --bin codex --target aarch64-linux-android
+          cargo build --release --bin codex --target aarch64-linux-android
           echo "Post-build V8-related files under target:"
           find target -maxdepth 10 \( -path "*/build/v8-*/out/*" -o -name "librusty_v8*.a" -o -name "*.sum" \) -print 2>/dev/null | sort
 
