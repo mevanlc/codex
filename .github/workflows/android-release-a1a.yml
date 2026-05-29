@@ -67,9 +67,17 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Version: $version (upstream tag: ${best_tag:-none}, distance: ${best_dist})"
 
+      - name: Read pinned Rust channel
+        id: toolchain
+        run: |
+          set -euo pipefail
+          channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "Pinned Rust channel: $channel"
+
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.93.0"
+          toolchain: ${{ steps.toolchain.outputs.channel }}
           targets: aarch64-linux-android
 
       - name: Verify host dependencies
@@ -183,7 +191,7 @@ jobs:
         env:
           CARGO_BUILD_JOBS: "2"
           CARGO_PROFILE_RELEASE_LTO: "thin"
-          RUSTY_V8_ARCHIVE: https://github.com/mevanlc/codex/releases/download/v8-v146.4.0/librusty_v8_release_aarch64-linux-android.a.gz
+          RUSTY_V8_ARCHIVE: https://github.com/mevanlc/codex/releases/download/v8-v147.4.0/librusty_v8_release_aarch64-linux-android.a.gz
           RUSTY_V8_SRC_BINDING_PATH: /tmp/v8_binding.rs
         run: |
           set -euxo pipefail
@@ -197,7 +205,7 @@ jobs:
           ls -l /tmp/rusty_v8_archive.a.gz
           gzip -l /tmp/rusty_v8_archive.a.gz
           curl -fLsS -o /tmp/v8_binding.rs \
-            https://github.com/mevanlc/codex/releases/download/v8-v146.4.0/src_binding_release_aarch64-linux-android.rs
+            https://github.com/mevanlc/codex/releases/download/v8-v147.4.0/src_binding_release_aarch64-linux-android.rs
           echo "Downloaded binding details:"
           ls -l /tmp/v8_binding.rs
           wc -c /tmp/v8_binding.rs
