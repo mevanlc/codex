@@ -294,6 +294,9 @@ jobs:
       - name: Create release with prebuilt artifacts
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job has no checkout, so gh cannot infer the repo from git
+          # (otherwise it fails with "fatal: not a git repository"). Set GH_REPO.
+          GH_REPO: ${{ github.repository }}
         run: |
           TAG="v8-v${{ inputs.v8_version }}"
 
