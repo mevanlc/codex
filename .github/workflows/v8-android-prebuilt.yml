@@ -166,6 +166,38 @@ jobs:
 
           echo "All submodules fetched."
 
+      - name: Install libclang for bindgen (Clang 22)
+        run: |
+          set -euxo pipefail
+          # rusty_v8's build.rs generates FFI bindings with bindgen, which loads
+          # libclang via LIBCLANG_PATH and calls LIBCLANG_PATH/../bin/clang
+          # -print-resource-dir. V8 147's vendored libc++ requires Clang 20+
+          # (uses __builtin_clzg/ctzg); ubuntu-24.04's default clang-18 can't parse
+          # it. Chromium's matching clang-23 is tip-of-tree (not on apt) and its
+          # libclang package ships only Python bindings, so use apt.llvm.org's
+          # newest stable (clang-22, >= the libc++ headers' stated floor of 20).
+          # The ninja build is unaffected: it uses V8's own downloaded clang-23.
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 22
+          sudo apt-get install -y libclang-22-dev
+          test -f /usr/lib/llvm-22/lib/libclang.so
+          test -x /usr/lib/llvm-22/bin/clang
+          echo "LIBCLANG_PATH=/usr/lib/llvm-22/lib" >> "$GITHUB_ENV"
+          # Fail fast (seconds, before the ~2h ninja build) if clang-22 cannot parse
+          # the exact libc++ headers that errored, using the same flags build.rs
+          # feeds bindgen. <type_traits>/<bit>/<algorithm> pull in is_convertible.h,
+          # __bit/countl.h, __algorithm/sort.h — the headers from the failed run.
+          RESDIR=$(/usr/lib/llvm-22/bin/clang -print-resource-dir)
+          printf '#include <type_traits>\n#include <bit>\n#include <algorithm>\nint main(){}\n' > /tmp/probe.cc
+          cd "$V8_ROOT"
+          /usr/lib/llvm-22/bin/clang -xc++ -std=c++20 -nostdinc++ \
+            -isystem buildtools/third_party/libc++ \
+            -isystem third_party/libc++/src/include \
+            -isystem third_party/libc++abi/src/include \
+            -isystem "$RESDIR/include" -fsyntax-only /tmp/probe.cc
+          echo "clang-22 parsed V8 147 libc++ headers OK"
+
       - name: Create builder crate
         run: |
           mkdir -p v8-builder/src
