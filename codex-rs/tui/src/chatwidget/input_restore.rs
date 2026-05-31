@@ -79,10 +79,9 @@ impl ChatWidget {
                 .unwrap_or(UserMessageHistoryRecord::UserMessageText);
             Some(user_message_for_restore(user_message, &history_record))
         } else {
-            self.input_queue
-                .pending_steers
-                .pop_back()
-                .map(|pending| user_message_for_restore(pending.user_message, &pending.history_record))
+            self.input_queue.pending_steers.pop_back().map(|pending| {
+                user_message_for_restore(pending.user_message, &pending.history_record)
+            })
         }
     }
 

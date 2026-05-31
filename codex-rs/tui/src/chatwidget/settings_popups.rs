@@ -143,7 +143,7 @@ impl ChatWidget {
         let _ = kind;
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    #[cfg(any(test, not(any(target_os = "linux", target_os = "android"))))]
     pub(super) fn open_realtime_audio_device_selection_with_names(
         &mut self,
         kind: RealtimeAudioDeviceKind,
