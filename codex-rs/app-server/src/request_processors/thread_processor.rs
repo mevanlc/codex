@@ -2380,6 +2380,7 @@ impl ThreadRequestProcessor {
         thread_id: ThreadId,
         connection_ids: Vec<ConnectionId>,
     ) {
+        let mut raw_events_enabled = false;
         if let Ok(thread) = self.thread_manager.get_thread(thread_id).await {
             let config_snapshot = thread.config_snapshot().await;
             let loaded_thread = build_thread_from_snapshot(
@@ -2389,16 +2390,21 @@ impl ThreadRequestProcessor {
                 thread.rollout_path(),
             );
             self.thread_watch_manager.upsert_thread(loaded_thread).await;
+            if let Some(parent_thread_id) = config_snapshot.parent_thread_id {
+                raw_events_enabled = self
+                    .thread_state_manager
+                    .thread_state(parent_thread_id)
+                    .await
+                    .lock()
+                    .await
+                    .experimental_raw_events;
+            }
         }
 
         for connection_id in connection_ids {
             log_listener_attach_result(
-                self.ensure_conversation_listener(
-                    thread_id,
-                    connection_id,
-                    /*raw_events_enabled*/ false,
-                )
-                .await,
+                self.ensure_conversation_listener(thread_id, connection_id, raw_events_enabled)
+                    .await,
                 thread_id,
                 connection_id,
                 "thread",
@@ -4012,6 +4018,7 @@ pub(crate) fn thread_from_stored_thread(
         id: thread_id.clone(),
         session_id: thread_id,
         forked_from_id: thread.forked_from_id.map(|id| id.to_string()),
+        parent_thread_id: thread.parent_thread_id.map(|id| id.to_string()),
         preview: thread.preview,
         ephemeral: false,
         model_provider: if thread.model_provider.is_empty() {
@@ -4220,6 +4227,7 @@ fn build_thread_from_snapshot(
         id: thread_id.to_string(),
         session_id,
         forked_from_id: None,
+        parent_thread_id: config_snapshot.parent_thread_id.map(|id| id.to_string()),
         preview: String::new(),
         ephemeral: config_snapshot.ephemeral,
         model_provider: config_snapshot.model_provider_id.clone(),
