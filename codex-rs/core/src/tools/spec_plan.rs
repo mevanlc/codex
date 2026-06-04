@@ -1,3 +1,5 @@
+use crate::agent::exceeds_thread_spawn_depth_limit;
+use crate::agent::next_thread_spawn_depth;
 use crate::session::turn_context::TurnContext;
 #[cfg(feature = "code-mode")]
 use crate::tools::code_mode::execute_spec::create_code_mode_tool;
@@ -64,6 +66,7 @@ use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ToolMode;
+use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_tools::DiscoverableTool;
@@ -75,7 +78,9 @@ use codex_tools::ToolEnvironmentMode;
 use codex_tools::ToolExecutor;
 use codex_tools::ToolName;
 use codex_tools::ToolOutput;
+use codex_tools::ToolSearchInfo;
 use codex_tools::ToolSpec;
+use codex_tools::UnifiedExecShellMode;
 use codex_tools::can_request_original_image_detail;
 #[cfg(feature = "code-mode")]
 use codex_tools::collect_code_mode_exec_prompt_tool_definitions;
@@ -206,18 +211,15 @@ fn build_model_visible_specs_and_registry(
         if exposure.is_direct() && !is_hidden_by_code_mode_only(turn_context, &tool_name, exposure)
         {
             let spec = runtime.spec();
-            specs.push(spec_for_model_request(turn_context, exposure, spec));
+            specs.push(spec_for_model_request(
+                turn_context,
+                exposure,
+                &tool_name,
+                spec,
+            ));
         }
     }
-    for spec in hosted_specs {
-        if !is_hidden_by_code_mode_only(
-            turn_context,
-            &ToolName::plain(spec.name()),
-            ToolExposure::Direct,
-        ) {
-            specs.push(spec);
-        }
-    }
+    specs.extend(hosted_specs);
 
     let registry = ToolRegistry::from_tools(runtimes);
     let model_visible_specs = merge_into_namespaces(specs)
@@ -233,21 +235,21 @@ fn build_model_visible_specs_and_registry(
 fn spec_for_model_request(
     turn_context: &TurnContext,
     exposure: ToolExposure,
+    tool_name: &ToolName,
     spec: ToolSpec,
 ) -> ToolSpec {
+    #[cfg(feature = "code-mode")]
+    if matches!(
+        turn_context.tool_mode,
+        ToolMode::CodeMode | ToolMode::CodeModeOnly
+    ) && exposure != ToolExposure::DirectModelOnly
+        && !is_excluded_from_code_mode(turn_context, tool_name)
+        && codex_code_mode::is_code_mode_nested_tool(spec.name())
     {
-        #[cfg(feature = "code-mode")]
-        if matches!(
-            turn_context.tool_mode,
-            ToolMode::CodeMode | ToolMode::CodeModeOnly
-        ) && exposure != ToolExposure::DirectModelOnly
-            && codex_code_mode::is_code_mode_nested_tool(spec.name())
-        {
-            return codex_tools::augment_tool_spec_for_code_mode(spec);
-        }
+        return codex_tools::augment_tool_spec_for_code_mode(spec);
     }
 
-    let _ = (turn_context, exposure);
+    let _ = (turn_context, exposure, tool_name);
     spec
 }
 
@@ -270,6 +272,7 @@ fn hosted_model_tool_specs(context: &CoreToolPlanContext<'_>) -> Vec<ToolSpec> {
     }) {
         specs.push(web_search_tool);
     }
+    // TODO: Remove hosted image generation once the standalone extension is ready.
     if image_generation_tool_enabled(turn_context)
         && !standalone_image_generation_available(turn_context, context.extension_tool_executors)
     {
@@ -294,11 +297,18 @@ fn namespace_tools_enabled(turn_context: &TurnContext) -> bool {
 }
 
 fn multi_agent_v2_enabled(turn_context: &TurnContext) -> bool {
-    turn_context.features.get().enabled(Feature::MultiAgentV2)
+    turn_context.multi_agent_version == MultiAgentVersion::V2
 }
 
 fn collab_tools_enabled(turn_context: &TurnContext) -> bool {
-    multi_agent_v2_enabled(turn_context) || turn_context.features.get().enabled(Feature::Collab)
+    match turn_context.multi_agent_version {
+        MultiAgentVersion::Disabled => false,
+        MultiAgentVersion::V1 => !exceeds_thread_spawn_depth_limit(
+            next_thread_spawn_depth(&turn_context.session_source),
+            turn_context.config.agent_max_depth,
+        ),
+        MultiAgentVersion::V2 => true,
+    }
 }
 
 fn goal_tools_enabled(turn_context: &TurnContext) -> bool {
@@ -310,7 +320,7 @@ fn goal_tools_enabled(turn_context: &TurnContext) -> bool {
 }
 
 fn agent_jobs_tools_enabled(turn_context: &TurnContext) -> bool {
-    turn_context.features.get().enabled(Feature::SpawnCsv)
+    turn_context.features.get().enabled(Feature::SpawnCsv) && collab_tools_enabled(turn_context)
 }
 
 fn agent_jobs_worker_tools_enabled(turn_context: &TurnContext) -> bool {
@@ -418,10 +428,20 @@ fn is_hidden_by_code_mode_only(
 }
 
 #[cfg(feature = "code-mode")]
+fn is_excluded_from_code_mode(turn_context: &TurnContext, tool_name: &ToolName) -> bool {
+    tool_name.namespace.as_ref().is_some_and(|namespace| {
+        turn_context
+            .config
+            .code_mode
+            .excluded_tool_namespaces
+            .contains(namespace)
+    })
+}
+
+#[cfg(feature = "code-mode")]
 fn build_code_mode_executors(
     turn_context: &TurnContext,
     executors: &[Arc<dyn CoreToolRuntime>],
-    deferred_tools_available: bool,
 ) -> Vec<Arc<dyn CoreToolRuntime>> {
     if !matches!(
         turn_context.tool_mode,
@@ -432,6 +452,8 @@ fn build_code_mode_executors(
 
     let mut code_mode_nested_tool_specs = Vec::new();
     let mut exec_prompt_tool_specs = Vec::new();
+    let mut deferred_tools_available = false;
+    let deferred_tools_guidance_enabled = search_tool_enabled(turn_context);
     for executor in executors {
         let exposure = executor.exposure();
         if exposure == ToolExposure::DirectModelOnly {
@@ -441,9 +463,19 @@ fn build_code_mode_executors(
         if exposure == ToolExposure::Hidden {
             continue;
         }
+
+        if is_excluded_from_code_mode(turn_context, &executor.tool_name()) {
+            continue;
+        }
+
         let spec = executor.spec();
 
-        if exposure != ToolExposure::Deferred {
+        if exposure == ToolExposure::Deferred {
+            // Only show deferred-tool guidance when supported and an included spec is usable by code mode.
+            deferred_tools_available |= deferred_tools_guidance_enabled
+                && !collect_code_mode_exec_prompt_tool_definitions(std::iter::once(&spec))
+                    .is_empty();
+        } else {
             exec_prompt_tool_specs.push(spec.clone());
         }
         code_mode_nested_tool_specs.push(spec);
@@ -473,7 +505,6 @@ fn build_code_mode_executors(
 fn build_code_mode_executors(
     _turn_context: &TurnContext,
     _executors: &[Arc<dyn CoreToolRuntime>],
-    _deferred_tools_available: bool,
 ) -> Vec<Arc<dyn CoreToolRuntime>> {
     Vec::new()
 }
@@ -592,6 +623,7 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut Planne
                 allow_login_shell,
                 exec_permission_approvals_enabled,
                 include_environment_id,
+                include_shell_parameter: unified_exec_should_include_shell_parameter(turn_context),
             }));
             planned_tools.add(WriteStdinHandler);
 
@@ -606,6 +638,17 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut Planne
             planned_tools.add(ShellCommandHandler::new(shell_command_options));
         }
     }
+}
+
+fn unified_exec_should_include_shell_parameter(turn_context: &TurnContext) -> bool {
+    !matches!(
+        &turn_context.unified_exec_shell_mode,
+        UnifiedExecShellMode::ZshFork(_)
+    ) || turn_context
+        .environments
+        .turn_environments
+        .iter()
+        .any(|environment| environment.environment.is_remote())
 }
 
 fn add_mcp_resource_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
@@ -850,16 +893,7 @@ fn prepend_code_mode_executors(
     planned_tools: &mut PlannedTools,
 ) {
     let turn_context = context.turn_context;
-    let deferred_tools_available = search_tool_enabled(turn_context)
-        && planned_tools
-            .runtimes()
-            .iter()
-            .any(|executor| executor.exposure() == ToolExposure::Deferred);
-    let code_mode_executors = build_code_mode_executors(
-        turn_context,
-        planned_tools.runtimes(),
-        deferred_tools_available,
-    );
+    let code_mode_executors = build_code_mode_executors(turn_context, planned_tools.runtimes());
     planned_tools.runtimes.splice(0..0, code_mode_executors);
 }
 
@@ -955,6 +989,10 @@ impl ToolExecutor<ToolInvocation> for MultiAgentV2NamespaceOverride {
         self.handler.supports_parallel_tool_calls()
     }
 
+    fn search_info(&self) -> Option<ToolSearchInfo> {
+        self.handler.search_info()
+    }
+
     async fn handle(
         &self,
         invocation: ToolInvocation,
@@ -966,10 +1004,6 @@ impl ToolExecutor<ToolInvocation> for MultiAgentV2NamespaceOverride {
 impl CoreToolRuntime for MultiAgentV2NamespaceOverride {
     fn matches_kind(&self, payload: &crate::tools::context::ToolPayload) -> bool {
         self.handler.matches_kind(payload)
-    }
-
-    fn search_info(&self) -> Option<crate::tools::tool_search_entry::ToolSearchInfo> {
-        self.handler.search_info()
     }
 
     fn create_diff_consumer(
