@@ -579,9 +579,6 @@
             "request_rule": {
               "type": "boolean"
             },
-            "responses_websocket_response_processed": {
-              "type": "boolean"
-            },
             "responses_websockets": {
               "type": "boolean"
             },
@@ -2513,15 +2510,8 @@
       "type": "string"
     },
     "ReasoningEffort": {
-      "description": "See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning",
-      "enum": [
-        "none",
-        "minimal",
-        "low",
-        "medium",
-        "high",
-        "xhigh"
-      ],
+      "description": "A non-empty reasoning effort value advertised by the model.",
+      "minLength": 1,
       "type": "string"
     },
     "ReasoningSummary": {
@@ -4724,9 +4714,6 @@
           "type": "boolean"
         },
         "request_rule": {
-          "type": "boolean"
-        },
-        "responses_websocket_response_processed": {
           "type": "boolean"
         },
         "responses_websockets": {
