@@ -702,7 +702,8 @@ mod tests {
             allowed_approval_policies: Some(vec![AskForApproval::OnRequest.to_core()]),
             allowed_approvals_reviewers: Some(vec![ApprovalsReviewer::AutoReview]),
             allowed_sandbox_modes: Some(vec![SandboxModeRequirement::ReadOnly]),
-            allowed_permissions: None,
+            allowed_permission_profiles: None,
+            default_permissions: None,
             remote_sandbox_config: None,
             allowed_web_search_modes: Some(vec![WebSearchModeRequirement::Cached]),
             allow_managed_hooks_only: Some(true),
@@ -754,7 +755,7 @@ mod tests {
             "allowed_approval_policies: on-request (source: {requirements_source})"
         )));
         assert!(rendered.contains(
-            "allowed_approvals_reviewers: guardian_subagent (source: MDM managed_config.toml (legacy))"
+            "allowed_approvals_reviewers: auto_review (source: MDM managed_config.toml (legacy))"
         ));
         assert!(
             rendered.contains(
@@ -817,7 +818,7 @@ mod tests {
 
         let rendered = render_to_text(&render_debug_config_lines(&stack));
         assert!(rendered.contains(
-            "allowed_approvals_reviewers: guardian_subagent (source: MDM managed_config.toml (legacy))"
+            "allowed_approvals_reviewers: auto_review (source: MDM managed_config.toml (legacy))"
         ));
         assert!(!rendered.contains("Requirements:\n  <none>"));
     }
@@ -973,7 +974,8 @@ approval_policy = "never"
             allowed_approval_policies: None,
             allowed_approvals_reviewers: None,
             allowed_sandbox_modes: None,
-            allowed_permissions: None,
+            allowed_permission_profiles: None,
+            default_permissions: None,
             remote_sandbox_config: None,
             allowed_web_search_modes: Some(Vec::new()),
             allow_managed_hooks_only: None,
