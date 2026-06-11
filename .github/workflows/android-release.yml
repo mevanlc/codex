@@ -135,7 +135,7 @@ jobs:
       - name: Build codex
         env:
           CARGO_BUILD_JOBS: "2"
-          CARGO_PROFILE_RELEASE_LTO: "thin"
+          CARGO_PROFILE_RELEASE_LTO: "fat"
           RUSTY_V8_ARCHIVE: https://github.com/mevanlc/codex/releases/download/v8-v146.4.0/librusty_v8_release_aarch64-linux-android.a.gz
           RUSTY_V8_SRC_BINDING_PATH: /tmp/v8_binding.rs
           RUSTFLAGS: -C link-arg=/usr/local/lib/android/sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/libclang_rt.builtins-aarch64-android.a
