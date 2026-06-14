@@ -934,6 +934,7 @@ impl TurnRequestProcessor {
             request_id,
             thread.as_ref(),
             Op::RealtimeConversationStart(ConversationStartParams {
+                architecture: params.architecture,
                 model: params.model,
                 output_modality: params.output_modality,
                 prompt: params.prompt,
@@ -996,7 +997,10 @@ impl TurnRequestProcessor {
         self.submit_core_op(
             request_id,
             thread.as_ref(),
-            Op::RealtimeConversationText(ConversationTextParams { text: params.text }),
+            Op::RealtimeConversationText(ConversationTextParams {
+                text: params.text,
+                role: params.role,
+            }),
         )
         .await
         .map_err(|err| {
