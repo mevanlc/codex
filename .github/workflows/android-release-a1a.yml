@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}
   cancel-in-progress: true
 
 permissions:
@@ -139,9 +139,21 @@ jobs:
           ln -sf "$AR"     "$TOOLCHAIN_BIN/aarch64-linux-android-ar"
           echo "$TOOLCHAIN_BIN" >> "$GITHUB_PATH"
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: codex-rs -> target
+      - name: Configure local build caches
+        shell: bash
+        run: |
+          set -euo pipefail
+          cache_root="$HOME/.cache/codex-a1a"
+          mkdir -p "$cache_root/cargo-target" "$cache_root/sccache"
+          {
+            echo "A1A_CACHE_ROOT=$cache_root"
+            echo "CARGO_TARGET_DIR=$cache_root/cargo-target"
+            echo "SCCACHE_DIR=$cache_root/sccache"
+            echo "SCCACHE_CACHE_SIZE=10G"
+            echo "SCCACHE_GHA_ENABLED=false"
+            echo "CARGO_INCREMENTAL=0"
+          } >> "$GITHUB_ENV"
+          echo "Using persistent local cache root: $cache_root"
 
       - name: Install sccache
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2
@@ -149,35 +161,9 @@ jobs:
           tool: sccache
           version: 0.7.5
 
-      - name: Configure sccache backend
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "SCCACHE_CACHE_SIZE=10G" >> "$GITHUB_ENV"
-          if [[ -n "${ACTIONS_CACHE_URL:-}" && -n "${ACTIONS_RUNTIME_TOKEN:-}" ]]; then
-            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-            echo "Using sccache GitHub backend"
-          else
-            echo "SCCACHE_GHA_ENABLED=false" >> "$GITHUB_ENV"
-            echo "SCCACHE_DIR=${{ github.workspace }}/.sccache" >> "$GITHUB_ENV"
-            echo "Using sccache local disk + actions/cache fallback"
-          fi
-
       - name: Enable sccache wrapper
         shell: bash
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
-
-      - name: Restore sccache cache (fallback)
-        if: ${{ env.SCCACHE_GHA_ENABLED != 'true' }}
-        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
-        with:
-          path: ${{ github.workspace }}/.sccache/
-          key: sccache-${{ runner.os }}-aarch64-linux-android-release-${{ hashFiles('codex-rs/Cargo.lock') }}-${{ github.run_id }}
-          restore-keys: |
-            sccache-${{ runner.os }}-aarch64-linux-android-release-${{ hashFiles('codex-rs/Cargo.lock') }}-
-            sccache-${{ runner.os }}-aarch64-linux-android-release-
+        run: echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
 
       - name: Build codex
         env:
@@ -189,7 +175,7 @@ jobs:
           RUSTY_V8_SRC_BINDING_PATH: /tmp/v8_binding.rs
         run: |
           set -euxo pipefail
-          trap 'status=$?; echo "Build codex failed with status $status"; echo "V8-related files under target:"; find target -maxdepth 10 \( -path "*/build/v8-*/out/*" -o -name "librusty_v8*.a" -o -name "*.sum" \) -print 2>/dev/null | sort || true; exit "$status"' ERR
+          trap 'status=$?; echo "Build codex failed with status $status"; echo "V8-related files under $CARGO_TARGET_DIR:"; find "$CARGO_TARGET_DIR" -maxdepth 10 \( -path "*/build/v8-*/out/*" -o -name "librusty_v8*.a" -o -name "*.sum" \) -print 2>/dev/null | sort || true; exit "$status"' ERR
           echo "Rusty V8 environment:"
           env | sort | grep -E '^(AR_|CC_|CARGO_TARGET_AARCH64|RANLIB_|RUSTFLAGS|RUSTY_V8_)' || true
           echo "Rusty V8 archive headers:"
@@ -204,9 +190,9 @@ jobs:
           ls -l /tmp/v8_binding.rs
           wc -c /tmp/v8_binding.rs
           sed -n '1,5p' /tmp/v8_binding.rs
-          V8_STAGE_DIR=target/aarch64-linux-android/release/gn_out/obj
+          V8_STAGE_DIR="$CARGO_TARGET_DIR/aarch64-linux-android/release/gn_out/obj"
           echo "Pre-staging fresh rusty_v8 into $V8_STAGE_DIR"
-          rm -rf target/aarch64-linux-android/release/gn_out
+          rm -rf "$CARGO_TARGET_DIR/aarch64-linux-android/release/gn_out"
           mkdir -p "$V8_STAGE_DIR"
           gzip -dc /tmp/rusty_v8_archive.a.gz > "$V8_STAGE_DIR/librusty_v8.a"
           printf '%s' "$RUSTY_V8_ARCHIVE" > "$V8_STAGE_DIR/librusty_v8.sum"
@@ -215,12 +201,12 @@ jobs:
           sed -i 's/^version = ".*"$/version = "${{ steps.version.outputs.version }}"/' Cargo.toml
           grep -n '^version = "' Cargo.toml | head -1
           cargo build --release --bin codex --target aarch64-linux-android
-          echo "Post-build V8-related files under target:"
-          find target -maxdepth 10 \( -path "*/build/v8-*/out/*" -o -name "librusty_v8*.a" -o -name "*.sum" \) -print 2>/dev/null | sort
+          echo "Post-build V8-related files under $CARGO_TARGET_DIR:"
+          find "$CARGO_TARGET_DIR" -maxdepth 10 \( -path "*/build/v8-*/out/*" -o -name "librusty_v8*.a" -o -name "*.sum" \) -print 2>/dev/null | sort
 
       - name: Compress binary
         run: |
-          zstd -19 target/aarch64-linux-android/release/codex \
+          zstd -19 "$CARGO_TARGET_DIR/aarch64-linux-android/release/codex" \
             -o codex-aarch64-linux-android.zst
 
       - name: Upload artifact
@@ -229,18 +215,15 @@ jobs:
           name: codex-aarch64-linux-android
           path: codex-rs/codex-aarch64-linux-android.zst
 
-      - name: Save sccache cache (fallback)
-        if: ${{ always() && !cancelled() && env.SCCACHE_GHA_ENABLED != 'true' }}
-        continue-on-error: true
-        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
-        with:
-          path: ${{ github.workspace }}/.sccache/
-          key: sccache-${{ runner.os }}-aarch64-linux-android-release-${{ hashFiles('codex-rs/Cargo.lock') }}-${{ github.run_id }}
-
       - name: sccache stats
         if: ${{ always() }}
         continue-on-error: true
         run: sccache --show-stats || true
+
+      - name: Local cache disk usage
+        if: ${{ always() }}
+        continue-on-error: true
+        run: du -sh "$A1A_CACHE_ROOT"/* 2>/dev/null || true
 
     outputs:
       version: ${{ steps.version.outputs.version }}
