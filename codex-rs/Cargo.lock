@@ -3911,7 +3911,6 @@ dependencies = [
  "serde",
  "serde_json",
  "shlex",
- "tempfile",
  "tree-sitter",
  "tree-sitter-bash",
  "url",
@@ -4058,6 +4057,7 @@ dependencies = [
 name = "codex-tools"
 version = "0.0.0"
 dependencies = [
+ "codex-app-server-protocol",
  "codex-code-mode",
  "codex-connectors",
  "codex-features",

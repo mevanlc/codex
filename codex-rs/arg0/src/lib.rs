@@ -22,6 +22,7 @@ const MISSPELLED_APPLY_PATCH_ARG0: &str = "applypatch";
 #[cfg(unix)]
 const EXECVE_WRAPPER_ARG0: &str = "codex-execve-wrapper";
 const LOCK_FILENAME: &str = ".lock";
+#[cfg(any(target_os = "android", target_os = "linux"))]
 const PROCESS_METADATA_FILENAME: &str = ".process";
 const TOKIO_WORKER_STACK_SIZE_BYTES: usize = 16 * 1024 * 1024;
 
@@ -674,6 +675,7 @@ mod tests {
     use super::Arg0PathEntryGuard;
     use super::FileLockStatus;
     use super::LOCK_FILENAME;
+    #[cfg(any(target_os = "android", target_os = "linux"))]
     use super::PROCESS_METADATA_FILENAME;
     #[cfg(any(target_os = "android", target_os = "linux"))]
     use super::current_process_metadata;
@@ -897,12 +899,21 @@ mod tests {
         let root = tempfile::tempdir()?;
         let dir = root.path().join("locked");
         fs::create_dir(&dir)?;
-        if locking_is_supported()? {
+        let _held_lock = if locking_is_supported()? {
             let lock_file = create_lock(&dir)?;
             lock_file.try_lock()?;
+            Some(lock_file)
         } else {
-            write_current_process_metadata(&dir)?;
-        }
+            #[cfg(any(target_os = "android", target_os = "linux"))]
+            {
+                write_current_process_metadata(&dir)?;
+                None
+            }
+            #[cfg(not(any(target_os = "android", target_os = "linux")))]
+            {
+                return Ok(());
+            }
+        };
 
         janitor_cleanup(root.path())?;
 
@@ -918,11 +929,16 @@ mod tests {
         if locking_is_supported()? {
             create_lock(&dir)?;
         } else {
-            let metadata = current_process_metadata()?;
-            fs::write(
-                dir.join(PROCESS_METADATA_FILENAME),
-                format!("{} {}\n", metadata.pid, metadata.starttime_ticks + 1),
-            )?;
+            #[cfg(any(target_os = "android", target_os = "linux"))]
+            {
+                let metadata = current_process_metadata()?;
+                fs::write(
+                    dir.join(PROCESS_METADATA_FILENAME),
+                    format!("{} {}\n", metadata.pid, metadata.starttime_ticks + 1),
+                )?;
+            }
+            #[cfg(not(any(target_os = "android", target_os = "linux")))]
+            return Ok(());
         }
 
         janitor_cleanup(root.path())?;
