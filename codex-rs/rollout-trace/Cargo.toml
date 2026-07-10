@@ -12,13 +12,9 @@ path = "src/lib.rs"
 [lints]
 workspace = true
 
-[features]
-default = []
-code-mode = ["dep:codex-code-mode"]
-
 [dependencies]
 anyhow = { workspace = true }
-codex-code-mode = { workspace = true, optional = true }
+codex-code-mode = { workspace = true }
 codex-protocol = { workspace = true }
 http = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

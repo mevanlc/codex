@@ -7,13 +7,9 @@ version.workspace = true
 [lints]
 workspace = true
 
-[features]
-default = []
-code-mode = ["dep:codex-code-mode"]
-
 [dependencies]
 codex-app-server-protocol = { workspace = true }
-codex-code-mode = { workspace = true, optional = true }
+codex-code-mode = { workspace = true }
 codex-connectors = { workspace = true }
 codex-features = { workspace = true }
 codex-file-system = { workspace = true }

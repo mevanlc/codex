@@ -14,10 +14,6 @@ name = "codex_cli"
 path = "src/lib.rs"
 doctest = false
 
-[features]
-default = ["code-mode"]
-code-mode = ["codex-core/code-mode"]
-
 [lints]
 workspace = true
 

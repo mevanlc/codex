@@ -1,7 +1,6 @@
 //! Shared tool definitions and Responses API tool primitives that can live
 //! outside `codex-core`.
 
-#[cfg(feature = "code-mode")]
 mod code_mode;
 mod dynamic_tool;
 mod function_call_error;
@@ -21,15 +20,10 @@ mod tool_payload;
 mod tool_search;
 mod tool_spec;
 
-#[cfg(feature = "code-mode")]
 pub use code_mode::augment_tool_spec_for_code_mode;
-#[cfg(feature = "code-mode")]
 pub use code_mode::code_mode_name_for_tool_name;
-#[cfg(feature = "code-mode")]
 pub use code_mode::collect_code_mode_exec_prompt_tool_definitions;
-#[cfg(feature = "code-mode")]
 pub use code_mode::collect_code_mode_tool_definitions;
-#[cfg(feature = "code-mode")]
 pub use code_mode::tool_spec_to_code_mode_tool_definition;
 pub use codex_protocol::ToolName;
 pub use dynamic_tool::parse_dynamic_tool;

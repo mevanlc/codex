@@ -2,14 +2,11 @@ use crate::agent::exceeds_thread_spawn_depth_limit;
 use crate::agent::next_thread_spawn_depth;
 use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
-#[cfg(feature = "code-mode")]
 use crate::tools::code_mode::execute_spec::create_code_mode_tool;
 use crate::tools::context::ToolInvocation;
 use crate::tools::effective_tool_mode;
 use crate::tools::handlers::ApplyPatchHandler;
-#[cfg(feature = "code-mode")]
 use crate::tools::handlers::CodeModeExecuteHandler;
-#[cfg(feature = "code-mode")]
 use crate::tools::handlers::CodeModeWaitHandler;
 use crate::tools::handlers::CurrentTimeHandler;
 use crate::tools::handlers::DynamicToolHandler;
@@ -85,7 +82,6 @@ use codex_tools::ToolSearchInfo;
 use codex_tools::ToolSpec;
 use codex_tools::UnifiedExecShellMode;
 use codex_tools::can_request_original_image_detail;
-#[cfg(feature = "code-mode")]
 use codex_tools::collect_code_mode_exec_prompt_tool_definitions;
 use codex_tools::collect_request_plugin_install_entries;
 use codex_tools::default_namespace_description;
@@ -281,21 +277,16 @@ fn spec_for_model_request(
     tool_name: &ToolName,
     spec: ToolSpec,
 ) -> ToolSpec {
-    #[cfg(feature = "code-mode")]
+    let tool_mode = effective_tool_mode(turn_context);
+    if matches!(tool_mode, ToolMode::CodeMode | ToolMode::CodeModeOnly)
+        && exposure != ToolExposure::DirectModelOnly
+        && !is_excluded_from_code_mode(turn_context, tool_name)
+        && codex_code_mode::is_code_mode_nested_tool(spec.name())
     {
-        let tool_mode = effective_tool_mode(turn_context);
-        if matches!(tool_mode, ToolMode::CodeMode | ToolMode::CodeModeOnly)
-            && exposure != ToolExposure::DirectModelOnly
-            && !is_excluded_from_code_mode(turn_context, tool_name)
-            && codex_code_mode::is_code_mode_nested_tool(spec.name())
-        {
-            return codex_tools::augment_tool_spec_for_code_mode(spec);
-        }
+        codex_tools::augment_tool_spec_for_code_mode(spec)
+    } else {
+        spec
     }
-
-    #[cfg(not(feature = "code-mode"))]
-    let _ = (turn_context, exposure, tool_name);
-    spec
 }
 
 #[instrument(level = "trace", skip_all)]
@@ -441,24 +432,14 @@ fn is_hidden_by_code_mode_only(
     tool_name: &ToolName,
     exposure: ToolExposure,
 ) -> bool {
-    #[cfg(feature = "code-mode")]
-    {
-        let tool_mode = effective_tool_mode(turn_context);
-        tool_mode == ToolMode::CodeModeOnly
-            && exposure != ToolExposure::DirectModelOnly
-            && codex_code_mode::is_code_mode_nested_tool(
-                &codex_tools::code_mode_name_for_tool_name(tool_name),
-            )
-    }
-
-    #[cfg(not(feature = "code-mode"))]
-    {
-        let _ = (turn_context, tool_name, exposure);
-        false
-    }
+    let tool_mode = effective_tool_mode(turn_context);
+    tool_mode == ToolMode::CodeModeOnly
+        && exposure != ToolExposure::DirectModelOnly
+        && codex_code_mode::is_code_mode_nested_tool(&codex_tools::code_mode_name_for_tool_name(
+            tool_name,
+        ))
 }
 
-#[cfg(feature = "code-mode")]
 fn is_excluded_from_code_mode(turn_context: &TurnContext, tool_name: &ToolName) -> bool {
     tool_name.namespace.as_ref().is_some_and(|namespace| {
         turn_context
@@ -469,7 +450,6 @@ fn is_excluded_from_code_mode(turn_context: &TurnContext, tool_name: &ToolName) 
     })
 }
 
-#[cfg(feature = "code-mode")]
 fn build_code_mode_executors(
     turn_context: &TurnContext,
     executors: &[Arc<dyn CoreToolRuntime>],
@@ -531,14 +511,6 @@ fn build_code_mode_executors(
     ]
 }
 
-#[cfg(not(feature = "code-mode"))]
-fn build_code_mode_executors(
-    _turn_context: &TurnContext,
-    _executors: &[Arc<dyn CoreToolRuntime>],
-) -> Vec<Arc<dyn CoreToolRuntime>> {
-    Vec::new()
-}
-
 #[instrument(level = "trace", skip_all, fields(tool_spec_count = specs.len()))]
 fn merge_into_namespaces(specs: Vec<ToolSpec>) -> Vec<ToolSpec> {
     let mut merged_specs = Vec::with_capacity(specs.len());
@@ -586,7 +558,6 @@ fn merge_into_namespaces(specs: Vec<ToolSpec>) -> Vec<ToolSpec> {
     merged_specs
 }
 
-#[cfg(feature = "code-mode")]
 fn code_mode_namespace_descriptions(
     specs: &[ToolSpec],
 ) -> BTreeMap<String, codex_code_mode::ToolNamespaceDescription> {
@@ -1034,11 +1005,8 @@ fn append_extension_tool_executors(
         .collect::<HashSet<_>>();
     let tool_mode = effective_tool_mode(turn_context);
     if matches!(tool_mode, ToolMode::CodeMode | ToolMode::CodeModeOnly) {
-        #[cfg(feature = "code-mode")]
-        {
-            reserved_tool_names.insert(ToolName::plain(codex_code_mode::PUBLIC_TOOL_NAME));
-            reserved_tool_names.insert(ToolName::plain(codex_code_mode::WAIT_TOOL_NAME));
-        }
+        reserved_tool_names.insert(ToolName::plain(codex_code_mode::PUBLIC_TOOL_NAME));
+        reserved_tool_names.insert(ToolName::plain(codex_code_mode::WAIT_TOOL_NAME));
     }
     if search_tool_enabled(turn_context)
         && planned_tools
@@ -1135,7 +1103,6 @@ impl CoreToolRuntime for MultiAgentV2NamespaceOverride {
     }
 }
 
-#[cfg(feature = "code-mode")]
 fn compare_code_mode_tools(
     left: &codex_code_mode::ToolDefinition,
     right: &codex_code_mode::ToolDefinition,
@@ -1150,7 +1117,6 @@ fn compare_code_mode_tools(
         .then_with(|| left.name.cmp(&right.name))
 }
 
-#[cfg(feature = "code-mode")]
 fn code_mode_namespace_name<'a>(
     tool: &codex_code_mode::ToolDefinition,
     namespace_descriptions: &'a BTreeMap<String, codex_code_mode::ToolNamespaceDescription>,
