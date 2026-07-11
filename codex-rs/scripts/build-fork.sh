@@ -249,18 +249,23 @@ if [[ "$(uname -m)" == "aarch64" ]] && [[ -f /system/build.prop ]]; then
 	echo "Termux detected: using prebuilt V8 from ${V8_PREBUILT_TAG}"
 fi
 
-# Build binary
+# Build binaries
 echo "Building codex $VERSION ($PROFILE)..."
 
-cargo build --bin codex --profile $PROFILE -p codex-cli
+cargo build \
+	--bin codex \
+	--bin codex-code-mode-host \
+	--profile "$PROFILE"
 
-# Copy to ~/.local/bin
+# Copy to ~/.local/bin. The code-mode runtime resolves its host beside codex.
 mkdir -p "$HOME/.local/bin"
 cp "$CODEX_DIR/target/$PROFILE/codex" "$HOME/.local/bin/codex"
+cp "$CODEX_DIR/target/$PROFILE/codex-code-mode-host" "$HOME/.local/bin/codex-code-mode-host"
 
-# macOS: re-sign after copy so the ad-hoc signature covers the installed path
+# macOS: re-sign after copy so the ad-hoc signatures cover the installed paths
 if [[ "$(uname)" == "Darwin" ]]; then
   codesign --force --sign - "$HOME/.local/bin/codex"
+  codesign --force --sign - "$HOME/.local/bin/codex-code-mode-host"
 fi
 
 warn_if_installed_codex_is_not_first_on_path() {
@@ -348,4 +353,4 @@ maybe_prune_target() {
 maybe_prune_target
 warn_if_installed_codex_is_not_first_on_path
 
-echo "Installed codex $VERSION to $HOME/.local/bin/codex"
+echo "Installed codex $VERSION and its code-mode host to $HOME/.local/bin"

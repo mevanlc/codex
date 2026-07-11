@@ -134,7 +134,7 @@ jobs:
           sudo swapon /mnt/swapfile
         working-directory: /
 
-      - name: Build codex
+      - name: Build codex and code-mode host
         env:
           CARGO_BUILD_JOBS: "2"
           CARGO_PROFILE_RELEASE_DEBUG: "0"
@@ -170,20 +170,27 @@ jobs:
           echo "Stamping Cargo workspace version to ${{ steps.version.outputs.version }}"
           sed -i 's/^version = ".*"$/version = "${{ steps.version.outputs.version }}"/' Cargo.toml
           grep -n '^version = "' Cargo.toml | head -1
-          cargo build --verbose --release --bin codex --target aarch64-linux-android
+          cargo build --verbose --release \
+            --bin codex \
+            --bin codex-code-mode-host \
+            --target aarch64-linux-android
           echo "Post-build V8-related files under target:"
           find target -maxdepth 10 \( -path "*/build/v8-*/out/*" -o -name "librusty_v8*.a" -o -name "*.sum" \) -print 2>/dev/null | sort
 
-      - name: Compress binary
+      - name: Compress binaries
         run: |
           zstd -19 target/aarch64-linux-android/release/codex \
             -o codex-aarch64-linux-android.zst
+          zstd -19 target/aarch64-linux-android/release/codex-code-mode-host \
+            -o codex-code-mode-host-aarch64-linux-android.zst
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: codex-aarch64-linux-android
-          path: codex-rs/codex-aarch64-linux-android.zst
+          path: |
+            codex-rs/codex-aarch64-linux-android.zst
+            codex-rs/codex-code-mode-host-aarch64-linux-android.zst
 
       - name: Save sccache cache (fallback)
         if: ${{ always() && !cancelled() && env.SCCACHE_GHA_ENABLED != 'true' }}
@@ -217,7 +224,9 @@ jobs:
           name: Android aarch64 ${{ needs.build.outputs.version }}
           prerelease: false
           make_latest: true
-          files: codex-aarch64-linux-android.zst
+          files: |
+            codex-aarch64-linux-android.zst
+            codex-code-mode-host-aarch64-linux-android.zst
           body: |
             Codex CLI for Android aarch64 (Termux) — with code-mode (V8/JS REPL).
 
@@ -226,5 +235,8 @@ jobs:
 
             ```sh
             zstd -d codex-aarch64-linux-android.zst -o codex
-            chmod +x codex
+            zstd -d codex-code-mode-host-aarch64-linux-android.zst -o codex-code-mode-host
+            chmod +x codex codex-code-mode-host
             ```
+
+            Install `codex` and `codex-code-mode-host` in the same directory on `PATH`.
