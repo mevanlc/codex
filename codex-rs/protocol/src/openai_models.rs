@@ -21,7 +21,7 @@ use serde::de::DeserializeOwned;
 use serde::de::Error;
 use strum_macros::Display;
 use strum_macros::EnumIter;
-use tracing::warn;
+use tracing::trace;
 use ts_rs::TS;
 
 use crate::config_types::Personality;
@@ -230,6 +230,11 @@ pub struct ModelPreset {
     pub upgrade: Option<ModelUpgrade>,
     /// Whether this preset should appear in the picker UI.
     pub show_in_picker: bool,
+    /// Multi-agent backend selected when this model starts a new thread.
+    #[serde(default, skip_serializing, skip_deserializing)]
+    #[schemars(skip)]
+    #[ts(skip)]
+    pub multi_agent_version: Option<MultiAgentVersion>,
     /// Availability NUX shown when this preset becomes accessible to the user.
     pub availability_nux: Option<ModelAvailabilityNux>,
     /// whether this model is supported in the api
@@ -480,7 +485,7 @@ impl ModelInfo {
         } else {
             match personality {
                 Some(personality @ (Personality::Friendly | Personality::Pragmatic)) => {
-                    warn!(
+                    trace!(
                         model = %self.slug,
                         %personality,
                         "Model personality requested but model_messages is missing, falling back to base instructions."
@@ -500,12 +505,18 @@ pub struct ModelMessages {
     pub instructions_template: Option<String>,
     pub instructions_variables: Option<ModelInstructionsVariables>,
     pub approvals: Option<ApprovalMessages>,
+    pub auto_review: Option<AutoReviewMessages>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, TS, JsonSchema)]
 pub struct ApprovalMessages {
     pub on_request: Option<String>,
     pub on_request_auto_review: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, TS, JsonSchema)]
+pub struct AutoReviewMessages {
+    pub policy: Option<String>,
 }
 
 impl ModelMessages {
@@ -606,6 +617,7 @@ impl From<ModelInfo> for ModelPreset {
                 migration_markdown: Some(upgrade.migration_markdown.clone()),
             }),
             show_in_picker: info.visibility == ModelVisibility::List,
+            multi_agent_version: info.multi_agent_version,
             availability_nux: info.availability_nux,
             supported_in_api: info.supported_in_api,
             input_modalities: info.input_modalities,
@@ -828,6 +840,7 @@ mod tests {
             instructions_template: Some("Hello {{ personality }}".to_string()),
             instructions_variables: Some(personality_variables()),
             approvals: None,
+            auto_review: None,
         }));
 
         let instructions = model.get_model_instructions(Some(Personality::Friendly));
@@ -845,6 +858,7 @@ mod tests {
                 personality_pragmatic: None,
             }),
             approvals: None,
+            auto_review: None,
         }));
         assert_eq!(
             model.get_model_instructions(Some(Personality::Friendly)),
@@ -871,6 +885,7 @@ mod tests {
                 personality_pragmatic: None,
             }),
             approvals: None,
+            auto_review: None,
         }));
         assert_eq!(
             model_no_personality.get_model_instructions(Some(Personality::Friendly)),
@@ -900,6 +915,7 @@ mod tests {
                 personality_pragmatic: None,
             }),
             approvals: None,
+            auto_review: None,
         }));
 
         let instructions = model.get_model_instructions(Some(Personality::Friendly));
