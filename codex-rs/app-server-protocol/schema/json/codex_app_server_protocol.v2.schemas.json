@@ -11236,6 +11236,38 @@
       ],
       "type": "object"
     },
+    "RawResponseCompletedNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "Internal-only notification containing the exact usage from one upstream Responses API completion.",
+      "properties": {
+        "responseId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TokenUsageBreakdown"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "responseId",
+        "threadId",
+        "turnId"
+      ],
+      "title": "RawResponseCompletedNotification",
+      "type": "object"
+    },
     "RawResponseItemCompletedNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -14385,6 +14417,13 @@
           "type": "object"
         }
       ],
+      "properties": {
+        "emittedAtMs": {
+          "description": "Unix timestamp (in milliseconds) when app-server emitted this notification.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
       "title": "ServerNotification"
     },
     "ServerRequestResolvedNotification": {
@@ -16330,6 +16369,15 @@
             "query": {
               "type": "string"
             },
+            "results": {
+              "default": null,
+              "description": "Structured search results returned out-of-band by standalone web search.\n\nThese stay as opaque JSON at the extension/app-server boundary so new result fields and result types can pass through without a Codex release.",
+              "items": true,
+              "type": [
+                "array",
+                "null"
+              ]
+            },
             "type": {
               "enum": [
                 "webSearch"
@@ -18102,6 +18150,16 @@
         },
         "environmentId": {
           "type": "string"
+        },
+        "runtimeWorkspaceRoots": {
+          "description": "Environment-native runtime workspace roots. Omitted defaults to `cwd`.",
+          "items": {
+            "$ref": "#/definitions/LegacyAppPathString"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [
