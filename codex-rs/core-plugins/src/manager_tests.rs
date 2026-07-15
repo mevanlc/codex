@@ -1928,6 +1928,7 @@ async fn load_plugin_skills_dedupes_overlapping_manifest_roots() {
         /*restriction_product*/ None,
         &SkillConfigRules::default(),
         /*plugin_skill_snapshots*/ None,
+        Arc::new(Semaphore::new(MAX_CONCURRENT_ROOT_SCANS)),
     )
     .await;
 
@@ -5822,6 +5823,7 @@ async fn load_plugins_ignores_project_config_files() {
         /*plugin_skill_snapshots*/ None,
         Some(Product::Codex),
         /*remote_global_catalog_active*/ false,
+        Arc::new(Semaphore::new(MAX_CONCURRENT_ROOT_SCANS)),
     )
     .await;
 
@@ -5948,5 +5950,18 @@ fn remote_installed_plugins_cache_refresh_coalesces_materializations() {
     assert_eq!(
         unrelated_callback_count.load(std::sync::atomic::Ordering::Relaxed),
         0
+    );
+}
+
+#[test]
+fn plugin_install_error_preserves_store_io_sub_error_type() {
+    let error = PluginInstallError::Store(PluginStoreError::Io {
+        context: "failed to copy plugin file",
+        source: std::io::Error::other("copy failed"),
+    });
+
+    assert_eq!(
+        error.sub_error_type(),
+        Some("failed_to_copy_plugin_file".to_string())
     );
 }
