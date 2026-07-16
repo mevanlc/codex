@@ -42,6 +42,11 @@ pub(crate) enum AppCommand {
         final_output_json_schema: Option<Value>,
         collaboration_mode: Option<CollaborationMode>,
         personality: Option<Personality>,
+        client_user_message_id: Option<String>,
+    },
+    RetractSteer {
+        expected_turn_id: String,
+        client_user_message_id: String,
     },
     OverrideTurnContext {
         cwd: Option<PathBuf>,
@@ -125,6 +130,7 @@ impl AppCommand {
         final_output_json_schema: Option<Value>,
         collaboration_mode: Option<CollaborationMode>,
         personality: Option<Personality>,
+        client_user_message_id: Option<String>,
     ) -> Self {
         Self::UserTurn {
             items,
@@ -139,6 +145,14 @@ impl AppCommand {
             final_output_json_schema,
             collaboration_mode,
             personality,
+            client_user_message_id,
+        }
+    }
+
+    pub(crate) fn retract_steer(expected_turn_id: String, client_user_message_id: String) -> Self {
+        Self::RetractSteer {
+            expected_turn_id,
+            client_user_message_id,
         }
     }
 

@@ -9,11 +9,14 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::watch;
 
+use super::RetractSteerStatus;
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum TurnInput {
     UserInput {
         content: Vec<UserInput>,
         client_id: Option<String>,
+        retractable: bool,
     },
     ResponseItem(ResponseItem),
     InterAgentCommunication(InterAgentCommunication),
@@ -264,6 +267,33 @@ impl InputQueue {
 }
 
 impl TurnInputQueue {
+    pub(super) fn retract_steer(&mut self, client_id: &str) -> RetractSteerStatus {
+        let Some(index) = self.items.iter().position(|input| {
+            matches!(
+                input,
+                TurnInput::UserInput {
+                    client_id: Some(pending_client_id),
+                    ..
+                } if pending_client_id == client_id
+            )
+        }) else {
+            return RetractSteerStatus::NotPending;
+        };
+
+        if matches!(
+            self.items.get(index),
+            Some(TurnInput::UserInput {
+                retractable: false,
+                ..
+            })
+        ) {
+            return RetractSteerStatus::NotRetractable;
+        }
+
+        self.items.remove(index);
+        RetractSteerStatus::Retracted
+    }
+
     fn has_user_input(&self) -> bool {
         self.items
             .iter()
@@ -340,6 +370,7 @@ mod tests {
                         text_elements: Vec::new(),
                     }],
                     client_id: None,
+                    retractable: false,
                 }],
             )
             .await;
@@ -361,6 +392,7 @@ mod tests {
                         text_elements: Vec::new(),
                     }],
                     client_id: None,
+                    retractable: false,
                 }],
             )
             .await;

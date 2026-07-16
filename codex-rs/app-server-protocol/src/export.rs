@@ -50,6 +50,7 @@ const EXPERIMENTAL_CLIENT_METHOD_DEPENDENCY_TYPES: &[&str] = &[
     "RemoteControlClient",
     "RemoteControlClientsListOrder",
     "ThreadBackgroundTerminal",
+    "TurnRetractStatus",
 ];
 const SPECIAL_DEFINITIONS: &[&str] = &[
     "ClientNotification",

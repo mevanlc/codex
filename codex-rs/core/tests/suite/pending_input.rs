@@ -2,6 +2,7 @@ use core_test_support::test_codex::local_selections;
 use std::sync::Arc;
 
 use codex_core::CodexThread;
+use codex_core::RetractSteerStatus;
 use codex_core::config::CurrentTimeReminderConfig;
 use codex_extension_items::ExtensionItem;
 use codex_extension_items::sleep::SleepItem;
@@ -599,6 +600,53 @@ async fn injected_user_input_triggers_follow_up_request_with_deltas() {
     let second_texts = message_input_texts(&second_body, "user");
     assert!(second_texts.iter().any(|text| text == "first prompt"));
     assert!(second_texts.iter().any(|text| text == "second prompt"));
+
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retracted_steer_is_not_sent_in_a_follow_up_request() {
+    let (gate_completed_tx, gate_completed_rx) = oneshot::channel();
+    let first_chunks = vec![
+        chunk(ev_response_created("resp-1")),
+        chunk(ev_message_item_added("msg-1", "")),
+        chunk(ev_output_text_delta("first answer")),
+        chunk(ev_message_item_done("msg-1", "first answer")),
+        gated_chunk(gate_completed_rx, vec![ev_completed("resp-1")]),
+    ];
+    let (server, _completions) = start_streaming_sse_server(vec![first_chunks]).await;
+    let codex = build_codex(&server).await;
+
+    submit_user_input(&codex, "first prompt").await;
+    wait_for_agent_message(&codex, "first answer").await;
+
+    let turn_id = codex
+        .steer_input(
+            vec![UserInput::Text {
+                text: "retracted prompt".to_string(),
+                text_elements: Vec::new(),
+            }],
+            /*additional_context*/ Default::default(),
+            /*expected_turn_id*/ None,
+            Some("client-message-1".to_string()),
+            /*responsesapi_client_metadata*/ None,
+        )
+        .await
+        .expect("steer should be accepted");
+    assert_eq!(
+        codex.retract_steer(&turn_id, "client-message-1").await,
+        RetractSteerStatus::Retracted
+    );
+
+    let _ = gate_completed_tx.send(());
+    wait_for_turn_complete(&codex).await;
+
+    let requests = server.requests().await;
+    assert_eq!(requests.len(), 1);
+    let body: Value = from_slice(&requests[0]).expect("parse request");
+    let user_texts = message_input_texts(&body, "user");
+    assert!(user_texts.iter().any(|text| text == "first prompt"));
+    assert!(!user_texts.iter().any(|text| text == "retracted prompt"));
 
     server.shutdown().await;
 }

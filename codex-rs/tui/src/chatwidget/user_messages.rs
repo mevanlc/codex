@@ -124,9 +124,7 @@ impl ThreadComposerState {
 pub(crate) struct ThreadInputState {
     pub(super) composer: Option<ThreadComposerState>,
     pub(super) safety_buffering_prompt: Option<UserMessage>,
-    pub(super) pending_steers: VecDeque<UserMessage>,
-    pub(super) pending_steer_history_records: VecDeque<UserMessageHistoryRecord>,
-    pub(super) pending_steer_compare_keys: VecDeque<PendingSteerCompareKey>,
+    pub(super) pending_steers: VecDeque<PendingSteer>,
     pub(super) rejected_steers_queue: VecDeque<UserMessage>,
     pub(super) rejected_steer_history_records: VecDeque<UserMessageHistoryRecord>,
     pub(super) queued_user_messages: VecDeque<QueuedUserMessage>,
@@ -170,11 +168,13 @@ impl From<&str> for UserMessage {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct PendingSteer {
     pub(super) user_message: UserMessage,
     pub(super) history_record: UserMessageHistoryRecord,
     pub(super) compare_key: PendingSteerCompareKey,
+    pub(super) client_id: String,
+    pub(super) turn_id: Option<String>,
 }
 
 pub(crate) fn create_initial_user_message(

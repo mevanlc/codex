@@ -1,0 +1,5 @@
+---
+source: tui/src/chatwidget/tests/review_mode.rs
+expression: warning
+---
+⚠ Message was already submitted and can no longer be edited.

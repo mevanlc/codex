@@ -298,6 +298,16 @@ impl CodexThread {
             .await
     }
 
+    pub async fn retract_steer(
+        &self,
+        expected_turn_id: &str,
+        client_user_message_id: &str,
+    ) -> crate::RetractSteerStatus {
+        self.session
+            .retract_steer(expected_turn_id, client_user_message_id)
+            .await
+    }
+
     /// Injects model-visible items into the currently active turn.
     ///
     /// This is the thread-level bridge to `Session::inject_if_running` for

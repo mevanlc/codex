@@ -251,6 +251,13 @@ pub enum SteerInputError {
     EmptyInput,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RetractSteerStatus {
+    Retracted,
+    NotPending,
+    NotRetractable,
+}
+
 impl SteerInputError {
     fn to_error_event(&self) -> ErrorEvent {
         match self {
@@ -3874,6 +3881,9 @@ impl Session {
             return Err(SteerInputError::EmptyInput);
         }
 
+        let retractable = client_user_message_id.is_some()
+            && additional_context.is_empty()
+            && responsesapi_client_metadata.is_none();
         let additional_context_input = {
             let mut state = self.state.lock().await;
             state.additional_context.merge(additional_context)
@@ -3894,6 +3904,7 @@ impl Session {
         pending_input.push(TurnInput::UserInput {
             content: input,
             client_id: client_user_message_id,
+            retractable,
         });
         self.input_queue
             .extend_pending_input_and_accept_mailbox_delivery_for_turn_state(
@@ -3902,6 +3913,34 @@ impl Session {
             )
             .await;
         Ok(active_turn_id.clone())
+    }
+
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "active turn checks and pending input removal must remain atomic"
+    )]
+    pub async fn retract_steer(
+        &self,
+        expected_turn_id: &str,
+        client_user_message_id: &str,
+    ) -> RetractSteerStatus {
+        let mut active = self.active_turn.lock().await;
+        let Some(active_turn) = active.as_mut() else {
+            return RetractSteerStatus::NotPending;
+        };
+        let Some(active_task) = active_turn.task.as_ref() else {
+            return RetractSteerStatus::NotPending;
+        };
+        if active_task.turn_context.sub_id != expected_turn_id {
+            return RetractSteerStatus::NotPending;
+        }
+
+        active_turn
+            .turn_state
+            .lock()
+            .await
+            .pending_input
+            .retract_steer(client_user_message_id)
     }
 
     pub(crate) async fn record_memory_citation_for_turn(&self, sub_id: &str) {

@@ -102,6 +102,8 @@ use codex_app_server_protocol::ThreadUnsubscribeResponse;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnInterruptResponse;
+use codex_app_server_protocol::TurnRetractParams;
+use codex_app_server_protocol::TurnRetractResponse;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::TurnSteerParams;
@@ -816,6 +818,7 @@ impl AppServerSession {
         &mut self,
         thread_id: ThreadId,
         items: Vec<UserInput>,
+        client_user_message_id: Option<String>,
         cwd: PathBuf,
         approval_policy: AskForApproval,
         approvals_reviewer: codex_protocol::config_types::ApprovalsReviewer,
@@ -837,7 +840,7 @@ impl AppServerSession {
                 request_id,
                 params: TurnStartParams {
                     thread_id: thread_id.to_string(),
-                    client_user_message_id: None,
+                    client_user_message_id,
                     input: items,
                     responsesapi_client_metadata: None,
                     additional_context: None,
@@ -893,6 +896,7 @@ impl AppServerSession {
         thread_id: ThreadId,
         turn_id: String,
         items: Vec<UserInput>,
+        client_user_message_id: Option<String>,
     ) -> std::result::Result<TurnSteerResponse, TypedRequestError> {
         let request_id = self.next_request_id();
         self.client
@@ -900,11 +904,30 @@ impl AppServerSession {
                 request_id,
                 params: TurnSteerParams {
                     thread_id: thread_id.to_string(),
-                    client_user_message_id: None,
+                    client_user_message_id,
                     input: items,
                     responsesapi_client_metadata: None,
                     additional_context: None,
                     expected_turn_id: turn_id,
+                },
+            })
+            .await
+    }
+
+    pub(crate) async fn turn_retract(
+        &mut self,
+        thread_id: ThreadId,
+        expected_turn_id: String,
+        client_user_message_id: String,
+    ) -> std::result::Result<TurnRetractResponse, TypedRequestError> {
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::TurnRetract {
+                request_id,
+                params: TurnRetractParams {
+                    thread_id: thread_id.to_string(),
+                    expected_turn_id,
+                    client_user_message_id,
                 },
             })
             .await

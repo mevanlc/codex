@@ -319,17 +319,22 @@ impl ChatWidget {
         } else {
             None
         };
-        let pending_steer = (!render_in_history).then(|| PendingSteer {
-            user_message: UserMessage {
-                text: text.clone(),
-                local_images: local_images.clone(),
-                remote_image_urls: remote_image_urls.clone(),
-                text_elements: text_elements.clone(),
-                mention_bindings: mention_bindings.clone(),
-            },
-            history_record: history_record.clone(),
-            compare_key: Self::pending_steer_compare_key_from_items(&items),
-        });
+        let client_user_message_id = (!render_in_history).then(|| uuid::Uuid::new_v4().to_string());
+        let pending_steer = client_user_message_id
+            .as_ref()
+            .map(|client_id| PendingSteer {
+                user_message: UserMessage {
+                    text: text.clone(),
+                    local_images: local_images.clone(),
+                    remote_image_urls: remote_image_urls.clone(),
+                    text_elements: text_elements.clone(),
+                    mention_bindings: mention_bindings.clone(),
+                },
+                history_record: history_record.clone(),
+                compare_key: Self::pending_steer_compare_key_from_items(&items),
+                client_id: client_id.clone(),
+                turn_id: None,
+            });
         let personality = self
             .config
             .personality
@@ -349,6 +354,7 @@ impl ChatWidget {
             /*final_output_json_schema*/ None,
             collaboration_mode,
             personality,
+            client_user_message_id,
         );
         let submitted_message = UserMessage {
             text,

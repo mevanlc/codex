@@ -407,6 +407,7 @@ use self::status_state::StatusState;
 use self::status_state::TerminalTitleStatusKind;
 mod status_controls;
 mod status_surfaces;
+mod steer_retraction;
 mod streaming;
 use self::status_surfaces::CachedProjectRootName;
 mod tokens;
@@ -421,6 +422,7 @@ use self::turn_lifecycle::TurnLifecycleState;
 mod usage;
 mod user_messages;
 use self::user_messages::PendingSteer;
+#[cfg(test)]
 use self::user_messages::PendingSteerCompareKey;
 use self::user_messages::QueueDrain;
 use self::user_messages::QueuedUserMessage;
@@ -1252,7 +1254,12 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    fn on_committed_user_message(&mut self, items: &[UserInput], from_replay: bool) {
+    fn on_committed_user_message(
+        &mut self,
+        items: &[UserInput],
+        client_id: Option<&str>,
+        from_replay: bool,
+    ) {
         let display = Self::user_message_display_from_inputs(items);
         if from_replay {
             if self.review.is_review_mode {
@@ -1271,14 +1278,29 @@ impl ChatWidget {
             return;
         }
 
-        let compare_key = Self::pending_steer_compare_key_from_items(items);
-        if self
-            .input_queue
-            .pending_steers
-            .front()
-            .is_some_and(|pending| pending.compare_key == compare_key)
-        {
-            if let Some(pending) = self.input_queue.pending_steers.pop_front() {
+        let pending_position = if let Some(client_id) = client_id {
+            self.input_queue
+                .pending_steers
+                .iter()
+                .position(|pending| pending.client_id == client_id)
+        } else {
+            let compare_key = Self::pending_steer_compare_key_from_items(items);
+            self.input_queue
+                .pending_steers
+                .front()
+                .is_some_and(|pending| pending.compare_key == compare_key)
+                .then_some(0)
+        };
+        if let Some(position) = pending_position {
+            if let Some(pending) = self.input_queue.pending_steers.remove(position) {
+                if self
+                    .input_queue
+                    .pending_steer_retraction_in_flight
+                    .as_deref()
+                    == Some(pending.client_id.as_str())
+                {
+                    self.input_queue.pending_steer_retraction_in_flight = None;
+                }
                 self.refresh_pending_input_preview();
                 let pending_display =
                     user_message_display_for_history(pending.user_message, &pending.history_record);

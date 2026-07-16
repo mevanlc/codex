@@ -64,7 +64,9 @@ impl ChatWidget {
         }
     }
 
-    pub(super) fn pop_latest_retractable_composer_state(&mut self) -> Option<ThreadComposerState> {
+    pub(super) fn pop_latest_locally_queued_composer_state(
+        &mut self,
+    ) -> Option<ThreadComposerState> {
         if let Some(user_message) = self.input_queue.queued_user_messages.pop_back() {
             let history_record = self
                 .input_queue
@@ -91,12 +93,7 @@ impl ChatWidget {
                 Vec::new(),
             ))
         } else {
-            self.input_queue.pending_steers.pop_back().map(|pending| {
-                Self::composer_state_from_user_message(
-                    user_message_for_restore(pending.user_message, &pending.history_record),
-                    Vec::new(),
-                )
-            })
+            None
         }
     }
 
@@ -301,7 +298,7 @@ impl ChatWidget {
         self.bottom_pane.set_composer_pending_pastes(pending_pastes);
     }
 
-    fn composer_state_from_user_message(
+    pub(super) fn composer_state_from_user_message(
         user_message: UserMessage,
         pending_pastes: Vec<(String, String)>,
     ) -> ThreadComposerState {
@@ -335,24 +332,7 @@ impl ChatWidget {
         Some(ThreadInputState {
             composer: composer.has_content().then_some(composer),
             safety_buffering_prompt: self.safety_buffering_prompt.clone(),
-            pending_steers: self
-                .input_queue
-                .pending_steers
-                .iter()
-                .map(|pending| pending.user_message.clone())
-                .collect(),
-            pending_steer_history_records: self
-                .input_queue
-                .pending_steers
-                .iter()
-                .map(|pending| pending.history_record.clone())
-                .collect(),
-            pending_steer_compare_keys: self
-                .input_queue
-                .pending_steers
-                .iter()
-                .map(|pending| pending.compare_key.clone())
-                .collect(),
+            pending_steers: self.input_queue.pending_steers.clone(),
             rejected_steers_queue: self.input_queue.rejected_steers_queue.clone(),
             rejected_steer_history_records: self.input_queue.rejected_steer_history_records.clone(),
             queued_user_messages: self.input_queue.queued_user_messages.clone(),
@@ -394,38 +374,26 @@ impl ChatWidget {
             self.update_collaboration_mode_indicator();
             self.refresh_model_dependent_surfaces();
             self.restore_composer_state(input_state.composer.unwrap_or_default());
-            let mut pending_steer_history_records = input_state.pending_steer_history_records;
-            pending_steer_history_records.resize(
-                input_state.pending_steers.len(),
-                UserMessageHistoryRecord::UserMessageText,
-            );
-            let mut pending_steer_compare_keys = input_state.pending_steer_compare_keys;
             let pending_steers = input_state.pending_steers;
             let mut queued_user_messages = input_state.queued_user_messages;
             let mut queued_user_message_history_records =
                 input_state.queued_user_message_history_records;
             if preserve_in_flight_turn {
-                self.input_queue.pending_steers = pending_steers
-                    .into_iter()
-                    .zip(pending_steer_history_records)
-                    .map(|(user_message, history_record)| PendingSteer {
-                        compare_key: pending_steer_compare_keys.pop_front().unwrap_or_else(|| {
-                            PendingSteerCompareKey {
-                                message: user_message.text.clone(),
-                                image_count: user_message.local_images.len()
-                                    + user_message.remote_image_urls.len(),
-                            }
-                        }),
-                        history_record,
-                        user_message,
-                    })
-                    .collect();
+                self.input_queue.pending_steers = pending_steers;
+                self.input_queue.pending_steer_retraction_in_flight = None;
             } else {
                 self.input_queue.pending_steers.clear();
-                let mut safety_retry_follow_ups = pending_steers
-                    .into_iter()
-                    .map(QueuedUserMessage::from)
-                    .collect::<VecDeque<_>>();
+                self.input_queue.pending_steer_retraction_in_flight = None;
+                let (mut safety_retry_follow_ups, mut pending_steer_history_records) =
+                    pending_steers
+                        .into_iter()
+                        .map(|pending| {
+                            (
+                                QueuedUserMessage::from(pending.user_message),
+                                pending.history_record,
+                            )
+                        })
+                        .unzip::<_, _, VecDeque<_>, VecDeque<_>>();
                 safety_retry_follow_ups.append(&mut queued_user_messages);
                 queued_user_messages = safety_retry_follow_ups;
                 pending_steer_history_records.append(&mut queued_user_message_history_records);

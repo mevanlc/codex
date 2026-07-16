@@ -6845,6 +6845,7 @@ async fn spawn_task_turn_span_inherits_dispatch_trace_context() {
                     text_elements: Vec::new(),
                 }],
                 client_id: None,
+                retractable: false,
             }],
             TraceCaptureTask {
                 captured_trace: Arc::clone(&captured_trace),
@@ -7840,6 +7841,7 @@ async fn spawn_task_does_not_update_previous_turn_settings_for_non_run_turn_task
             text_elements: Vec::new(),
         }],
         client_id: None,
+        retractable: false,
     }];
 
     sess.spawn_task(
@@ -9325,6 +9327,7 @@ async fn guardian_helper_review_interrupts_after_three_consecutive_denials() {
             text_elements: Vec::new(),
         }],
         client_id: None,
+        retractable: false,
     }];
     sess.spawn_task(
         Arc::clone(&tc),
@@ -9392,6 +9395,7 @@ async fn turn_complete_flushes_terminal_event_after_delivery() {
             text_elements: Vec::new(),
         }],
         client_id: None,
+        retractable: false,
     }];
     sess.spawn_task(Arc::clone(&tc), input, CompletingTask)
         .await;
@@ -9419,6 +9423,7 @@ async fn turn_aborted_flushes_terminal_event_after_delivery() {
             text_elements: Vec::new(),
         }],
         client_id: None,
+        retractable: false,
     }];
     sess.spawn_task(
         Arc::clone(&tc),
@@ -9461,6 +9466,7 @@ async fn abort_regular_task_emits_marker_before_turn_aborted() {
             text_elements: Vec::new(),
         }],
         client_id: None,
+        retractable: false,
     }];
     sess.spawn_task(
         Arc::clone(&tc),
@@ -9502,6 +9508,7 @@ async fn abort_gracefully_emits_marker_before_turn_aborted() {
             text_elements: Vec::new(),
         }],
         client_id: None,
+        retractable: false,
     }];
     sess.spawn_task(
         Arc::clone(&tc),
@@ -9543,6 +9550,7 @@ async fn task_finish_emits_turn_item_lifecycle_for_leftover_pending_user_input()
             text_elements: Vec::new(),
         }],
         client_id: None,
+        retractable: false,
     }];
     sess.spawn_task(
         Arc::clone(&tc),
@@ -9887,6 +9895,7 @@ async fn steer_input_enforces_expected_turn_id() {
             text_elements: Vec::new(),
         }],
         client_id: None,
+        retractable: false,
     }];
     sess.spawn_task(
         Arc::clone(&tc),
@@ -9937,6 +9946,7 @@ async fn steer_input_rejects_non_regular_turns() {
                 text_elements: Vec::new(),
             }],
             client_id: None,
+            retractable: false,
         }];
         let turn_context = sess.new_default_turn_with_sub_id("turn".to_string()).await;
         sess.spawn_task(
@@ -9979,6 +9989,7 @@ async fn steer_input_returns_active_turn_id() {
             text_elements: Vec::new(),
         }],
         client_id: None,
+        retractable: false,
     }];
     sess.spawn_task(
         Arc::clone(&tc),
@@ -10007,6 +10018,131 @@ async fn steer_input_returns_active_turn_id() {
 
     assert_eq!(turn_id, tc.sub_id);
     assert!(sess.input_queue.has_pending_input(&sess.active_turn).await);
+}
+
+#[tokio::test]
+async fn retract_steer_removes_matching_pending_input() {
+    let (sess, tc, _rx) = make_session_and_context_with_rx().await;
+    sess.spawn_task(
+        Arc::clone(&tc),
+        Vec::new(),
+        NeverEndingTask {
+            kind: TaskKind::Regular,
+            listen_to_cancellation_token: true,
+        },
+    )
+    .await;
+
+    sess.steer_input(
+        vec![UserInput::Text {
+            text: "retract me".to_string(),
+            text_elements: Vec::new(),
+        }],
+        /*additional_context*/ Default::default(),
+        Some(&tc.sub_id),
+        Some("client-message-1".to_string()),
+        /*responsesapi_client_metadata*/ None,
+    )
+    .await
+    .expect("steer should be accepted");
+
+    assert_eq!(
+        sess.retract_steer(&tc.sub_id, "client-message-1").await,
+        RetractSteerStatus::Retracted
+    );
+    assert_eq!(
+        sess.input_queue.get_pending_input(&sess.active_turn).await,
+        Vec::<TurnInput>::new()
+    );
+
+    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+}
+
+#[tokio::test]
+async fn retract_steer_does_not_remove_input_after_drain_or_from_another_turn() {
+    let (sess, tc, _rx) = make_session_and_context_with_rx().await;
+    sess.spawn_task(
+        Arc::clone(&tc),
+        Vec::new(),
+        NeverEndingTask {
+            kind: TaskKind::Regular,
+            listen_to_cancellation_token: true,
+        },
+    )
+    .await;
+
+    sess.steer_input(
+        vec![UserInput::Text {
+            text: "keep me".to_string(),
+            text_elements: Vec::new(),
+        }],
+        /*additional_context*/ Default::default(),
+        Some(&tc.sub_id),
+        Some("client-message-1".to_string()),
+        /*responsesapi_client_metadata*/ None,
+    )
+    .await
+    .expect("steer should be accepted");
+
+    assert_eq!(
+        sess.retract_steer("another-turn", "client-message-1").await,
+        RetractSteerStatus::NotPending
+    );
+    assert_eq!(
+        sess.input_queue.get_pending_input(&sess.active_turn).await,
+        vec![TurnInput::UserInput {
+            content: vec![UserInput::Text {
+                text: "keep me".to_string(),
+                text_elements: Vec::new(),
+            }],
+            client_id: Some("client-message-1".to_string()),
+            retractable: true,
+        }]
+    );
+    assert_eq!(
+        sess.retract_steer(&tc.sub_id, "client-message-1").await,
+        RetractSteerStatus::NotPending
+    );
+
+    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+}
+
+#[tokio::test]
+async fn retract_steer_rejects_steers_with_side_effects() {
+    let (sess, tc, _rx) = make_session_and_context_with_rx().await;
+    sess.spawn_task(
+        Arc::clone(&tc),
+        Vec::new(),
+        NeverEndingTask {
+            kind: TaskKind::Regular,
+            listen_to_cancellation_token: true,
+        },
+    )
+    .await;
+
+    sess.steer_input(
+        vec![UserInput::Text {
+            text: "not retractable".to_string(),
+            text_elements: Vec::new(),
+        }],
+        /*additional_context*/ Default::default(),
+        Some(&tc.sub_id),
+        Some("client-message-1".to_string()),
+        Some(HashMap::from([(
+            "source".to_string(),
+            "side-effect-test".to_string(),
+        )])),
+    )
+    .await
+    .expect("steer should be accepted");
+
+    assert_eq!(
+        sess.retract_steer(&tc.sub_id, "client-message-1").await,
+        RetractSteerStatus::NotRetractable
+    );
+    assert!(sess.input_queue.has_pending_input(&sess.active_turn).await);
+
+    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 }
 
 #[tokio::test]
@@ -10180,7 +10316,8 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
                     text: "follow up".to_string(),
                     text_elements: Vec::new(),
                 }],
-                client_id: None
+                client_id: None,
+                retractable: false,
             },
             TurnInput::InterAgentCommunication(communication),
         ],
@@ -10238,7 +10375,8 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
                     text: "follow up".to_string(),
                     text_elements: Vec::new(),
                 }],
-                client_id: None
+                client_id: None,
+                retractable: false,
             },
             TurnInput::InterAgentCommunication(communication),
         ],
@@ -10309,6 +10447,7 @@ async fn abort_review_task_emits_exited_then_aborted_and_records_history() {
             text_elements: Vec::new(),
         }],
         client_id: None,
+        retractable: false,
     }];
     sess.spawn_task(Arc::clone(&tc), input, ReviewTask::new())
         .await;

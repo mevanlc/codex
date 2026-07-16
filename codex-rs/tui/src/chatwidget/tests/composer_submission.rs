@@ -1127,15 +1127,15 @@ async fn restore_thread_input_state_applies_running_state_policy() {
         text: "queued history".to_string(),
         text_elements: Vec::new(),
     });
+    let mut pending = pending_steer("submitted to the interrupted turn");
+    pending.history_record = pending_history.clone();
     let input_state = ThreadInputState {
         composer: Some(ThreadComposerState {
             text: "composer draft".to_string(),
             ..Default::default()
         }),
         safety_buffering_prompt: Some(UserMessage::from("buffered prompt")),
-        pending_steers: VecDeque::from([UserMessage::from("submitted to the interrupted turn")]),
-        pending_steer_history_records: VecDeque::from([pending_history.clone()]),
-        pending_steer_compare_keys: VecDeque::new(),
+        pending_steers: VecDeque::from([pending]),
         rejected_steers_queue: VecDeque::new(),
         rejected_steer_history_records: VecDeque::new(),
         queued_user_messages: VecDeque::from([UserMessage::from("already queued").into()]),

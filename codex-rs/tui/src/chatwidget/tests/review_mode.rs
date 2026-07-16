@@ -360,14 +360,17 @@ async fn review_restores_context_window_indicator() {
 #[tokio::test]
 async fn restore_thread_input_state_restores_pending_steers_without_downgrading_them() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    let mut pending_steers = VecDeque::new();
-    pending_steers.push_back(UserMessage::from("pending steer"));
     let expected_compare_key = PendingSteerCompareKey {
         message: "hidden IDE context\npending steer".to_string(),
         image_count: 0,
     };
-    let mut pending_steer_compare_keys = VecDeque::new();
-    pending_steer_compare_keys.push_back(expected_compare_key.clone());
+    let pending_steers = VecDeque::from([PendingSteer {
+        user_message: UserMessage::from("pending steer"),
+        history_record: UserMessageHistoryRecord::UserMessageText,
+        compare_key: expected_compare_key.clone(),
+        client_id: "client-pending".to_string(),
+        turn_id: Some("turn-1".to_string()),
+    }]);
     let mut rejected_steers_queue = VecDeque::new();
     rejected_steers_queue.push_back(UserMessage::from("already rejected"));
     let mut queued_user_messages = VecDeque::new();
@@ -378,8 +381,6 @@ async fn restore_thread_input_state_restores_pending_steers_without_downgrading_
             composer: None,
             safety_buffering_prompt: None,
             pending_steers,
-            pending_steer_history_records: VecDeque::new(),
-            pending_steer_compare_keys,
             rejected_steers_queue,
             rejected_steer_history_records: VecDeque::new(),
             queued_user_messages,
@@ -464,8 +465,18 @@ async fn steer_enter_uses_pending_steers_while_turn_is_running_without_streaming
             .text,
         "queued while running"
     );
+    let pending_client_id = chat
+        .input_queue
+        .pending_steers
+        .front()
+        .unwrap()
+        .client_id
+        .clone();
     match next_submit_op(&mut op_rx) {
-        Op::UserTurn { .. } => {}
+        Op::UserTurn {
+            client_user_message_id,
+            ..
+        } => assert_eq!(client_user_message_id, Some(pending_client_id)),
         other => panic!("expected Op::UserTurn, got {other:?}"),
     }
     assert!(drain_insert_history(&mut rx).is_empty());
@@ -476,6 +487,37 @@ async fn steer_enter_uses_pending_steers_while_turn_is_running_without_streaming
     let inserted = drain_insert_history(&mut rx);
     assert_eq!(inserted.len(), 1);
     assert!(lines_to_single_string(&inserted[0]).contains("queued while running"));
+}
+
+#[tokio::test]
+async fn committed_user_message_matches_pending_steer_by_client_id() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let mut first = pending_steer("duplicate text");
+    first.client_id = "client-1".to_string();
+    let mut second = pending_steer("duplicate text");
+    second.client_id = "client-2".to_string();
+    chat.input_queue.pending_steers.extend([first, second]);
+    chat.input_queue.pending_steer_retraction_in_flight = Some("client-2".to_string());
+
+    complete_user_message_for_inputs_with_client_id(
+        &mut chat,
+        "user-2",
+        vec![UserInput::Text {
+            text: "duplicate text".to_string(),
+            text_elements: Vec::new(),
+        }],
+        Some("client-2".to_string()),
+    );
+
+    assert_eq!(chat.input_queue.pending_steer_retraction_in_flight, None);
+    assert_eq!(chat.input_queue.pending_steers.len(), 1);
+    assert_eq!(
+        chat.input_queue.pending_steers.front().unwrap().client_id,
+        "client-1"
+    );
+    let inserted = drain_insert_history(&mut rx);
+    assert_eq!(inserted.len(), 1);
+    assert!(lines_to_single_string(&inserted[0]).contains("duplicate text"));
 }
 
 #[tokio::test]
@@ -797,23 +839,71 @@ async fn manual_interrupt_restores_pending_steers_to_composer() {
 }
 
 #[tokio::test]
-async fn queued_message_shortcut_restores_pending_steer_to_composer() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.chat_keymap.edit_queued_message = vec![crate::key_hint::alt(KeyCode::Up)];
-    chat.queued_message_edit_hint_binding = Some(crate::key_hint::alt(KeyCode::Up));
-    chat.bottom_pane
-        .set_queued_message_edit_binding(chat.queued_message_edit_hint_binding);
+async fn queued_message_shortcut_restores_pending_steer_after_retraction_succeeds() {
+    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.bottom_pane.set_task_running(/*running*/ true);
 
+    let mut pending = pending_steer("pending steer");
+    pending.turn_id = None;
+    chat.input_queue.pending_steers.push_back(pending);
+    chat.mark_pending_steer_accepted("client-pending steer", "accepted-turn-id".to_string());
+    chat.refresh_pending_input_preview();
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+
+    assert_eq!(chat.input_queue.pending_steers.len(), 1);
+    assert_eq!(chat.bottom_pane.composer_text(), "");
+    assert_eq!(
+        chat.input_queue.pending_steer_retraction_in_flight,
+        Some("client-pending steer".to_string())
+    );
+    assert_eq!(
+        op_rx.try_recv().expect("retract steer op"),
+        Op::RetractSteer {
+            expected_turn_id: "accepted-turn-id".to_string(),
+            client_user_message_id: "client-pending steer".to_string(),
+        }
+    );
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+    assert_no_submit_op(&mut op_rx);
+
+    chat.bottom_pane.set_composer_text(
+        "draft typed while retracting".to_string(),
+        Vec::new(),
+        Vec::new(),
+    );
+    chat.on_pending_steer_retraction_result(
+        "client-pending steer",
+        codex_app_server_protocol::TurnRetractStatus::Retracted,
+    );
+
+    assert!(chat.input_queue.pending_steers.is_empty());
+    assert_eq!(chat.input_queue.pending_steer_retraction_in_flight, None);
+    assert_eq!(
+        chat.bottom_pane.composer_text(),
+        "pending steer\ndraft typed while retracting"
+    );
+}
+
+#[tokio::test]
+async fn pending_steer_already_submitted_warning_snapshot() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.input_queue
         .pending_steers
         .push_back(pending_steer("pending steer"));
-    chat.refresh_pending_input_preview();
+    chat.input_queue.pending_steer_retraction_in_flight = Some("client-pending steer".to_string());
 
-    chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
+    chat.on_pending_steer_retraction_result(
+        "client-pending steer",
+        codex_app_server_protocol::TurnRetractStatus::NotPending,
+    );
 
-    assert!(chat.input_queue.pending_steers.is_empty());
-    assert_eq!(chat.bottom_pane.composer_text(), "pending steer");
+    assert_eq!(chat.input_queue.pending_steer_retraction_in_flight, None);
+    assert_eq!(chat.input_queue.pending_steers.len(), 1);
+    let cells = drain_insert_history(&mut rx);
+    let warning = lines_to_single_string(cells.last().expect("warning history cell"));
+    assert_chatwidget_snapshot!("pending_steer_already_submitted_warning", warning);
 }
 
 #[tokio::test]

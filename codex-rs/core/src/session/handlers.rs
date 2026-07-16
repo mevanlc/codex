@@ -264,6 +264,7 @@ pub(super) async fn user_input_or_turn_inner(
                 task_input.push(TurnInput::UserInput {
                     content: items,
                     client_id: client_user_message_id,
+                    retractable: false,
                 });
             }
             sess.spawn_task(

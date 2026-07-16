@@ -110,10 +110,12 @@ impl ChatWidget {
             && self.input_queue.has_retractable_follow_up_messages()
             && self.bottom_pane.no_modal_or_popup_active()
         {
-            if let Some(composer) = self.pop_latest_retractable_composer_state() {
+            if let Some(composer) = self.pop_latest_locally_queued_composer_state() {
                 self.restore_composer_state(composer);
                 self.refresh_pending_input_preview();
                 self.request_redraw();
+            } else {
+                self.request_latest_pending_steer_retraction();
             }
             return;
         }

@@ -566,6 +566,7 @@ impl App {
                 final_output_json_schema,
                 collaboration_mode,
                 personality,
+                client_user_message_id,
             } => {
                 let mut should_start_turn = true;
                 if let Some(turn_id) = self.active_turn_id_for_thread(thread_id).await {
@@ -573,10 +574,21 @@ impl App {
                     let mut retried_after_turn_mismatch = false;
                     loop {
                         match app_server
-                            .turn_steer(thread_id, steer_turn_id.clone(), items.to_vec())
+                            .turn_steer(
+                                thread_id,
+                                steer_turn_id.clone(),
+                                items.to_vec(),
+                                client_user_message_id.clone(),
+                            )
                             .await
                         {
-                            Ok(_) => return Ok(true),
+                            Ok(response) => {
+                                if let Some(client_id) = client_user_message_id.as_deref() {
+                                    self.chat_widget
+                                        .mark_pending_steer_accepted(client_id, response.turn_id);
+                                }
+                                return Ok(true);
+                            }
                             Err(error) => {
                                 if let Some(turn_error) =
                                     active_turn_not_steerable_turn_error(&error)
@@ -647,6 +659,7 @@ impl App {
                         .turn_start(
                             thread_id,
                             items.to_vec(),
+                            client_user_message_id.clone(),
                             cwd.clone(),
                             *approval_policy,
                             approvals_reviewer,
@@ -661,12 +674,39 @@ impl App {
                             final_output_json_schema.clone(),
                         )
                         .await?;
+                    if let Some(client_id) = client_user_message_id.as_deref() {
+                        self.chat_widget
+                            .mark_pending_steer_accepted(client_id, response.turn.id.clone());
+                    }
                     if self.active_thread_id == Some(thread_id)
                         && self.chat_widget.thread_id() == Some(thread_id)
                     {
                         self.chat_widget
                             .record_safety_buffering_turn(response.turn.id, op);
                     }
+                }
+                Ok(true)
+            }
+            AppCommand::RetractSteer {
+                expected_turn_id,
+                client_user_message_id,
+            } => {
+                match app_server
+                    .turn_retract(
+                        thread_id,
+                        expected_turn_id.clone(),
+                        client_user_message_id.clone(),
+                    )
+                    .await
+                {
+                    Ok(response) => self.chat_widget.on_pending_steer_retraction_result(
+                        client_user_message_id,
+                        response.status,
+                    ),
+                    Err(error) => self.chat_widget.on_pending_steer_retraction_failed(
+                        client_user_message_id,
+                        format!("Failed to retract steer message: {error}"),
+                    ),
                 }
                 Ok(true)
             }
