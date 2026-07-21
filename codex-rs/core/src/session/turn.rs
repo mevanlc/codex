@@ -259,15 +259,9 @@ pub(crate) async fn run_turn(
             )
             .await?;
 
-            if turn_context
-                .config
-                .features
-                .enabled(Feature::DeferredExecutor)
-            {
-                world_state = sess
-                    .record_step_world_state_if_changed(&world_state, step_context.as_ref())
-                    .await;
-            }
+            world_state = sess
+                .record_step_world_state_if_changed(&world_state, step_context.as_ref())
+                .await;
 
             // Construct the input that we will send to the model.
             let sampling_request_input: Vec<ResponseItem> = async {
@@ -377,6 +371,9 @@ pub(crate) async fn run_turn(
                             .await;
                         return Ok(None);
                     }
+                    if run_pending_session_start_hooks(&sess, &turn_context).await {
+                        return Ok(None);
+                    }
                     can_drain_pending_input = !model_needs_follow_up;
                     continue;
                 }
@@ -438,16 +435,6 @@ pub(crate) async fn run_turn(
                 return Err(err);
             }
             Err(codex_error @ CodexErr::InvalidImageRequest()) => {
-                {
-                    let mut state = sess.state.lock().await;
-                    error_or_panic(
-                        "Invalid image detected; sanitizing tool output to prevent poisoning",
-                    );
-                    if state.history.replace_last_turn_images("Invalid image") {
-                        continue;
-                    }
-                }
-
                 sess.track_turn_codex_error(turn_context.as_ref(), &codex_error);
                 let error = CodexErrorInfo::BadRequest;
                 sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone())
@@ -480,7 +467,7 @@ pub(crate) async fn run_turn(
 #[instrument(level = "trace", skip_all)]
 async fn turn_diff_display_roots(turn_context: &TurnContext) -> Vec<(String, PathBuf)> {
     let mut display_roots = Vec::new();
-    for turn_environment in &turn_context.environments.turn_environments {
+    for turn_environment in turn_context.environments.turn_environments() {
         // TODO(anp): Migrate git-root discovery and diff display roots to PathUri so foreign
         // environment roots can participate without host-native conversion.
         let Ok(cwd) = turn_environment.cwd().to_abs_path() else {
@@ -711,8 +698,7 @@ async fn build_extension_turn_input_items(
 
     let environments = turn_context
         .environments
-        .turn_environments
-        .iter()
+        .turn_environments()
         .enumerate()
         .filter_map(|(index, environment)| {
             // TODO(anp): Migrate extension turn-input environments to PathUri so foreign cwd
@@ -1530,7 +1516,7 @@ async fn maybe_emit_pending_agent_message_start(
 }
 
 /// Agent messages are text-only today; concatenate all text entries.
-fn agent_message_text(item: &codex_protocol::items::AgentMessageItem) -> String {
+pub(super) fn agent_message_text(item: &codex_protocol::items::AgentMessageItem) -> String {
     item.content
         .iter()
         .map(|entry| match entry {
@@ -2025,6 +2011,7 @@ async fn try_run_sampling_request(
             codex.request.reasoning_effort = %reasoning_effort,
             gen_ai.usage.input_tokens = field::Empty,
             gen_ai.usage.cache_read.input_tokens = field::Empty,
+            gen_ai.usage.cache_write.input_tokens = field::Empty,
             gen_ai.usage.output_tokens = field::Empty,
             codex.usage.reasoning_output_tokens = field::Empty,
             codex.usage.total_tokens = field::Empty,
