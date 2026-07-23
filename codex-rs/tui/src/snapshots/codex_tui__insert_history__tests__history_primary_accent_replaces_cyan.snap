@@ -1,0 +1,5 @@
+---
+source: tui/src/insert_history.rs
+expression: output
+---
+"\u{1b}[39;49m\u{1b}[K\u{1b}[38;2;122;129;255;49mInline code\u{1b}[39;49m and \u{1b}[4m\u{1b}[38;2;122;129;255;49mhttps://example.com\u{1b}[39m\u{1b}[49m\u{1b}[0m"

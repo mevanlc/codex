@@ -111,6 +111,7 @@ where
     B: Backend + Write,
 {
     let screen_size = terminal.backend().size().unwrap_or(Size::new(0, 0));
+    let primary_accent = crate::primary_accent::current_primary_accent();
 
     let mut area = terminal.viewport_area;
     let mut should_update_area = false;
@@ -170,7 +171,7 @@ where
                 if index > 0 {
                     queue!(writer, Print("\r\n"))?;
                 }
-                write_history_line(writer, line, wrap_width)?;
+                write_history_line(writer, line, wrap_width, primary_accent)?;
             }
 
             // Writing raw source text through the terminal preserves its soft-wrap metadata.
@@ -237,7 +238,7 @@ where
 
             for line in &wrapped {
                 queue!(writer, Print("\r\n"))?;
-                write_history_line(writer, line, wrap_width)?;
+                write_history_line(writer, line, wrap_width, primary_accent)?;
             }
 
             queue!(writer, ResetScrollRegion)?;
@@ -283,6 +284,7 @@ fn write_history_line<W: Write>(
     writer: &mut W,
     line: &HyperlinkLine,
     wrap_width: usize,
+    primary_accent: Option<Color>,
 ) -> io::Result<()> {
     let physical_rows = line.width().max(1).div_ceil(wrap_width) as u16;
     if physical_rows > 1 {
@@ -293,20 +295,17 @@ fn write_history_line<W: Write>(
         }
         queue!(writer, RestorePosition)?;
     }
+    let line_fg = crate::primary_accent::remap_cyan(
+        line.line.style.fg.unwrap_or(Color::Reset),
+        primary_accent,
+    );
+    let line_bg = crate::primary_accent::remap_cyan(
+        line.line.style.bg.unwrap_or(Color::Reset),
+        primary_accent,
+    );
     queue!(
         writer,
-        SetColors(Colors::new(
-            line.line
-                .style
-                .fg
-                .map(std::convert::Into::into)
-                .unwrap_or(CColor::Reset),
-            line.line
-                .style
-                .bg
-                .map(std::convert::Into::into)
-                .unwrap_or(CColor::Reset)
-        ))
+        SetColors(Colors::new(line_fg.into(), line_bg.into()))
     )?;
     queue!(writer, Clear(ClearType::UntilNewLine))?;
     // Merge line-level style into each span so that ANSI colors reflect
@@ -325,7 +324,7 @@ fn write_history_line<W: Write>(
         hyperlinks: line.hyperlinks.clone(),
     };
     let decorated = decorate_spans(&merged_line);
-    write_spans(writer, decorated.iter())
+    write_spans(writer, decorated.iter(), primary_accent)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -435,7 +434,11 @@ impl ModifierDiff {
     }
 }
 
-fn write_spans<'a, I>(mut writer: &mut impl Write, content: I) -> io::Result<()>
+fn write_spans<'a, I>(
+    mut writer: &mut impl Write,
+    content: I,
+    primary_accent: Option<Color>,
+) -> io::Result<()>
 where
     I: IntoIterator<Item = &'a Span<'a>>,
 {
@@ -454,8 +457,14 @@ where
             diff.queue(&mut writer)?;
             last_modifier = modifier;
         }
-        let next_fg = span.style.fg.unwrap_or(Color::Reset);
-        let next_bg = span.style.bg.unwrap_or(Color::Reset);
+        let next_fg = crate::primary_accent::remap_cyan(
+            span.style.fg.unwrap_or(Color::Reset),
+            primary_accent,
+        );
+        let next_bg = crate::primary_accent::remap_cyan(
+            span.style.bg.unwrap_or(Color::Reset),
+            primary_accent,
+        );
         if next_fg != fg || next_bg != bg {
             queue!(
                 writer,
@@ -491,7 +500,7 @@ mod tests {
         let spans = ["A".bold(), "B".into()];
 
         let mut actual: Vec<u8> = Vec::new();
-        write_spans(&mut actual, spans.iter()).unwrap();
+        write_spans(&mut actual, spans.iter(), /*primary_accent*/ None).unwrap();
 
         let mut expected: Vec<u8> = Vec::new();
         queue!(
@@ -513,12 +522,40 @@ mod tests {
     }
 
     #[test]
+    fn write_history_line_remaps_cyan_to_primary_accent() {
+        use ratatui::style::Stylize;
+
+        crossterm::style::force_color_output(true);
+        let line = HyperlinkLine::new(Line::from(vec![
+            "Inline code".cyan(),
+            " and ".into(),
+            "https://example.com".cyan().underlined(),
+        ]));
+        let primary_accent = Some(
+            crate::primary_accent::parse_primary_accent("#7a81ff").expect("valid primary accent"),
+        );
+        let mut actual = Vec::new();
+
+        write_history_line(&mut actual, &line, /*wrap_width*/ 80, primary_accent)
+            .expect("write history line");
+
+        let output = String::from_utf8(actual).expect("UTF-8 terminal output");
+        insta::assert_debug_snapshot!("history_primary_accent_replaces_cyan", output);
+    }
+
+    #[test]
     fn writes_semantic_web_link_without_changing_visible_text() {
         let destination = "https://example.com/long/path";
         let line = crate::terminal_hyperlinks::annotate_web_urls_in_line(Line::from(destination));
         let mut actual = Vec::new();
 
-        write_history_line(&mut actual, &line, /*wrap_width*/ 80).expect("write history line");
+        write_history_line(
+            &mut actual,
+            &line,
+            /*wrap_width*/ 80,
+            /*primary_accent*/ None,
+        )
+        .expect("write history line");
 
         let output = String::from_utf8(actual).expect("UTF-8 terminal output");
         assert!(output.contains("\x1b]8;;https://example.com/long/path\x07"));
