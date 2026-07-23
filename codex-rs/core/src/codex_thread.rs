@@ -34,6 +34,7 @@ use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::Submission;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadMemoryMode;
+use codex_protocol::protocol::ThreadSettingsSnapshot;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TokenUsageInfo;
 use codex_protocol::protocol::TurnEnvironmentSelection;
@@ -55,6 +56,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::watch;
+use tokio_util::sync::CancellationToken;
 
 use codex_rollout::state_db::StateDbHandle;
 
@@ -137,6 +139,24 @@ impl ThreadConfigSnapshot {
             &self.permission_profile,
             self.cwd().as_path(),
         )
+    }
+
+    pub fn into_thread_settings_snapshot(self) -> ThreadSettingsSnapshot {
+        let cwd = self.cwd().clone();
+        ThreadSettingsSnapshot {
+            model: self.model,
+            model_provider_id: self.model_provider_id,
+            service_tier: self.service_tier,
+            approval_policy: self.approval_policy,
+            approvals_reviewer: self.approvals_reviewer,
+            permission_profile: self.permission_profile,
+            active_permission_profile: self.active_permission_profile,
+            cwd,
+            reasoning_effort: self.reasoning_effort,
+            reasoning_summary: self.reasoning_summary,
+            personality: self.personality,
+            collaboration_mode: self.collaboration_mode,
+        }
     }
 }
 
@@ -479,8 +499,8 @@ impl CodexThread {
             // This history-only API runs without run_turn, so it owns its initial step.
             let step_context = self
                 .session
-                .capture_step_context(Arc::clone(&turn_context))
-                .await;
+                .capture_step_context(Arc::clone(&turn_context), &CancellationToken::new())
+                .await?;
             self.session
                 .record_context_updates_and_set_reference_context_item(step_context.as_ref())
                 .await;
@@ -599,11 +619,28 @@ impl CodexThread {
     /// Returns the exact MCP config, environment bindings, and manager most recently published.
     pub async fn current_mcp_runtime(&self) -> Arc<crate::session::McpRuntimeSnapshot> {
         let turn_context = self.session.new_default_turn().await;
+        let environments = turn_context.environments.refresh_readiness();
+        let selected_capability_roots = self
+            .session
+            .resolve_selected_capability_roots_for_step(&environments)
+            .await;
+        let ready_selected_capability_roots =
+            Session::ready_selected_capability_roots(&selected_capability_roots);
+        let executor_capability_discovery = self
+            .session
+            .executor_capability_discovery_for_step(
+                &turn_context.config,
+                &ready_selected_capability_roots,
+            )
+            .await;
         self.session
-            .capture_step_context(turn_context)
+            .mcp_runtime_for_step(
+                turn_context.as_ref(),
+                &environments,
+                &selected_capability_roots,
+                executor_capability_discovery.as_deref(),
+            )
             .await
-            .mcp
-            .clone()
     }
 
     pub fn multi_agent_version(&self) -> Option<MultiAgentVersion> {

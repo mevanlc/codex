@@ -275,6 +275,23 @@ fn from_sources_ignores_removed_resize_all_images_feature_key() {
 }
 
 #[test]
+fn from_sources_ignores_removed_item_ids_feature_key() {
+    let features_toml = FeaturesToml::from(BTreeMap::from([("item_ids".to_string(), false)]));
+
+    let features = Features::from_sources(
+        FeatureConfigSource {
+            features: Some(&features_toml),
+            ..Default::default()
+        },
+        FeatureConfigSource::default(),
+        FeatureOverrides::default(),
+    );
+
+    assert_eq!(features, Features::with_defaults());
+    assert_eq!(features.enabled(Feature::ItemIds), true);
+}
+
+#[test]
 fn from_sources_ignores_removed_undo_feature_key() {
     let features_toml = FeaturesToml::from(BTreeMap::from([("undo".to_string(), true)]));
 
@@ -395,6 +412,7 @@ multi_agent_mode_hint_text = "Custom mode guidance."
 tool_namespace = "agents"
 hide_spawn_agent_metadata = true
 expose_spawn_agent_model_overrides = true
+wait_agent_enabled = false
 non_code_mode_only = true
 "#,
     )
@@ -420,6 +438,7 @@ non_code_mode_only = true
             tool_namespace: Some("agents".to_string()),
             hide_spawn_agent_metadata: Some(true),
             expose_spawn_agent_model_overrides: Some(true),
+            wait_agent_enabled: Some(false),
             non_code_mode_only: Some(true),
         }))
     );

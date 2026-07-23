@@ -6619,12 +6619,6 @@
               "null"
             ]
           },
-          "firstPartyType": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "review": {
             "anyOf": [
               {
@@ -6858,6 +6852,20 @@
         "properties": {
           "description": {
             "type": "string"
+          },
+          "disabledReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isEnabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "isReadOnly": {
+            "default": false,
+            "type": "boolean"
           },
           "name": {
             "type": "string"
@@ -8542,6 +8550,12 @@
               "null"
             ]
           },
+          "allowLoginShell": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "allowManagedHooksOnly": {
             "type": [
               "boolean",
@@ -8599,6 +8613,12 @@
               "null"
             ]
           },
+          "checkForUpdateOnStartup": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "computerUse": {
             "anyOf": [
               {
@@ -8634,6 +8654,28 @@
               "null"
             ]
           },
+          "feedback": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/FeedbackRequirements"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "logDir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelCatalogJson": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "models": {
             "anyOf": [
               {
@@ -8642,6 +8684,18 @@
               {
                 "type": "null"
               }
+            ]
+          },
+          "sqliteHome": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "windowsSandboxPrivateDesktop": {
+            "type": [
+              "boolean",
+              "null"
             ]
           }
         },
@@ -9577,6 +9631,24 @@
             "description": "If true, include detection under the user's home directory.",
             "type": "boolean"
           },
+          "maxSessionAgeDays": {
+            "description": "Maximum age in days for detected sessions. Missing values use the default limit.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "maxSessions": {
+            "description": "Maximum number of sessions to detect. Missing values use the default limit.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "migrationSource": {
             "description": "Optional migration-source selector. Missing or unrecognized values use the default source.",
             "type": [
@@ -9772,6 +9844,13 @@
               "null"
             ]
           },
+          "providerId": {
+            "description": "Opaque provider identifier supplied by the caller for analytics attribution. This does not select the migration source.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "source": {
             "description": "Optional identifier for the product that initiated the import.",
             "type": [
@@ -9917,6 +9996,17 @@
           "remoteMcpServersConfig"
         ],
         "type": "string"
+      },
+      "FeedbackRequirements": {
+        "properties": {
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
       },
       "FeedbackUploadParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -13699,6 +13789,9 @@
           }
         ]
       },
+      "PathUri": {
+        "type": "string"
+      },
       "PermissionProfileListParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -14231,6 +14324,10 @@
               "array",
               "null"
             ]
+          },
+          "forceRefetch": {
+            "description": "Whether the client requests a fresh remote plugin catalog fetch.",
+            "type": "boolean"
           },
           "marketplaceKinds": {
             "description": "Optional marketplace kind filter. When omitted, only local marketplaces are queried, plus the default remote catalog when enabled by feature flag.",
@@ -17877,6 +17974,11 @@
             "description": "Identifier for this thread. Codex-generated thread IDs are UUIDv7.",
             "type": "string"
           },
+          "isPinned": {
+            "default": false,
+            "description": "Whether the thread has been pinned by the user.",
+            "type": "boolean"
+          },
           "modelProvider": {
             "description": "Model provider used for this thread (for example, 'openai').",
             "type": "string"
@@ -19321,6 +19423,13 @@
             ],
             "description": "Optional cwd filter or filters; when set, only threads whose session cwd exactly matches one of these paths are returned."
           },
+          "isPinned": {
+            "description": "Optional pinned filter; when set, only threads matching this value are returned.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "limit": {
             "description": "Optional page size; defaults to a reasonable server-side value.",
             "format": "uint32",
@@ -19510,6 +19619,13 @@
               }
             ],
             "description": "Patch the stored Git metadata for this thread. Omit a field to leave it unchanged, set it to `null` to clear it, or provide a string to replace the stored value."
+          },
+          "isPinned": {
+            "description": "Patch whether this thread is pinned. Omit to leave the stored value unchanged.",
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "threadId": {
             "type": "string"
