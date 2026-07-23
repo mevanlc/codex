@@ -706,11 +706,11 @@ where
                 queue!(writer, Print(symbol))?;
             }
             DrawCommand::ClearToEnd { bg: clear_bg, .. } => {
-                let clear_bg = crate::primary_accent::remap_cyan(clear_bg, primary_accent);
+                let clear_bg = crate::primary_accent::remap_cyan(*clear_bg, primary_accent);
                 queue!(writer, SetAttribute(crossterm::style::Attribute::Reset))?;
                 modifier = Modifier::empty();
-                queue!(writer, SetBackgroundColor((*clear_bg).into()))?;
-                bg = *clear_bg;
+                queue!(writer, SetBackgroundColor(clear_bg.into()))?;
+                bg = clear_bg;
                 queue!(writer, Clear(crossterm::terminal::ClearType::UntilNewLine))?;
             }
         }
