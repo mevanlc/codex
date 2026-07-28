@@ -87,6 +87,8 @@ jobs:
           # update does internal immediate retries that burn rate budget.
           # Use raw git clone instead for full control over timing.
 
+          failed_submodules=()
+
           clone_submodule() {
             local path=$1
             local url=$(git config --file .gitmodules --get "submodule.$path.url")
@@ -101,7 +103,8 @@ jobs:
               echo "  ✓ ok"
             else
               cd /tmp/rusty_v8
-              echo "  ✗ FAILED (continuing)"
+              echo "  ✗ FAILED"
+              failed_submodules+=("$path@$sha")
             fi
             echo "::endgroup::"
           }
@@ -143,6 +146,21 @@ jobs:
             sleep 5
             clone_submodule "$mod"
           done
+
+          # Stop here rather than letting a missing submodule resurface ~4min
+          # later as an unrelated-looking `gn gen` error (a stale mevanlc/chromium-*
+          # mirror shows up as "Unresolved dependencies ... needs
+          # //buildtools/third_party/libc++:headers"). Each mirror is a
+          # single-commit snapshot, so a v8 bump that moves a submodule SHA needs
+          # the mirror re-pushed; see the "not our ref" SHA reported above.
+          if [ ${#failed_submodules[@]} -gt 0 ]; then
+            for mod in "${failed_submodules[@]}"; do
+              echo "::error::submodule not fetched: $mod"
+            done
+            echo "Re-push the affected mevanlc/chromium-* mirror(s) at the pinned SHA," >&2
+            echo "fetching FULL history from googlesource (a shallow push is rejected)." >&2
+            exit 1
+          fi
 
           # Pre-populate repos that build.rs clones for Android targets
           # (not submodules — cloned directly by build.rs at build time)
