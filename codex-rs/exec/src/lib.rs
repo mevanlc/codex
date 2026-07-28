@@ -1115,6 +1115,7 @@ fn thread_resume_params_from_config(
         sandbox: sandbox.flatten(),
         permissions,
         config: thread_config_overrides_from_config(config),
+        exclude_turns: true,
         ..ThreadResumeParams::default()
     }
 }
@@ -1484,7 +1485,7 @@ async fn resolve_resume_thread_id(
                         model_providers: model_providers.clone(),
                         source_kinds: Some(all_thread_source_kinds()),
                         archived: Some(false),
-                        is_pinned: None,
+                        section_id: None,
                         parent_thread_id: None,
                         ancestor_thread_id: None,
                         cwd: None,
@@ -1552,7 +1553,7 @@ async fn resolve_resume_thread_id(
                     model_providers: model_providers.clone(),
                     source_kinds: Some(all_thread_source_kinds()),
                     archived: Some(false),
-                    is_pinned: None,
+                    section_id: None,
                     parent_thread_id: None,
                     ancestor_thread_id: None,
                     cwd: None,
