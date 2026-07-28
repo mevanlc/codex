@@ -75,6 +75,21 @@ jobs:
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
           echo "Pinned Rust channel: $channel"
 
+      - name: Resolve V8 prebuilt tag from the v8 crate pin
+        run: |
+          set -euo pipefail
+          # The prebuilt librusty_v8 must match the v8 crate exactly: the crate's
+          # C++ shims are compiled into the archive, and their signatures change
+          # between V8 majors. Deriving the tag here keeps an upstream v8 bump
+          # from silently pairing new Rust bindings with an old archive.
+          v8_version=$(sed -n 's/^v8 = "=\(.*\)"$/\1/p' Cargo.toml)
+          if [ -z "$v8_version" ]; then
+            echo "Could not read the v8 pin from codex-rs/Cargo.toml" >&2
+            exit 1
+          fi
+          echo "V8_PREBUILT_TAG=v8-v$v8_version" >> "$GITHUB_ENV"
+          echo "V8 prebuilt tag: v8-v$v8_version"
+
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
@@ -179,7 +194,7 @@ jobs:
           CARGO_PROFILE_RELEASE_DEBUG: "0"
           CARGO_PROFILE_RELEASE_LTO: "thin"
           CARGO_PROFILE_RELEASE_STRIP: "symbols"
-          RUSTY_V8_ARCHIVE: https://github.com/mevanlc/codex/releases/download/v8-v147.4.0/librusty_v8_release_aarch64-linux-android.a.gz
+          RUSTY_V8_ARCHIVE: https://github.com/mevanlc/codex/releases/download/${{ env.V8_PREBUILT_TAG }}/librusty_v8_release_aarch64-linux-android.a.gz
           RUSTY_V8_SRC_BINDING_PATH: /tmp/v8_binding.rs
         run: |
           set -euxo pipefail
@@ -193,7 +208,7 @@ jobs:
           ls -l /tmp/rusty_v8_archive.a.gz
           gzip -l /tmp/rusty_v8_archive.a.gz
           curl -fLsS -o /tmp/v8_binding.rs \
-            https://github.com/mevanlc/codex/releases/download/v8-v147.4.0/src_binding_release_aarch64-linux-android.rs
+            "https://github.com/mevanlc/codex/releases/download/${V8_PREBUILT_TAG}/src_binding_release_aarch64-linux-android.rs"
           echo "Downloaded binding details:"
           ls -l /tmp/v8_binding.rs
           wc -c /tmp/v8_binding.rs

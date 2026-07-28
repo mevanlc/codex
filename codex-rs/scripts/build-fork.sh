@@ -233,12 +233,21 @@ trap cleanup EXIT
 # Termux/Android: use prebuilt V8 from mevanlc/codex releases and link C++
 # runtime for native C++ deps (oboe-sys, onig_sys).
 V8_PREBUILT_BASE="https://github.com/mevanlc/codex/releases/download"
-V8_PREBUILT_TAG="v8-v146.4.0"
+# Derive the prebuilt tag from the v8 crate pin. The archive embeds the crate's
+# C++ shims, whose signatures change between V8 majors, so a stale tag links
+# cleanly but misbehaves at runtime.
+V8_CRATE_VERSION="$(sed -n 's/^v8 = "=\(.*\)"$/\1/p' "$CARGO_TOML" | head -1)"
+V8_PREBUILT_TAG="v8-v${V8_CRATE_VERSION}"
 if [[ "$(uname -m)" == "aarch64" ]] && [[ -f /system/build.prop ]]; then
+	if [[ -z "$V8_CRATE_VERSION" ]]; then
+		echo "Error: could not read the v8 pin from $CARGO_TOML" >&2
+		exit 1
+	fi
 	export RUSTY_V8_ARCHIVE="${V8_PREBUILT_BASE}/${V8_PREBUILT_TAG}/librusty_v8_release_aarch64-linux-android.a.gz"
-	V8_BINDING="/tmp/v8_src_binding.rs"
+	# Key the cache on the tag so a version bump cannot reuse an old binding.
+	V8_BINDING="/tmp/v8_src_binding-${V8_PREBUILT_TAG}.rs"
 	if [[ ! -f "$V8_BINDING" ]]; then
-		curl -sL -o "$V8_BINDING" "${V8_PREBUILT_BASE}/${V8_PREBUILT_TAG}/src_binding_release_aarch64-linux-android.rs"
+		curl -fsSL -o "$V8_BINDING" "${V8_PREBUILT_BASE}/${V8_PREBUILT_TAG}/src_binding_release_aarch64-linux-android.rs"
 	fi
 	export RUSTY_V8_SRC_BINDING_PATH="$V8_BINDING"
 	# V8's arm64 codegen references __clear_cache; rustc passes -nodefaultlibs

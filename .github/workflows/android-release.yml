@@ -140,7 +140,7 @@ jobs:
           CARGO_PROFILE_RELEASE_DEBUG: "0"
           CARGO_PROFILE_RELEASE_LTO: "fat"
           CARGO_PROFILE_RELEASE_STRIP: "symbols"
-          RUSTY_V8_ARCHIVE: https://github.com/mevanlc/codex/releases/download/v8-v146.4.0/librusty_v8_release_aarch64-linux-android.a.gz
+          RUSTY_V8_ARCHIVE: https://github.com/mevanlc/codex/releases/download/v8-v149.2.0/librusty_v8_release_aarch64-linux-android.a.gz
           RUSTY_V8_SRC_BINDING_PATH: /tmp/v8_binding.rs
           RUSTFLAGS: -C link-arg=/usr/local/lib/android/sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/libclang_rt.builtins-aarch64-android.a
         run: |
@@ -155,7 +155,7 @@ jobs:
           ls -l /tmp/rusty_v8_archive.a.gz
           gzip -l /tmp/rusty_v8_archive.a.gz
           curl -fLsS -o /tmp/v8_binding.rs \
-            https://github.com/mevanlc/codex/releases/download/v8-v146.4.0/src_binding_release_aarch64-linux-android.rs
+            https://github.com/mevanlc/codex/releases/download/v8-v149.2.0/src_binding_release_aarch64-linux-android.rs
           echo "Downloaded binding details:"
           ls -l /tmp/v8_binding.rs
           wc -c /tmp/v8_binding.rs
