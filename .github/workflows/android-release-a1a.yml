@@ -178,6 +178,26 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "Using persistent local cache root: $cache_root"
 
+      - name: Wipe cargo-target cache when disk is low
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The persistent cargo-target grows by several GB every time the
+          # stamped workspace version changes (full rebuild, old artifacts kept).
+          # lld mmaps its output, so running out of disk mid-link surfaces as
+          # SIGBUS ("Bus error"), not ENOSPC.
+          df -h "$A1A_CACHE_ROOT"
+          avail_kb=$(df -Pk "$A1A_CACHE_ROOT" | awk 'NR==2 {print $4}')
+          avail_gb=$((avail_kb / 1024 / 1024))
+          echo "Available: ${avail_gb}G"
+          if [ "$avail_gb" -lt 30 ]; then
+            echo "Less than 30G free: wiping cargo-target cache"
+            du -sh "$CARGO_TARGET_DIR" 2>/dev/null || true
+            rm -rf "$CARGO_TARGET_DIR"
+            mkdir -p "$CARGO_TARGET_DIR"
+            df -h "$A1A_CACHE_ROOT"
+          fi
+
       - name: Install sccache
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2
         with:
