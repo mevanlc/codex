@@ -19,7 +19,7 @@ jobs:
       run:
         working-directory: codex-rs
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -103,7 +103,7 @@ jobs:
           done
 
       - name: Install Android NDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
           packages: ""
 
@@ -182,7 +182,6 @@ jobs:
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2
         with:
           tool: sccache
-          version: 0.7.5
 
       - name: Enable sccache wrapper
         shell: bash
@@ -238,7 +237,7 @@ jobs:
             -o codex-code-mode-host-aarch64-linux-android.zst
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: codex-aarch64-linux-android
           path: |
@@ -263,12 +262,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: codex-aarch64-linux-android
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: android-a1a-${{ needs.build.outputs.version }}
           name: Android aarch64 A1A ${{ needs.build.outputs.version }}
