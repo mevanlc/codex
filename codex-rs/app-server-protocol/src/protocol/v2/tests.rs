@@ -73,6 +73,57 @@ fn test_absolute_path() -> AbsolutePathBuf {
 }
 
 #[test]
+fn thread_background_terminals_list_response_round_trips_foreign_paths() {
+    for (uri, expected_cwd) in [
+        ("file:///home/alice/repo", "/home/alice/repo"),
+        (
+            "file:///C:/Users/Alice%20Smith/repo",
+            r"C:\Users\Alice Smith\repo",
+        ),
+        ("file://server/share/repo", r"\\server\share\repo"),
+    ] {
+        let response = ThreadBackgroundTerminalsListResponse {
+            data: vec![ThreadBackgroundTerminal {
+                item_id: "item_123".to_string(),
+                process_id: "42".to_string(),
+                command: "run server".to_string(),
+                cwd: PathUri::parse(uri)
+                    .expect("cross-platform path URI should parse")
+                    .into(),
+                os_pid: None,
+                cpu_percent: None,
+                rss_kb: None,
+            }],
+            next_cursor: None,
+        };
+        let expected = json!({
+            "data": [{
+                "itemId": "item_123",
+                "processId": "42",
+                "command": "run server",
+                "cwd": expected_cwd,
+                "osPid": null,
+                "cpuPercent": null,
+                "rssKb": null,
+            }],
+            "nextCursor": null,
+        });
+
+        assert_eq!(
+            serde_json::to_value(&response).expect("response should serialize"),
+            expected,
+            "serializing {uri}",
+        );
+        assert_eq!(
+            serde_json::from_value::<ThreadBackgroundTerminalsListResponse>(expected)
+                .expect("response should deserialize"),
+            response,
+            "deserializing {uri}",
+        );
+    }
+}
+
+#[test]
 fn thread_sources_round_trip_as_scalar_labels() {
     for (source, label) in [
         (ThreadSource::User, "user"),
@@ -3958,12 +4009,15 @@ fn plugin_share_list_response_serializes_share_items() {
                     share_context: None,
                     source: PluginSource::Remote,
                     installed: false,
+                    installed_at: None,
                     enabled: false,
                     install_policy: PluginInstallPolicy::Available,
                     install_policy_source: Some(PluginInstallPolicySource::WorkspaceSetting),
                     must_show_installation_interstitial: None,
                     auth_policy: PluginAuthPolicy::OnUse,
                     availability: PluginAvailability::Available,
+                    disabled_reason: None,
+                    eligible_plan_types: None,
                     interface: None,
                     keywords: Vec::new(),
                 },
@@ -3982,12 +4036,15 @@ fn plugin_share_list_response_serializes_share_items() {
                     "shareContext": null,
                     "source": { "type": "remote" },
                     "installed": false,
+                    "installedAt": null,
                     "enabled": false,
                     "installPolicy": "AVAILABLE",
                     "installPolicySource": "WORKSPACE_SETTING",
                     "mustShowInstallationInterstitial": null,
                     "authPolicy": "ON_USE",
                     "availability": "AVAILABLE",
+                    "disabledReason": null,
+                    "eligiblePlanTypes": null,
                     "interface": null,
                     "keywords": [],
                 },
@@ -4012,9 +4069,48 @@ fn plugin_summary_defaults_missing_availability_to_available() {
     .unwrap();
 
     assert_eq!(summary.availability, PluginAvailability::Available);
+    assert_eq!(summary.installed_at, None);
     assert_eq!(summary.local_version, None);
     assert_eq!(summary.share_context, None);
     assert_eq!(summary.must_show_installation_interstitial, None);
+    assert_eq!(summary.disabled_reason, None);
+    assert_eq!(summary.eligible_plan_types, None);
+}
+
+#[test]
+fn plugin_summary_round_trips_plan_eligibility_metadata() {
+    let value = json!({
+        "id": "gmail@openai-curated-remote",
+        "remotePluginId": "plugins~Plugin_00000000000000000000000000000000",
+        "version": null,
+        "localVersion": null,
+        "name": "gmail",
+        "shareContext": null,
+        "source": { "type": "remote" },
+        "installed": false,
+        "installedAt": null,
+        "enabled": false,
+        "installPolicy": "NOT_AVAILABLE",
+        "installPolicySource": null,
+        "mustShowInstallationInterstitial": null,
+        "authPolicy": "ON_USE",
+        "availability": "DISABLED_BY_ADMIN",
+        "disabledReason": "plan_not_eligible",
+        "eligiblePlanTypes": ["plus", "pro", "enterprise_cbp_automation"],
+        "interface": null,
+        "keywords": [],
+    });
+    let summary: PluginSummary =
+        serde_json::from_value(value.clone()).expect("plan metadata should deserialize");
+
+    assert_eq!(
+        summary.disabled_reason,
+        Some(PluginDisabledReason::PlanNotEligible)
+    );
+    assert_eq!(
+        serde_json::to_value(summary).expect("plan metadata should serialize"),
+        value
+    );
 }
 
 #[test]

@@ -6015,7 +6015,7 @@
         "itemTypeResults": {
           "description": "Completed results grouped by imported item type.",
           "items": {
-            "$ref": "#/definitions/ExternalAgentConfigImportTypeResult"
+            "$ref": "#/definitions/ExternalAgentConfigImportHistoryRecordTypeResultParams"
           },
           "type": "array"
         },
@@ -6042,6 +6042,68 @@
         "importId"
       ],
       "title": "ExternalAgentConfigImportHistoryRecordResponse",
+      "type": "object"
+    },
+    "ExternalAgentConfigImportHistoryRecordSuccessParams": {
+      "properties": {
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "itemType": {
+          "$ref": "#/definitions/ExternalAgentConfigMigrationItemType"
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "default": null,
+          "description": "Original title for an imported session, when available.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "itemType"
+      ],
+      "type": "object"
+    },
+    "ExternalAgentConfigImportHistoryRecordTypeResultParams": {
+      "properties": {
+        "failures": {
+          "items": {
+            "$ref": "#/definitions/ExternalAgentConfigImportItemTypeFailure"
+          },
+          "type": "array"
+        },
+        "itemType": {
+          "$ref": "#/definitions/ExternalAgentConfigMigrationItemType"
+        },
+        "successes": {
+          "items": {
+            "$ref": "#/definitions/ExternalAgentConfigImportHistoryRecordSuccessParams"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "failures",
+        "itemType",
+        "successes"
+      ],
       "type": "object"
     },
     "ExternalAgentConfigImportItemTypeFailure": {
@@ -6105,6 +6167,14 @@
           ]
         },
         "target": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "default": null,
+          "description": "Original title for an imported session; null for other item types.",
           "type": [
             "string",
             "null"
@@ -10479,6 +10549,15 @@
       ],
       "type": "object"
     },
+    "PluginDisabledReason": {
+      "enum": [
+        "disabled_by_admin",
+        "plan_not_eligible",
+        "required_app_unavailable",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "PluginHookSummary": {
       "properties": {
         "eventName": {
@@ -11431,6 +11510,29 @@
           "default": "AVAILABLE",
           "description": "Availability state for installing and using the plugin."
         },
+        "disabledReason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginDisabledReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why the remote plugin is unavailable, when provided by plugin-service."
+        },
+        "eligiblePlanTypes": {
+          "default": null,
+          "description": "Raw plugin-service plan identifiers eligible to install the plugin.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "enabled": {
           "type": "boolean"
         },
@@ -11452,6 +11554,15 @@
         },
         "installed": {
           "type": "boolean"
+        },
+        "installedAt": {
+          "default": null,
+          "description": "Unix timestamp in seconds when the remote plugin was installed, when available.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "interface": {
           "anyOf": [
@@ -12646,6 +12757,15 @@
             },
             "call_id": {
               "type": "string"
+            },
+            "encrypted_function_args": {
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
             },
             "id": {
               "type": [

@@ -122,6 +122,8 @@ export type { ExternalAgentConfigImportHistoriesReadResponse } from "./ExternalA
 export type { ExternalAgentConfigImportHistory } from "./ExternalAgentConfigImportHistory";
 export type { ExternalAgentConfigImportHistoryRecordParams } from "./ExternalAgentConfigImportHistoryRecordParams";
 export type { ExternalAgentConfigImportHistoryRecordResponse } from "./ExternalAgentConfigImportHistoryRecordResponse";
+export type { ExternalAgentConfigImportHistoryRecordSuccessParams } from "./ExternalAgentConfigImportHistoryRecordSuccessParams";
+export type { ExternalAgentConfigImportHistoryRecordTypeResultParams } from "./ExternalAgentConfigImportHistoryRecordTypeResultParams";
 export type { ExternalAgentConfigImportItemTypeFailure } from "./ExternalAgentConfigImportItemTypeFailure";
 export type { ExternalAgentConfigImportItemTypeSuccess } from "./ExternalAgentConfigImportItemTypeSuccess";
 export type { ExternalAgentConfigImportParams } from "./ExternalAgentConfigImportParams";
@@ -306,6 +308,7 @@ export type { PlanDeltaNotification } from "./PlanDeltaNotification";
 export type { PluginAuthPolicy } from "./PluginAuthPolicy";
 export type { PluginAvailability } from "./PluginAvailability";
 export type { PluginDetail } from "./PluginDetail";
+export type { PluginDisabledReason } from "./PluginDisabledReason";
 export type { PluginHookSummary } from "./PluginHookSummary";
 export type { PluginInstallParams } from "./PluginInstallParams";
 export type { PluginInstallPolicy } from "./PluginInstallPolicy";
