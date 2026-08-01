@@ -107,10 +107,34 @@ jobs:
 
       - if: ${{ runner.os == 'Linux' }}
         name: Install Zig
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: 0.14.0
-          use-cache: false
+        shell: bash
+        env:
+          ZIG_VERSION: 0.14.0
+        run: |
+          set -euo pipefail
+          case "$RUNNER_ARCH" in
+            X64)
+              zig_arch=x86_64
+              zig_sha256=473ec26806133cf4d1918caf1a410f8403a13d979726a9045b421b685031a982
+              ;;
+            ARM64)
+              zig_arch=aarch64
+              zig_sha256=ab64e3ea277f6fc5f3d723dcd95d9ce1ab282c8ed0f431b4de880d30df891e4f
+              ;;
+            *)
+              echo "Unsupported runner architecture: $RUNNER_ARCH" >&2
+              exit 1
+              ;;
+          esac
+
+          zig_dir="zig-linux-${zig_arch}-${ZIG_VERSION}"
+          zig_archive="$RUNNER_TEMP/${zig_dir}.tar.xz"
+          curl --fail --location --retry 10 --show-error \
+            "https://ziglang.org/download/${ZIG_VERSION}/${zig_dir}.tar.xz" \
+            --output "$zig_archive"
+          echo "${zig_sha256}  ${zig_archive}" | sha256sum --check
+          tar -xJf "$zig_archive" --directory "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$zig_dir" >> "$GITHUB_PATH"
 
       - if: ${{ runner.os == 'Linux' }}
         name: Install musl build tools
@@ -218,7 +242,7 @@ jobs:
           PY
 
       - name: Publish ${{ matrix.label }} artifact
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ needs.metadata.outputs.tag }}
           target_commitish: ${{ github.sha }}
@@ -335,7 +359,7 @@ jobs:
           }
 
       - name: Publish ${{ matrix.label }} artifact
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ needs.metadata.outputs.tag }}
           target_commitish: ${{ github.sha }}
@@ -374,14 +398,6 @@ jobs:
           echo "RUNNER_ARCH=${RUNNER_ARCH:-}"
           echo "ANDROID_HOME=${ANDROID_HOME:-}"
 
-      - name: Read pinned Rust channel
-        id: toolchain
-        run: |
-          set -euo pipefail
-          channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
-          echo "channel=$channel" >> "$GITHUB_OUTPUT"
-          echo "Pinned Rust channel: $channel"
-
       - name: Resolve V8 prebuilt tag from the v8 crate pin
         run: |
           set -euo pipefail
@@ -399,7 +415,6 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
         with:
-          toolchain: ${{ steps.toolchain.outputs.channel }}
           targets: aarch64-linux-android
 
       - name: Verify host dependencies
@@ -564,7 +579,7 @@ jobs:
             -o codex-code-mode-host-aarch64-linux-android.zst
 
       - name: Publish Android/Termux artifacts
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ needs.metadata.outputs.tag }}
           target_commitish: ${{ github.sha }}
