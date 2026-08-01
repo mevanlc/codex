@@ -4229,7 +4229,8 @@ impl Config {
             tui_file_mentions_allow_explicit_paths: cfg
                 .tui
                 .as_ref()
-                .is_some_and(|t| t.file_mentions_allow_explicit_paths),
+                .map(|t| t.file_mentions_allow_explicit_paths)
+                .unwrap_or(true),
             model_availability_nux: cfg
                 .tui
                 .as_ref()

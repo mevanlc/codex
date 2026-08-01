@@ -1031,7 +1031,7 @@ fn config_toml_deserializes_model_availability_nux() {
             show_tooltips: true,
             chatbox_placeholder_tips: ChatboxPlaceholderTips::default(),
             file_mentions_preserve_at: false,
-            file_mentions_allow_explicit_paths: false,
+            file_mentions_allow_explicit_paths: true,
             vim_mode_default: false,
             raw_output_mode: false,
             alternate_screen: AltScreenMode::default(),
@@ -3958,7 +3958,7 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             show_tooltips: true,
             chatbox_placeholder_tips: ChatboxPlaceholderTips::default(),
             file_mentions_preserve_at: false,
-            file_mentions_allow_explicit_paths: false,
+            file_mentions_allow_explicit_paths: true,
             vim_mode_default: false,
             raw_output_mode: false,
             alternate_screen: AltScreenMode::Auto,
@@ -3992,14 +3992,14 @@ async fn runtime_config_resolves_file_mention_settings() {
             default_config.tui_file_mentions_preserve_at,
             default_config.tui_file_mentions_allow_explicit_paths,
         ),
-        (false, false)
+        (false, true)
     );
 
     let config_toml = toml::from_str(
         r#"
 [tui]
 file_mentions_preserve_at = true
-file_mentions_allow_explicit_paths = true
+file_mentions_allow_explicit_paths = false
 "#,
     )
     .expect("file mention settings should deserialize");
@@ -4015,7 +4015,7 @@ file_mentions_allow_explicit_paths = true
             configured.tui_file_mentions_preserve_at,
             configured.tui_file_mentions_allow_explicit_paths,
         ),
-        (true, true)
+        (true, false)
     );
 }
 

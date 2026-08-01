@@ -3240,8 +3240,8 @@
           "description": "Controls whether the chatbox placeholder shows a rotating set of tip prompts.\n\n- `on` (default): Show rotating placeholder tips. - `off`: Use a generic placeholder instead."
         },
         "file_mentions_allow_explicit_paths": {
-          "default": false,
-          "description": "Let `@` file search resolve absolute paths and paths beginning with `./` or `../`. Defaults to `false`.",
+          "default": true,
+          "description": "Let `@` file search resolve absolute paths and paths beginning with `./` or `../`. Defaults to `true`.",
           "type": "boolean"
         },
         "file_mentions_preserve_at": {

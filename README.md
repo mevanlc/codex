@@ -84,7 +84,7 @@ file_mentions_preserve_at = true
 file_mentions_allow_explicit_paths = true
 ```
 
-`file_mentions_preserve_at` keeps the leading `@` in the composer when a file-search result is completed, so `@program` remains `@program` in the prompt sent to the model. `file_mentions_allow_explicit_paths` makes file search recognize absolute paths and relative paths beginning with `./` or `../`, including paths with repeated `.` and `..` components. The completed path retains the lexical form you typed. Both settings default to `false` and can be enabled independently.
+`file_mentions_preserve_at` keeps the leading `@` in the composer when a file-search result is completed, so `@program` remains `@program` in the prompt sent to the model. It defaults to `false`. `file_mentions_allow_explicit_paths` makes file search recognize absolute paths and relative paths beginning with `./` or `../`, including paths with repeated `.` and `..` components. The completed path retains the lexical form you typed. Explicit paths are enabled by default; set this option to `false` to disable them.
 
 ### Shell command follow-ups
 

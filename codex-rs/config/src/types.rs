@@ -724,8 +724,8 @@ pub struct Tui {
     pub file_mentions_preserve_at: bool,
 
     /// Let `@` file search resolve absolute paths and paths beginning with `./` or `../`.
-    /// Defaults to `false`.
-    #[serde(default)]
+    /// Defaults to `true`.
+    #[serde(default = "default_true")]
     pub file_mentions_allow_explicit_paths: bool,
 
     /// Start the composer in Vim mode (`Normal`) by default.
