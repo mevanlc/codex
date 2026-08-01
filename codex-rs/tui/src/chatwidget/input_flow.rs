@@ -50,6 +50,35 @@ impl ChatWidget {
                     self.queue_user_message(user_message);
                 }
             }
+            InputResult::SubmittedShell {
+                text,
+                text_elements,
+                follow_up,
+            } => {
+                let user_message = self.user_message_from_submission(text, text_elements);
+                let should_submit_now = self.is_session_configured()
+                    && !self.is_plan_streaming_in_tui()
+                    && !self.input_queue.suppress_queue_autosend;
+                if should_submit_now {
+                    self.reasoning_buffer.clear();
+                    self.reasoning_header = None;
+                    self.reasoning_summary_parts.clear();
+                    self.set_status_header(String::from("Working"));
+                    let accepted = self.submit_user_message_with_history_record(
+                        user_message,
+                        UserMessageHistoryRecord::UserMessageText,
+                    );
+                    if accepted && follow_up.is_enabled() {
+                        self.enqueue_shell_follow_up();
+                    }
+                } else {
+                    self.queue_user_message_with_options(
+                        user_message,
+                        QueuedInputAction::RunShell { follow_up },
+                        Vec::new(),
+                    );
+                }
+            }
             InputResult::Queued {
                 text,
                 text_elements,
@@ -123,9 +152,29 @@ impl ChatWidget {
                 .queued_user_message_history_records
                 .push_back(UserMessageHistoryRecord::UserMessageText);
             self.refresh_pending_input_preview();
+        } else if let QueuedInputAction::RunShell { follow_up } = action {
+            let accepted = self.submit_user_message_with_history_record(
+                user_message,
+                UserMessageHistoryRecord::UserMessageText,
+            );
+            if accepted && follow_up.is_enabled() {
+                self.enqueue_shell_follow_up();
+            }
         } else {
             self.submit_user_message(user_message);
         }
+    }
+
+    fn enqueue_shell_follow_up(&mut self) {
+        self.input_queue
+            .queued_user_messages
+            .push_front(QueuedUserMessage::from(UserMessage::from(
+                SHELL_FOLLOW_UP_PROMPT,
+            )));
+        self.input_queue
+            .queued_user_message_history_records
+            .push_front(UserMessageHistoryRecord::UserMessageText);
+        self.refresh_pending_input_preview();
     }
 
     /// If idle and there are queued inputs, submit exactly one to start the next turn.
@@ -159,9 +208,12 @@ impl ChatWidget {
                         break;
                     }
                 }
-                QueuedInputAction::RunShell => {
+                QueuedInputAction::RunShell { follow_up } => {
                     let drain = self.submit_queued_shell_prompt(queued_message.into_user_message());
                     if drain == QueueDrain::Stop {
+                        if follow_up.is_enabled() {
+                            self.enqueue_shell_follow_up();
+                        }
                         submitted_follow_up = self.is_user_turn_pending_or_running();
                         break;
                     }

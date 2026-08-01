@@ -1267,6 +1267,11 @@ impl McpServerElicitationOverlay {
                 text,
                 text_elements,
             }
+            | InputResult::SubmittedShell {
+                text,
+                text_elements,
+                ..
+            }
             | InputResult::Queued {
                 text,
                 text_elements,

@@ -1,4 +1,5 @@
 use super::*;
+use crate::bottom_pane::ShellFollowUp;
 use crate::bottom_pane::slash_commands::ServiceTierCommand;
 use pretty_assertions::assert_eq;
 use serial_test::serial;
@@ -63,6 +64,121 @@ fn queue_composer_text_with_tab(chat: &mut ChatWidget, text: &str) {
     chat.bottom_pane
         .set_composer_text(text.to_string(), Vec::new(), Vec::new());
     chat.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+}
+
+fn queue_shell_input(chat: &mut ChatWidget, text: &str) {
+    chat.queue_user_message_with_options(
+        UserMessage::from(text),
+        QueuedInputAction::RunShell {
+            follow_up: ShellFollowUp::Disabled,
+        },
+        Vec::new(),
+    );
+}
+
+#[tokio::test]
+async fn armed_bang_shell_starts_agent_follow_up_after_command_finishes() {
+    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.bottom_pane
+        .set_composer_text("!make check".to_string(), Vec::new(), Vec::new());
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    submit_current_composer(&mut chat);
+
+    match op_rx.try_recv() {
+        Ok(Op::RunUserShellCommand { command }) => assert_eq!(command, "make check"),
+        other => panic!("expected user shell command op, got {other:?}"),
+    }
+    assert_eq!(
+        chat.queued_user_message_texts(),
+        vec![SHELL_FOLLOW_UP_PROMPT.to_string()]
+    );
+    assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
+
+    handle_turn_started(&mut chat, "shell-turn");
+    let begin = begin_exec_with_source(
+        &mut chat,
+        "user-shell-make-check",
+        "make check",
+        ExecCommandSource::UserShell,
+    );
+    end_exec(
+        &mut chat,
+        begin,
+        "",
+        "error: check failed\n",
+        /*exit_code*/ 1,
+    );
+    assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
+
+    handle_turn_completed(&mut chat, "shell-turn", /*duration_ms*/ None);
+
+    match next_submit_op(&mut op_rx) {
+        Op::UserTurn { items, .. } => assert_eq!(
+            items,
+            vec![UserInput::Text {
+                text: SHELL_FOLLOW_UP_PROMPT.to_string(),
+                text_elements: Vec::new(),
+            }]
+        ),
+        other => panic!("expected automatic shell follow-up turn, got {other:?}"),
+    }
+    assert!(chat.input_queue.queued_user_messages.is_empty());
+}
+
+#[tokio::test]
+async fn queued_armed_bang_shell_prioritizes_automatic_follow_up() {
+    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    handle_turn_started(&mut chat, "active-turn");
+    chat.queue_user_message_with_options(
+        UserMessage::from("!make check"),
+        QueuedInputAction::RunShell {
+            follow_up: ShellFollowUp::Enabled,
+        },
+        Vec::new(),
+    );
+    queue_composer_text_with_tab(&mut chat, "after shell");
+
+    complete_turn_with_message(&mut chat, "active-turn", Some("done"));
+
+    match op_rx.try_recv() {
+        Ok(Op::RunUserShellCommand { command }) => assert_eq!(command, "make check"),
+        other => panic!("expected queued user shell command op, got {other:?}"),
+    }
+    assert_eq!(
+        chat.queued_user_message_texts(),
+        vec![
+            SHELL_FOLLOW_UP_PROMPT.to_string(),
+            "after shell".to_string()
+        ]
+    );
+
+    handle_turn_started(&mut chat, "shell-turn");
+    let begin = begin_exec_with_source(
+        &mut chat,
+        "queued-user-shell-make-check",
+        "make check",
+        ExecCommandSource::UserShell,
+    );
+    end_exec(&mut chat, begin, "ok\n", "", /*exit_code*/ 0);
+    handle_turn_completed(&mut chat, "shell-turn", /*duration_ms*/ None);
+
+    match next_submit_op(&mut op_rx) {
+        Op::UserTurn { items, .. } => assert_eq!(
+            items,
+            vec![UserInput::Text {
+                text: SHELL_FOLLOW_UP_PROMPT.to_string(),
+                text_elements: Vec::new(),
+            }]
+        ),
+        other => panic!("expected automatic shell follow-up turn, got {other:?}"),
+    }
+    assert_eq!(
+        chat.queued_user_message_texts(),
+        vec!["after shell".to_string()]
+    );
 }
 
 fn queue_goal_with_large_paste(chat: &mut ChatWidget, paste: String) {
@@ -238,7 +354,7 @@ async fn queued_bang_shell_dispatches_after_active_turn() {
     chat.thread_id = Some(ThreadId::new());
     handle_turn_started(&mut chat, "turn-1");
 
-    queue_composer_text_with_tab(&mut chat, "!echo hi");
+    queue_shell_input(&mut chat, "!echo hi");
 
     assert_eq!(chat.input_queue.queued_user_messages.len(), 1);
     assert_eq!(
@@ -247,7 +363,9 @@ async fn queued_bang_shell_dispatches_after_active_turn() {
             .front()
             .unwrap()
             .action,
-        QueuedInputAction::RunShell
+        QueuedInputAction::RunShell {
+            follow_up: ShellFollowUp::Disabled,
+        }
     );
     assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
 
@@ -267,7 +385,7 @@ async fn queued_empty_bang_shell_reports_help_when_dequeued_and_drains_next_inpu
     chat.thread_id = Some(ThreadId::new());
     handle_turn_started(&mut chat, "turn-1");
 
-    queue_composer_text_with_tab(&mut chat, "!");
+    queue_shell_input(&mut chat, "!");
     queue_composer_text_with_tab(&mut chat, "hello after help");
 
     assert!(drain_insert_history(&mut rx).is_empty());
@@ -304,7 +422,7 @@ async fn queued_bang_shell_waits_for_user_shell_completion_before_next_input() {
     chat.thread_id = Some(ThreadId::new());
     handle_turn_started(&mut chat, "turn-1");
 
-    queue_composer_text_with_tab(&mut chat, "!echo hi");
+    queue_shell_input(&mut chat, "!echo hi");
     queue_composer_text_with_tab(&mut chat, "hello after shell");
 
     complete_turn_with_message(&mut chat, "turn-1", Some("done"));

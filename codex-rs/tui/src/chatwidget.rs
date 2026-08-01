@@ -286,6 +286,7 @@ use crate::bottom_pane::MentionBinding;
 use crate::bottom_pane::PermissionsApprovalRequest;
 use crate::bottom_pane::QUIT_SHORTCUT_TIMEOUT;
 use crate::bottom_pane::QueuedInputAction;
+use crate::bottom_pane::SHELL_FOLLOW_UP_PROMPT;
 use crate::bottom_pane::SelectionAction;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;

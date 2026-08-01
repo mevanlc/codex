@@ -25,6 +25,7 @@ use super::ChatComposer;
 use super::InputResult;
 use super::QueuedInputAction;
 use super::parent_owned_command_is_allowed;
+use super::shell_mode::ShellFollowUp;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SlashValidation {
@@ -195,11 +196,14 @@ impl<'a> SlashInput<'a> {
 pub(super) fn queued_input_action(
     prepared_text: &str,
     defer_slash_validation: bool,
+    shell_follow_up: ShellFollowUp,
 ) -> QueuedInputAction {
     if defer_slash_validation && prepared_text.starts_with('/') {
         QueuedInputAction::ParseSlash
     } else if prepared_text.starts_with('!') {
-        QueuedInputAction::RunShell
+        QueuedInputAction::RunShell {
+            follow_up: shell_follow_up,
+        }
     } else {
         QueuedInputAction::Plain
     }
@@ -268,7 +272,7 @@ impl ChatComposer {
                     {
                         self.stage_selected_slash_command_history(&selected_cmd);
                         self.draft.textarea.set_text_clearing_elements("");
-                        self.draft.is_bash_mode = false;
+                        self.draft.leave_shell_mode();
                         return (InputResult::Command(*cmd), true);
                     }
 
@@ -327,7 +331,7 @@ impl ChatComposer {
                         self.draft
                             .textarea
                             .set_text_clearing_elements(&completed_text);
-                        self.draft.is_bash_mode = false;
+                        self.draft.leave_shell_mode();
                     }
                     if !self.draft.textarea.text().is_empty() {
                         self.draft
@@ -367,7 +371,7 @@ impl ChatComposer {
 
                     self.stage_selected_slash_command_history(&sel);
                     self.draft.textarea.set_text_clearing_elements("");
-                    self.draft.is_bash_mode = false;
+                    self.draft.leave_shell_mode();
                     return (
                         match sel {
                             CommandItem::Builtin(cmd) => InputResult::Command(cmd),
@@ -443,7 +447,7 @@ impl ChatComposer {
         self.draft
             .textarea
             .replace_range(0..replace_end, &replacement);
-        self.draft.is_bash_mode = false;
+        self.draft.leave_shell_mode();
         self.draft
             .textarea
             .set_cursor(self.draft.textarea.text().len());

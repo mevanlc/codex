@@ -60,8 +60,8 @@
 //! # Submission and Prompt Expansion
 //!
 //! `Enter` submits immediately. `Tab` requests queuing while a task is running; if no task is
-//! running, `Tab` submits just like Enter so input is never dropped.
-//! `Tab` does not submit when entering a `!` shell command.
+//! running, `Tab` submits just like Enter so input is never dropped. In `!` shell mode, `Tab`
+//! instead toggles an automatic agent follow-up after the command finishes.
 //!
 //! On submit/queue paths, the composer:
 //!
@@ -268,6 +268,7 @@ mod draft_state;
 mod footer_state;
 mod history_search;
 mod popup_state;
+mod shell_mode;
 mod slash_input;
 
 use self::attachment_state::AttachmentState;
@@ -278,6 +279,8 @@ use self::history_search::HistorySearchSession;
 use self::popup_state::ActivePopup;
 use self::popup_state::DismissedToken;
 use self::popup_state::PopupState;
+pub(crate) use self::shell_mode::SHELL_FOLLOW_UP_PROMPT;
+pub(crate) use self::shell_mode::ShellFollowUp;
 use self::slash_input::SlashInput;
 use self::slash_input::SlashValidation;
 use self::slash_input::SubmissionValidation;
@@ -328,6 +331,11 @@ pub enum InputResult {
     Submitted {
         text: String,
         text_elements: Vec<TextElement>,
+    },
+    SubmittedShell {
+        text: String,
+        text_elements: Vec<TextElement>,
+        follow_up: ShellFollowUp,
     },
     Queued {
         text: String,
@@ -405,7 +413,7 @@ fn parent_owned_command_is_allowed(command: SlashCommand, args: &str) -> bool {
 pub enum QueuedInputAction {
     Plain,
     ParseSlash,
-    RunShell,
+    RunShell { follow_up: ShellFollowUp },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1465,7 +1473,7 @@ impl ChatComposer {
     ) {
         // Clear any existing content, placeholders, and attachments first.
         self.draft.textarea.set_text_clearing_elements("");
-        self.draft.is_bash_mode = false;
+        self.draft.leave_shell_mode();
         self.draft.pending_pastes.clear();
         self.draft.mention_bindings.clear();
 
@@ -1606,7 +1614,7 @@ impl ChatComposer {
         text_elements: Vec<TextElement>,
     ) -> (String, Vec<TextElement>) {
         if let Some(stripped) = text.strip_prefix('!') {
-            self.draft.is_bash_mode = true;
+            self.draft.enter_shell_mode();
             (
                 stripped.to_string(),
                 text_elements
@@ -1615,7 +1623,7 @@ impl ChatComposer {
                     .collect(),
             )
         } else {
-            self.draft.is_bash_mode = false;
+            self.draft.leave_shell_mode();
             (text, text_elements)
         }
     }
@@ -2881,7 +2889,7 @@ impl ChatComposer {
         let input_starts_with_space = original_input.starts_with(' ');
         self.draft.recent_submission_mention_bindings.clear();
         self.draft.textarea.set_text_clearing_elements("");
-        self.draft.is_bash_mode = false;
+        self.draft.leave_shell_mode();
 
         if pending_paste_handling == PendingPasteHandling::Expand
             && !self.draft.pending_pastes.is_empty()
@@ -2977,6 +2985,7 @@ impl ChatComposer {
         if matches!(
             result,
             InputResult::Submitted { .. }
+                | InputResult::SubmittedShell { .. }
                 | InputResult::Queued { .. }
                 | InputResult::Command(_)
                 | InputResult::ServiceTierCommand(_)
@@ -3028,6 +3037,8 @@ impl ChatComposer {
         if let Some(result) = self.handle_parent_owned_submission() {
             return result;
         }
+        let was_bash_mode = self.draft.is_bash_mode;
+        let shell_follow_up = self.draft.shell_follow_up;
         if should_queue {
             if let Some(pasted) = self.draft.paste_burst.flush_before_modified_input() {
                 self.handle_paste(pasted);
@@ -3056,7 +3067,11 @@ impl ChatComposer {
                     PendingPasteHandling::Expand
                 },
             ) {
-                let action = slash_input::queued_input_action(&text, defer_slash_validation);
+                let action = slash_input::queued_input_action(
+                    &text,
+                    defer_slash_validation,
+                    shell_follow_up,
+                );
                 return (
                     InputResult::Queued {
                         text,
@@ -3106,13 +3121,19 @@ impl ChatComposer {
             } else {
                 // Do not clear local attachments here; ChatWidget drains them via
                 // take_recent_submission_images().
-                (
+                let result = if was_bash_mode {
+                    InputResult::SubmittedShell {
+                        text,
+                        text_elements,
+                        follow_up: shell_follow_up,
+                    }
+                } else {
                     InputResult::Submitted {
                         text,
                         text_elements,
-                    },
-                    true,
-                )
+                    }
+                };
+                (result, true)
             }
         } else {
             // Restore text if submission was suppressed.
@@ -3161,7 +3182,7 @@ impl ChatComposer {
         }
         self.stage_slash_command_history(&command);
         self.draft.textarea.set_text_clearing_elements("");
-        self.draft.is_bash_mode = false;
+        self.draft.leave_shell_mode();
         Some(match command {
             SlashCommandItem::Builtin(cmd) => InputResult::Command(cmd),
             SlashCommandItem::ServiceTier(command) => InputResult::ServiceTierCommand(command),
@@ -3299,7 +3320,7 @@ impl ChatComposer {
                 self.handle_paste(pasted);
             }
             if self.draft.textarea.is_empty() {
-                self.draft.is_bash_mode = false;
+                self.draft.leave_shell_mode();
                 return (InputResult::None, true);
             }
         }
@@ -3343,7 +3364,7 @@ impl ChatComposer {
             )
         {
             self.footer.mode = reset_mode_after_activity(self.footer.mode);
-            self.draft.is_bash_mode = true;
+            self.draft.enter_shell_mode();
             self.draft.textarea.enter_vim_insert_mode();
             return (InputResult::None, true);
         }
@@ -3357,6 +3378,10 @@ impl ChatComposer {
             }
         } else {
             self.footer.mode = reset_mode_after_activity(self.footer.mode);
+        }
+        if self.draft.is_bash_mode && key_hint::plain(KeyCode::Tab).is_press(key_event) {
+            self.draft.shell_follow_up.toggle();
+            return (InputResult::None, true);
         }
         if self.queue_keys.is_pressed(key_event)
             && (self.is_task_running || self.queue_submissions || !self.is_bang_shell_command())
@@ -3422,8 +3447,7 @@ impl ChatComposer {
 
     fn shell_mode_footer_line(&self) -> Option<Line<'static>> {
         self.is_bang_shell_command()
-            .then_some(())
-            .map(|_| Line::from(vec![Span::from("Shell mode").light_red()]))
+            .then(|| self.draft.shell_follow_up.footer_line())
     }
 
     /// Applies any due `PasteBurst` flush at time `now`.
@@ -3583,7 +3607,7 @@ impl ChatComposer {
             && matches!(input.code, KeyCode::Backspace)
             && self.draft.textarea.cursor() == 0
         {
-            self.draft.is_bash_mode = false;
+            self.draft.leave_shell_mode();
             return (InputResult::None, true);
         }
 
@@ -3620,7 +3644,7 @@ impl ChatComposer {
     fn sync_bash_mode_from_text(&mut self) {
         if !self.draft.is_bash_mode && self.draft.textarea.text().starts_with('!') {
             self.draft.textarea.replace_range(0..1, "");
-            self.draft.is_bash_mode = true;
+            self.draft.enter_shell_mode();
         }
     }
 
@@ -5220,6 +5244,19 @@ mod tests {
                     "gpt-5.4 high fast · ~/code/codex-1 · Context 0% used",
                 )));
                 composer.set_text_content("!git status".to_string(), Vec::new(), Vec::new());
+            },
+        );
+
+        snapshot_composer_state(
+            "footer_mode_shell_follow_up_enabled",
+            /*enhanced_keys_supported*/ true,
+            |composer| {
+                composer.set_status_line_enabled(/*enabled*/ true);
+                composer.set_status_line(Some(Line::from(
+                    "gpt-5.4 high fast · ~/code/codex-1 · Context 0% used",
+                )));
+                composer.set_text_content("!git status".to_string(), Vec::new(), Vec::new());
+                let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
             },
         );
 
@@ -9422,6 +9459,9 @@ mod tests {
             InputResult::Submitted { text, .. } => {
                 panic!("expected command dispatch, but composer submitted literal text: {text}")
             }
+            InputResult::SubmittedShell { text, .. } => {
+                panic!("expected command dispatch, but composer submitted shell text: {text}")
+            }
             InputResult::Queued { .. } => {
                 panic!("expected command dispatch, but composer queued literal text")
             }
@@ -9766,7 +9806,7 @@ mod tests {
     }
 
     #[test]
-    fn tab_queues_bang_shell_prompts_while_task_running_without_execution() {
+    fn enter_queues_armed_bang_shell_while_startup_queueing_is_enabled() {
         use crossterm::event::KeyCode;
         use crossterm::event::KeyEvent;
         use crossterm::event::KeyModifiers;
@@ -9781,11 +9821,15 @@ mod tests {
                 "Ask Codex to do anything".to_string(),
                 /*disable_paste_burst*/ false,
             );
-            composer.set_task_running(/*running*/ true);
-            composer.draft.textarea.set_text_clearing_elements(input);
+            composer.set_queue_submissions(/*queue_submissions*/ true);
+            composer.set_text_content(input.to_string(), Vec::new(), Vec::new());
 
             let (result, _needs_redraw) =
                 composer.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+            assert_eq!(result, InputResult::None);
+
+            let (result, _needs_redraw) =
+                composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
             match result {
                 InputResult::Queued {
@@ -9796,7 +9840,12 @@ mod tests {
                 } => {
                     assert_eq!(text, expected_text);
                     assert!(text_elements.is_empty());
-                    assert_eq!(action, QueuedInputAction::RunShell);
+                    assert_eq!(
+                        action,
+                        QueuedInputAction::RunShell {
+                            follow_up: ShellFollowUp::Enabled,
+                        }
+                    );
                 }
                 other => panic!("expected bang shell input to queue, got {other:?}"),
             }
@@ -9809,7 +9858,6 @@ mod tests {
 
         assert_queued_shell("!echo hi", "!echo hi");
         assert_queued_shell("!", "!");
-        assert_queued_shell(" !echo hi", "!echo hi");
     }
 
     #[test]
@@ -9932,6 +9980,9 @@ mod tests {
             InputResult::Submitted { text, .. } => {
                 panic!("expected command dispatch after Tab completion, got literal submit: {text}")
             }
+            InputResult::SubmittedShell { text, .. } => {
+                panic!("expected command dispatch after Tab completion, got shell submit: {text}")
+            }
             InputResult::Queued { .. } => {
                 panic!("expected command dispatch after Tab completion, got literal queue")
             }
@@ -10043,7 +10094,7 @@ mod tests {
     }
 
     #[test]
-    fn tab_does_not_submit_for_bang_shell_command() {
+    fn tab_toggles_shell_follow_up_without_submitting() {
         use crossterm::event::KeyCode;
         use crossterm::event::KeyEvent;
         use crossterm::event::KeyModifiers;
@@ -10057,18 +10108,23 @@ mod tests {
             "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
-        composer.set_task_running(/*running*/ false);
+        composer.set_task_running(/*running*/ true);
 
         type_chars_humanlike(&mut composer, &['!', 'l', 's']);
 
         let (result, _needs_redraw) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
 
-        assert!(matches!(result, InputResult::None));
-        assert!(
-            composer.current_text().starts_with("!ls"),
-            "expected Tab not to submit or clear a `!` command"
-        );
+        assert_eq!(result, InputResult::None);
+        assert_eq!(composer.draft.shell_follow_up, ShellFollowUp::Enabled);
+        assert_eq!(composer.current_text(), "!ls");
+
+        let (result, _needs_redraw) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+
+        assert_eq!(result, InputResult::None);
+        assert_eq!(composer.draft.shell_follow_up, ShellFollowUp::Disabled);
+        assert_eq!(composer.current_text(), "!ls");
     }
 
     #[test]
@@ -10094,7 +10150,11 @@ mod tests {
 
         assert!(matches!(
             result,
-            InputResult::Submitted { ref text, .. } if text == "!/diff"
+            InputResult::SubmittedShell {
+                ref text,
+                follow_up: ShellFollowUp::Disabled,
+                ..
+            } if text == "!/diff"
         ));
     }
 
@@ -10131,6 +10191,9 @@ mod tests {
             }
             InputResult::Submitted { text, .. } => {
                 panic!("expected command dispatch, but composer submitted literal text: {text}")
+            }
+            InputResult::SubmittedShell { text, .. } => {
+                panic!("expected command dispatch, but composer submitted shell text: {text}")
             }
             InputResult::Queued { .. } => {
                 panic!("expected command dispatch, but composer queued literal text")
@@ -11250,7 +11313,7 @@ mod tests {
         type_chars_humanlike(&mut composer, &['!', 'g', 'i', 't']);
         let (result, _needs_redraw) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert!(matches!(result, InputResult::Submitted { .. }));
+        assert!(matches!(result, InputResult::SubmittedShell { .. }));
 
         let (_result, _needs_redraw) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
@@ -11282,7 +11345,7 @@ mod tests {
         type_chars_humanlike(&mut composer, &['!', 'g', 'i', 't']);
         let (result, _needs_redraw) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert!(matches!(result, InputResult::Submitted { .. }));
+        assert!(matches!(result, InputResult::SubmittedShell { .. }));
 
         composer.set_vim_enabled(/*enabled*/ true);
 

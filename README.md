@@ -16,6 +16,7 @@ This fork maintains a build of Codex CLI that runs natively on Android via [Term
 - **`[tui].primary_accent`** — replace Codex's cyan accent with a color of your choosing
 - **`[tui].chatbox_placeholder_tips`** — turn off the rotating composer tips
 - **File mention settings** — optionally preserve the `@` prefix and complete explicit paths
+- **Shell follow-ups** — press Tab in `!` mode to start an agent turn after the command finishes
 - **Retractable steer messages** — pull a still-pending steer back into the composer; backed by a new `turn/retract` app-server method
 - **Unrestricted reasoning shortcuts** — the reasoning hotkeys step all the way into Max and Ultra
 - **Platform fixes** — file-lock fallbacks, `SHELL`-based shell detection on Android, vendored OpenSSL, fork-aware update checks
@@ -84,6 +85,10 @@ file_mentions_allow_explicit_paths = true
 ```
 
 `file_mentions_preserve_at` keeps the leading `@` in the composer when a file-search result is completed, so `@program` remains `@program` in the prompt sent to the model. `file_mentions_allow_explicit_paths` makes file search recognize absolute paths and relative paths beginning with `./` or `../`, including paths with repeated `.` and `..` components. The completed path retains the lexical form you typed. Both settings default to `false` and can be enabled independently.
+
+### Shell command follow-ups
+
+While composing a `!` shell command, press Tab to toggle an automatic follow-up on or off. With the follow-up on, Enter runs the command as usual, then starts an agent turn after the command exits. The agent receives the command result and is instructed to investigate and fix failures, or explain a successful result and relevant next steps. The toggle applies only to the current shell command and requires no configuration.
 
 ### Retracting a pending steer
 
