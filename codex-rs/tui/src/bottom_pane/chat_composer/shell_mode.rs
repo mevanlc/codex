@@ -4,7 +4,7 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 
 /// Prompt submitted automatically after an armed user shell command finishes.
-pub(crate) const SHELL_FOLLOW_UP_PROMPT: &str = "Review the shell command result above. If it failed, investigate the failure(s). If the fixes are compatible with any work in progress and do not conflict with the spirit of the session, then fix the failures; otherwise, just explain the results and any relevant next steps.";
+pub(crate) const SHELL_FOLLOW_UP_PROMPT: &str = "Review the shell command result above. If it failed, investigate the failure(s). If the fixes are compatible with any work in progress and do not conflict with the goals of the session, then fix the failures; otherwise, just explain the results and any relevant next steps.";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum ShellFollowUp {
