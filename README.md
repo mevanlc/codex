@@ -10,7 +10,7 @@ This fork maintains a build of Codex CLI that runs natively on Android via [Term
 
 ### Key changes
 
-- **Android aarch64 target** — a self-hosted CI workflow publishes `aarch64-linux-android` release binaries
+- **Cross-platform fork releases** — GitHub-hosted runners build Linux, macOS, and Windows for amd64 and arm64, while the self-hosted A1 runner builds `aarch64-linux-android`
 - **Android code-mode / JS REPL** — Android builds link a prebuilt `librusty_v8` and ship `codex-code-mode-host` alongside `codex`
 - **`build-fork.sh`** — one build-and-install script for macOS, Linux, and Termux, with Termux auto-detection and target-dir pruning
 - **`[tui].primary_accent`** — replace Codex's cyan accent with a color of your choosing
@@ -34,7 +34,15 @@ Everything else behaves like upstream Codex.
 
 ## Install
 
-Grab the latest Android aarch64 build from [Releases](https://github.com/mevanlc/codex/releases). Each release ships two zstd-compressed binaries; install both into the same directory on `PATH`, since the code-mode runtime resolves its host beside `codex`:
+Grab the archive for your platform from [Releases](https://github.com/mevanlc/codex/releases). Desktop archives use the Rust target triple in their names:
+
+- `codex-{x86_64,aarch64}-unknown-linux-musl.tar.zst`
+- `codex-{x86_64,aarch64}-apple-darwin.tar.zst`
+- `codex-{x86_64,aarch64}-pc-windows-msvc.zip`
+
+Each desktop archive contains a complete Codex package, including `codex`, `codex-code-mode-host`, ripgrep, and the platform-specific sandbox helpers where applicable.
+
+The Android/Termux build remains two zstd-compressed binaries. Install both into the same directory on `PATH`, since the code-mode runtime resolves its host beside `codex`:
 
 ```shell
 zstd -d codex-aarch64-linux-android.zst -o codex
@@ -110,12 +118,17 @@ This fork also raises `[profile.release]` to `opt-level = 3` with fat LTO.
 
 ## Status
 
-| Target          | CI      | Notes                                                                    |
-| --------------- | ------- | ------------------------------------------------------------------------ |
-| Android aarch64 | Active  | Release binaries published automatically from a self-hosted ARM64 runner |
-| Other platforms | Not run | Build from source; validated locally                                     |
+| Target          | CI     | Runner                                                |
+| --------------- | ------ | ----------------------------------------------------- |
+| Linux amd64     | Active | GitHub-hosted `ubuntu-24.04`                          |
+| Linux arm64     | Active | GitHub-hosted `ubuntu-24.04-arm`                      |
+| macOS amd64     | Active | GitHub-hosted `macos-15-intel`                        |
+| macOS arm64     | Active | GitHub-hosted `macos-15`                              |
+| Windows amd64   | Active | GitHub-hosted `windows-2022`                          |
+| Windows arm64   | Active | GitHub-hosted `windows-11-arm`                        |
+| Android aarch64 | Active | Self-hosted A1 runner (`self-hosted`, `Linux`, `ARM64`) |
 
-Upstream's own CI workflows are disabled in this fork, so the Android release workflow is the only build that runs here. Other targets still compile — that is an explicit goal — but nothing verifies them automatically.
+The release workflow runs on every push to `main`. The first completed platform build publishes the release with its artifact; the other builds add their artifacts as they finish. Matrix failures do not cancel the remaining platform builds.
 
 ## License
 

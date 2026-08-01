@@ -1,47 +1,38 @@
-name: Android aarch64 Release (A1A)
+name: Fork release
 
 on:
   push:
+    branches:
+      - main
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: true
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    runs-on: [self-hosted, Linux, ARM64]
-    timeout-minutes: 120
-    defaults:
-      run:
-        working-directory: codex-rs
+  metadata:
+    name: Compute release metadata
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
           fetch-tags: true
-
-      - name: Show runner environment
-        run: |
-          uname -a
-          echo "RUNNER_NAME=${RUNNER_NAME:-}"
-          echo "RUNNER_OS=${RUNNER_OS:-}"
-          echo "RUNNER_ARCH=${RUNNER_ARCH:-}"
-          echo "ANDROID_HOME=${ANDROID_HOME:-}"
+          persist-credentials: false
 
       - name: Compute version
         id: version
+        shell: bash
         run: |
           set -euo pipefail
 
           upstream_url="https://github.com/openai/codex.git"
           git fetch --force --prune "$upstream_url" 'refs/tags/*:refs/tags/upstream/*'
 
-          # Find the upstream tag with the most commits in common with HEAD
-          # (i.e. whose merge-base with HEAD is closest to HEAD).
+          # Find the upstream tag whose merge-base is closest to HEAD.
           best_tag=""
           best_dist=999999999
           short=$(git rev-parse --short=7 HEAD)
@@ -57,15 +48,331 @@ jobs:
           done < <(git tag -l 'upstream/rust-v*')
 
           if [ -n "$best_tag" ]; then
-            # Extract the version portion after 'upstream/rust-v'
             tag_ver=${best_tag#upstream/rust-v}
             version="${tag_ver}-${short}"
           else
             version="0.0.0-${short}"
           fi
 
+          echo "tag=fork-v$version" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Version: $version (upstream tag: ${best_tag:-none}, distance: ${best_dist})"
+
+  build-unix:
+    name: Build ${{ matrix.label }}
+    needs: metadata
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+      CARGO_PROFILE_RELEASE_LTO: "thin"
+      CARGO_PROFILE_RELEASE_STRIP: "symbols"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux amd64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            archive: codex-x86_64-unknown-linux-musl.tar.zst
+          - label: Linux arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            archive: codex-aarch64-unknown-linux-musl.tar.zst
+          - label: macOS amd64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            archive: codex-x86_64-apple-darwin.tar.zst
+          - label: macOS arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            archive: codex-aarch64-apple-darwin.tar.zst
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.0.0
+        with:
+          python-version: "3.11"
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: codex-rs -> target
+
+      - if: ${{ runner.os == 'Linux' }}
+        name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.0
+          use-cache: false
+
+      - if: ${{ runner.os == 'Linux' }}
+        name: Install musl build tools
+        env:
+          TARGET: ${{ matrix.target }}
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-musl-build-tools.sh"
+
+      - if: ${{ runner.os == 'Linux' }}
+        name: Disable aws-lc jitter entropy
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "AWS_LC_SYS_NO_JITTER_ENTROPY=1" >> "$GITHUB_ENV"
+          target_no_jitter="AWS_LC_SYS_NO_JITTER_ENTROPY_${{ matrix.target }}"
+          target_no_jitter="${target_no_jitter//-/_}"
+          echo "${target_no_jitter}=1" >> "$GITHUB_ENV"
+
+      - name: Stamp workspace version
+        shell: bash
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          cargo_toml = Path("codex-rs/Cargo.toml")
+          text = cargo_toml.read_text(encoding="utf-8")
+          pattern = re.compile(r'(\[workspace\.package\]\s*version\s*=\s*")[^"]+(")')
+          version = os.environ["VERSION"]
+          updated, count = pattern.subn(
+              lambda match: f"{match.group(1)}{version}{match.group(2)}",
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("could not stamp [workspace.package].version")
+          cargo_toml.write_text(updated, encoding="utf-8")
+          PY
+
+      - if: ${{ runner.os == 'Linux' }}
+        name: Build bwrap and export digest
+        working-directory: codex-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          cargo build --target "$target" --release --bin bwrap
+          bwrap_path="target/${target}/release/bwrap"
+          strip --strip-debug --strip-unneeded "$bwrap_path"
+          digest=$(sha256sum "$bwrap_path" | awk '{print $1}')
+          echo "CODEX_BWRAP_SHA256=$digest" >> "$GITHUB_ENV"
+
+      - name: Build package directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          package_dir="dist/codex-${target}"
+          package_args=(
+            --target "$target"
+            --variant codex
+            --cargo-profile release
+            --package-dir "$package_dir"
+            --force
+          )
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            package_args+=(--bwrap-bin "codex-rs/target/${target}/release/bwrap")
+          fi
+          python scripts/build_codex_package.py "${package_args[@]}"
+
+      - if: ${{ runner.os == 'macOS' }}
+        name: Ad-hoc sign macOS binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_dir="dist/codex-${{ matrix.target }}"
+          codesign --force --sign - "$package_dir/bin/codex"
+          codesign --force --sign - "$package_dir/bin/codex-code-mode-host"
+
+      - name: Smoke test package
+        shell: bash
+        run: '"dist/codex-${{ matrix.target }}/bin/codex" --version'
+
+      - name: Archive package
+        shell: bash
+        env:
+          ARCHIVE_PATH: dist/${{ matrix.archive }}
+          PACKAGE_DIR: dist/codex-${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH=scripts python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from codex_package.archive import write_archive
+
+          write_archive(
+              Path(os.environ["PACKAGE_DIR"]),
+              Path(os.environ["ARCHIVE_PATH"]),
+              force=True,
+          )
+          PY
+
+      - name: Publish ${{ matrix.label }} artifact
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        with:
+          tag_name: ${{ needs.metadata.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ needs.metadata.outputs.version }}
+          prerelease: false
+          make_latest: true
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          files: dist/${{ matrix.archive }}
+          body: |
+            Codex CLI fork release with Android/Termux support.
+
+            Version: `${{ needs.metadata.outputs.version }}`
+            Commit: `${{ github.sha }}`
+
+            Platform assets are added to this release as their builds complete.
+
+  build-windows:
+    name: Build ${{ matrix.label }}
+    needs: metadata
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+      CARGO_PROFILE_RELEASE_LTO: "thin"
+      CARGO_PROFILE_RELEASE_STRIP: "symbols"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows amd64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            python_arch: x64
+            archive: codex-x86_64-pc-windows-msvc.zip
+          - label: Windows arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            python_arch: arm64
+            archive: codex-aarch64-pc-windows-msvc.zip
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.0.0
+        with:
+          python-version: "3.11"
+          architecture: ${{ matrix.python_arch }}
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Configure build environment
+        shell: pwsh
+        run: |
+          $buildRoot = Join-Path $env:RUNNER_TEMP "codex-build"
+          New-Item -ItemType Directory -Force -Path $buildRoot | Out-Null
+          "CARGO_TARGET_DIR=$(Join-Path $buildRoot 'target')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          git config --global core.longpaths true
+          if ("${{ matrix.target }}" -eq "x86_64-pc-windows-msvc") {
+            "LIBSQLITE3_FLAGS=SQLITE_DISABLE_INTRINSIC" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+      - name: Configure MSVC toolchain
+        uses: ./.github/actions/setup-msvc-env
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Stamp workspace version
+        shell: bash
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          cargo_toml = Path("codex-rs/Cargo.toml")
+          text = cargo_toml.read_text(encoding="utf-8")
+          pattern = re.compile(r'(\[workspace\.package\]\s*version\s*=\s*")[^"]+(")')
+          version = os.environ["VERSION"]
+          updated, count = pattern.subn(
+              lambda match: f"{match.group(1)}{version}{match.group(2)}",
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("could not stamp [workspace.package].version")
+          cargo_toml.write_text(updated, encoding="utf-8")
+          PY
+
+      - name: Build package
+        shell: pwsh
+        run: |
+          python scripts/build_codex_package.py `
+            --target "${{ matrix.target }}" `
+            --variant codex `
+            --cargo-profile release `
+            --package-dir "dist/codex-${{ matrix.target }}" `
+            --archive-output "dist/${{ matrix.archive }}" `
+            --force
+
+      - name: Smoke test package
+        shell: pwsh
+        run: |
+          & "dist/codex-${{ matrix.target }}/bin/codex.exe" --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "codex.exe --version failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Publish ${{ matrix.label }} artifact
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        with:
+          tag_name: ${{ needs.metadata.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ needs.metadata.outputs.version }}
+          prerelease: false
+          make_latest: true
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          files: dist/${{ matrix.archive }}
+          body: |
+            Codex CLI fork release with Android/Termux support.
+
+            Version: `${{ needs.metadata.outputs.version }}`
+            Commit: `${{ github.sha }}`
+
+            Platform assets are added to this release as their builds complete.
+
+  build-android:
+    name: Build Android/Termux arm64 on A1
+    needs: metadata
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Show runner environment
+        run: |
+          uname -a
+          echo "RUNNER_NAME=${RUNNER_NAME:-}"
+          echo "RUNNER_OS=${RUNNER_OS:-}"
+          echo "RUNNER_ARCH=${RUNNER_ARCH:-}"
+          echo "ANDROID_HOME=${ANDROID_HOME:-}"
 
       - name: Read pinned Rust channel
         id: toolchain
@@ -90,7 +397,7 @@ jobs:
           echo "V8_PREBUILT_TAG=v8-v$v8_version" >> "$GITHUB_ENV"
           echo "V8 prebuilt tag: v8-v$v8_version"
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
           targets: aarch64-linux-android
@@ -103,7 +410,7 @@ jobs:
           done
 
       - name: Install Android NDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
         with:
           packages: ""
 
@@ -239,8 +546,8 @@ jobs:
           gzip -dc /tmp/rusty_v8_archive.a.gz > "$V8_STAGE_DIR/librusty_v8.a"
           printf '%s' "$RUSTY_V8_ARCHIVE" > "$V8_STAGE_DIR/librusty_v8.sum"
           ls -l "$V8_STAGE_DIR/librusty_v8.a" "$V8_STAGE_DIR/librusty_v8.sum"
-          echo "Stamping Cargo workspace version to ${{ steps.version.outputs.version }}"
-          sed -i 's/^version = ".*"$/version = "${{ steps.version.outputs.version }}"/' Cargo.toml
+          echo "Stamping Cargo workspace version to ${{ needs.metadata.outputs.version }}"
+          sed -i 's/^version = ".*"$/version = "${{ needs.metadata.outputs.version }}"/' Cargo.toml
           grep -n '^version = "' Cargo.toml | head -1
           cargo build --release \
             --bin codex \
@@ -256,13 +563,26 @@ jobs:
           zstd -19 "$CARGO_TARGET_DIR/aarch64-linux-android/release/codex-code-mode-host" \
             -o codex-code-mode-host-aarch64-linux-android.zst
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
+      - name: Publish Android/Termux artifacts
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         with:
-          name: codex-aarch64-linux-android
-          path: |
+          tag_name: ${{ needs.metadata.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ needs.metadata.outputs.version }}
+          prerelease: false
+          make_latest: true
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          files: |
             codex-rs/codex-aarch64-linux-android.zst
             codex-rs/codex-code-mode-host-aarch64-linux-android.zst
+          body: |
+            Codex CLI fork release with Android/Termux support.
+
+            Version: `${{ needs.metadata.outputs.version }}`
+            Commit: `${{ github.sha }}`
+
+            Platform assets are added to this release as their builds complete.
 
       - name: sccache stats
         if: ${{ always() }}
@@ -273,39 +593,3 @@ jobs:
         if: ${{ always() }}
         continue-on-error: true
         run: du -sh "$A1A_CACHE_ROOT"/* 2>/dev/null || true
-
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: codex-aarch64-linux-android
-
-      - name: Create release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: android-a1a-${{ needs.build.outputs.version }}
-          name: Android aarch64 A1A ${{ needs.build.outputs.version }}
-          prerelease: false
-          make_latest: true
-          files: |
-            codex-aarch64-linux-android.zst
-            codex-code-mode-host-aarch64-linux-android.zst
-          body: |
-            Codex CLI for Android aarch64 (Termux) — with code-mode (V8/JS REPL).
-
-            Version: `${{ needs.build.outputs.version }}`
-            Commit: `${{ github.sha }}`
-
-            ```sh
-            zstd -d codex-aarch64-linux-android.zst -o codex
-            zstd -d codex-code-mode-host-aarch64-linux-android.zst -o codex-code-mode-host
-            chmod +x codex codex-code-mode-host
-            ```
-
-            Install `codex` and `codex-code-mode-host` in the same directory on `PATH`.

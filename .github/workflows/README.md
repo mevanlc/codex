@@ -26,6 +26,10 @@ The workflows in this directory are split so that pull requests get fast, review
   - release-profile Cargo builds
   - cross-platform `argument-comment-lint`
   - Linux remote-env tests
+- `android-release-a1a.yml` publishes the fork release incrementally:
+  - Android/Termux arm64 builds on the self-hosted A1 runner
+  - Linux, macOS, and Windows amd64/arm64 builds on GitHub-hosted runners
+  - the first completed build publishes the release, and later builds add their assets
 
 ## Rule Of Thumb
 
