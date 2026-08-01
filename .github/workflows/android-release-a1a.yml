@@ -105,6 +105,11 @@ jobs:
         with:
           workspaces: codex-rs -> target
 
+      - name: Force rebuild V8 archive after cache restore
+        working-directory: codex-rs
+        shell: bash
+        run: cargo clean --package v8 --target "${{ matrix.target }}" --release
+
       - if: ${{ runner.os == 'Linux' }}
         name: Install Zig
         shell: bash
