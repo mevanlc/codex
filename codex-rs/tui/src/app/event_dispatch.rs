@@ -835,8 +835,8 @@ impl App {
                     "failed to load skills on startup",
                 );
             }
-            AppEvent::StartFileSearch(query) => {
-                self.file_search.on_user_query(query);
+            AppEvent::StartFileSearch(request) => {
+                self.file_search.on_user_query(request);
             }
             AppEvent::FileSearchResult { query, matches } => {
                 self.chat_widget.apply_file_search_result(query, matches);

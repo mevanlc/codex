@@ -47,6 +47,7 @@ use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::StatusLineItem;
 use crate::bottom_pane::TerminalTitleItem;
 use crate::chatwidget::UserMessage;
+use crate::file_search::FileSearchRequest;
 use crate::goal_files::GoalDraft;
 use codex_app_server_protocol::AskForApproval;
 use codex_config::types::ApprovalsReviewer;
@@ -325,7 +326,7 @@ pub(crate) enum AppEvent {
     /// Kick off an asynchronous file search for the given query (text after
     /// the `@`). Previous searches may be cancelled by the app layer so there
     /// is at most one in-flight search.
-    StartFileSearch(String),
+    StartFileSearch(FileSearchRequest),
 
     /// Result of a completed asynchronous file search. The `query` echoes the
     /// original search term so the UI can decide whether the results are

@@ -15,6 +15,7 @@ This fork maintains a build of Codex CLI that runs natively on Android via [Term
 - **`build-fork.sh`** — one build-and-install script for macOS, Linux, and Termux, with Termux auto-detection and target-dir pruning
 - **`[tui].primary_accent`** — replace Codex's cyan accent with a color of your choosing
 - **`[tui].chatbox_placeholder_tips`** — turn off the rotating composer tips
+- **File mention settings** — optionally preserve the `@` prefix and complete explicit paths
 - **Retractable steer messages** — pull a still-pending steer back into the composer; backed by a new `turn/retract` app-server method
 - **Unrestricted reasoning shortcuts** — the reasoning hotkeys step all the way into Max and Ultra
 - **Platform fixes** — file-lock fallbacks, `SHELL`-based shell detection on Android, vendored OpenSSL, fork-aware update checks
@@ -73,6 +74,16 @@ chatbox_placeholder_tips = "off"
 ```
 
 `on` (the default) keeps upstream's rotating tip prompts in the composer; `off` leaves the placeholder blank.
+
+### File mentions
+
+```toml
+[tui]
+file_mentions_preserve_at = true
+file_mentions_allow_explicit_paths = true
+```
+
+`file_mentions_preserve_at` keeps the leading `@` in the composer when a file-search result is completed, so `@program` remains `@program` in the prompt sent to the model. `file_mentions_allow_explicit_paths` makes file search recognize absolute paths and relative paths beginning with `./` or `../`, including paths with repeated `.` and `..` components. The completed path retains the lexical form you typed. Both settings default to `false` and can be enabled independently.
 
 ### Retracting a pending steer
 

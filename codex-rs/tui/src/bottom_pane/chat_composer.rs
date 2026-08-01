@@ -244,6 +244,7 @@ use super::slash_commands::BuiltinCommandFlags;
 use super::slash_commands::ServiceTierCommand;
 use super::slash_commands::SlashCommandItem;
 use crate::bottom_pane::paste_burst::FlushResult;
+use crate::file_search::FileSearchRequest;
 use crate::history_cell::sanitize_user_text;
 use crate::key_hint::KeyBindingListExt;
 use crate::keymap::EditorKeymap;
@@ -485,6 +486,8 @@ pub(crate) struct ChatComposer {
     service_tier_commands_enabled: bool,
     service_tier_commands: Vec<ServiceTierCommand>,
     mentions_v2_enabled: bool,
+    file_mentions_preserve_at: bool,
+    file_mentions_allow_explicit_paths: bool,
     goal_command_enabled: bool,
     personality_command_enabled: bool,
     windows_degraded_sandbox_active: bool,
@@ -662,6 +665,8 @@ impl ChatComposer {
             service_tier_commands_enabled: false,
             service_tier_commands: Vec::new(),
             mentions_v2_enabled: false,
+            file_mentions_preserve_at: false,
+            file_mentions_allow_explicit_paths: false,
             goal_command_enabled: false,
             personality_command_enabled: false,
             windows_degraded_sandbox_active: false,
@@ -770,6 +775,15 @@ impl ChatComposer {
     pub fn set_mentions_v2_enabled(&mut self, enabled: bool) {
         self.mentions_v2_enabled = enabled;
         self.history.set_at_mention_restore_enabled(enabled);
+        self.sync_popups();
+    }
+
+    pub fn set_file_mentions_preserve_at(&mut self, preserve_at: bool) {
+        self.file_mentions_preserve_at = preserve_at;
+    }
+
+    pub fn set_file_mentions_allow_explicit_paths(&mut self, allow_explicit_paths: bool) {
+        self.file_mentions_allow_explicit_paths = allow_explicit_paths;
         self.sync_popups();
     }
 
@@ -2656,10 +2670,15 @@ impl ChatComposer {
         // local prompt arg parser treats it as a single argument. Avoid adding
         // quotes when the path already contains one to keep behavior simple.
         let needs_quotes = path.chars().any(char::is_whitespace);
-        let inserted = if needs_quotes && !path.contains('"') {
+        let path = if needs_quotes && !path.contains('"') {
             format!("\"{path}\"")
         } else {
             path.to_string()
+        };
+        let inserted = if self.file_mentions_preserve_at {
+            format!("@{path}")
+        } else {
+            path
         };
 
         // Replace just the active `@token` so unrelated text elements, such as
@@ -3732,12 +3751,19 @@ impl ChatComposer {
             .map(|items| if items.is_empty() { 0 } else { 1 })
     }
 
+    fn request_file_search(&self, query: String) {
+        self.app_event_tx
+            .send(AppEvent::StartFileSearch(FileSearchRequest {
+                query,
+                allow_explicit_paths: self.file_mentions_allow_explicit_paths,
+            }));
+    }
+
     pub(crate) fn sync_popups(&mut self) {
         self.sync_slash_command_elements();
         if self.history_search.is_some() {
             if self.popups.current_file_query.is_some() {
-                self.app_event_tx
-                    .send(AppEvent::StartFileSearch(String::new()));
+                self.request_file_search(String::new());
                 self.popups.current_file_query = None;
             }
             self.popups.active = ActivePopup::None;
@@ -3762,8 +3788,7 @@ impl ChatComposer {
         // synchronization so nothing steals focus from continued history navigation.
         if browsing_history {
             if self.popups.current_file_query.is_some() {
-                self.app_event_tx
-                    .send(AppEvent::StartFileSearch(String::new()));
+                self.request_file_search(String::new());
                 self.popups.current_file_query = None;
             }
             self.popups.active = ActivePopup::None;
@@ -3795,8 +3820,7 @@ impl ChatComposer {
 
         if matches!(self.popups.active, ActivePopup::Command(_)) {
             if self.popups.current_file_query.is_some() {
-                self.app_event_tx
-                    .send(AppEvent::StartFileSearch(String::new()));
+                self.request_file_search(String::new());
                 self.popups.current_file_query = None;
             }
             self.popups.dismissed_file_token = None;
@@ -3811,8 +3835,7 @@ impl ChatComposer {
 
         if let Some(target) = mention_target {
             if self.popups.current_file_query.is_some() {
-                self.app_event_tx
-                    .send(AppEvent::StartFileSearch(String::new()));
+                self.request_file_search(String::new());
                 self.popups.current_file_query = None;
             }
             self.sync_mention_popup(target);
@@ -3826,8 +3849,7 @@ impl ChatComposer {
         }
 
         if self.popups.current_file_query.is_some() {
-            self.app_event_tx
-                .send(AppEvent::StartFileSearch(String::new()));
+            self.request_file_search(String::new());
             self.popups.current_file_query = None;
         }
         self.popups.dismissed_file_token = None;
@@ -3915,11 +3937,9 @@ impl ChatComposer {
         }
 
         if query.is_empty() {
-            self.app_event_tx
-                .send(AppEvent::StartFileSearch(String::new()));
+            self.request_file_search(String::new());
         } else {
-            self.app_event_tx
-                .send(AppEvent::StartFileSearch(query.clone()));
+            self.request_file_search(query.clone());
         }
 
         match &mut self.popups.active {
@@ -3994,20 +4014,17 @@ impl ChatComposer {
         }
 
         if query.is_empty() {
-            self.app_event_tx
-                .send(AppEvent::StartFileSearch(String::new()));
+            self.request_file_search(String::new());
             self.popups.current_file_query = None;
         } else {
             let new_popup = !matches!(self.popups.active, ActivePopup::MentionV2(_));
             if new_popup {
                 // A fresh popup has no cached matches, and the app-owned file-search manager can
                 // retain an identical query. Reset it before issuing the query so results arrive.
-                self.app_event_tx
-                    .send(AppEvent::StartFileSearch(String::new()));
+                self.request_file_search(String::new());
             }
             if new_popup || self.popups.current_file_query.as_deref() != Some(query.as_str()) {
-                self.app_event_tx
-                    .send(AppEvent::StartFileSearch(query.clone()));
+                self.request_file_search(query.clone());
                 self.popups.current_file_query = Some(query.clone());
             }
         }
@@ -7448,6 +7465,30 @@ mod tests {
     }
 
     #[test]
+    fn explicit_path_file_popup_snapshot() {
+        snapshot_composer_state(
+            "explicit_path_file_popup",
+            /*enhanced_keys_supported*/ false,
+            |composer| {
+                composer.set_mentions_v2_enabled(/*enabled*/ true);
+                composer.set_file_mentions_allow_explicit_paths(/*allow_explicit_paths*/ true);
+                let query = "../pd/ppd/file.txt";
+                composer.set_text_content(format!("@{query}"), Vec::new(), Vec::new());
+                composer.on_file_search_result(
+                    query.to_string(),
+                    vec![FileMatch {
+                        score: 42,
+                        path: PathBuf::from(query),
+                        match_type: codex_file_search::MatchType::File,
+                        root: PathBuf::from("/workspace/project"),
+                        indices: Some(vec![10, 11, 12, 13, 14, 15, 16, 17]),
+                    }],
+                );
+            },
+        );
+    }
+
+    #[test]
     fn bare_unified_mention_resets_an_inherited_file_search() {
         let (mut composer, mut rx) = new_test_composer();
         composer.set_mentions_v2_enabled(/*enabled*/ true);
@@ -7455,13 +7496,15 @@ mod tests {
         composer.insert_str("@");
         assert!(matches!(
             rx.try_recv(),
-            Ok(AppEvent::StartFileSearch(query)) if query.is_empty()
+            Ok(AppEvent::StartFileSearch(request))
+                if request.query.is_empty() && !request.allow_explicit_paths
         ));
 
         composer.insert_str("s");
         assert!(matches!(
             rx.try_recv(),
-            Ok(AppEvent::StartFileSearch(query)) if query == "s"
+            Ok(AppEvent::StartFileSearch(request))
+                if request.query == "s" && !request.allow_explicit_paths
         ));
     }
 
@@ -7474,11 +7517,11 @@ mod tests {
         composer.sync_popups();
         assert!(matches!(
             rx.try_recv(),
-            Ok(AppEvent::StartFileSearch(query)) if query.is_empty()
+            Ok(AppEvent::StartFileSearch(request)) if request.query.is_empty()
         ));
         assert!(matches!(
             rx.try_recv(),
-            Ok(AppEvent::StartFileSearch(query)) if query == "foo"
+            Ok(AppEvent::StartFileSearch(request)) if request.query == "foo"
         ));
 
         composer.on_file_search_result("foo".to_string(), Vec::new());
@@ -7490,7 +7533,7 @@ mod tests {
         assert!(matches!(composer.popups.active, ActivePopup::MentionV2(_)));
         let queries = std::iter::from_fn(|| rx.try_recv().ok())
             .filter_map(|event| match event {
-                AppEvent::StartFileSearch(query) => Some(query),
+                AppEvent::StartFileSearch(request) => Some(request.query),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -7507,11 +7550,41 @@ mod tests {
         assert!(matches!(composer.popups.active, ActivePopup::MentionV2(_)));
         let queries = std::iter::from_fn(|| rx.try_recv().ok())
             .filter_map(|event| match event {
-                AppEvent::StartFileSearch(query) => Some(query),
+                AppEvent::StartFileSearch(request) => Some(request.query),
                 _ => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(queries, vec![String::new(), "foo".to_string()]);
+    }
+
+    #[test]
+    fn explicit_path_setting_is_forwarded_to_file_search() {
+        let (mut composer, mut rx) = new_test_composer();
+        composer.set_mentions_v2_enabled(/*enabled*/ true);
+        composer.set_file_mentions_allow_explicit_paths(/*allow_explicit_paths*/ true);
+
+        let query = "../././././dir/../.././../file.txt";
+        composer.set_text_content(format!("@{query}"), Vec::new(), Vec::new());
+
+        let requests = std::iter::from_fn(|| rx.try_recv().ok())
+            .filter_map(|event| match event {
+                AppEvent::StartFileSearch(request) => Some(request),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            requests,
+            vec![
+                FileSearchRequest {
+                    query: String::new(),
+                    allow_explicit_paths: true,
+                },
+                FileSearchRequest {
+                    query: query.to_string(),
+                    allow_explicit_paths: true,
+                },
+            ]
+        );
     }
 
     #[test]
@@ -10210,6 +10283,56 @@ mod tests {
         );
 
         assert_eq!(composer.current_text(), "src/main.rs  $HOME");
+    }
+
+    #[test]
+    fn file_completion_can_preserve_at_in_submitted_text() {
+        let (mut composer, _rx) = new_test_composer();
+        composer.set_file_mentions_preserve_at(/*preserve_at*/ true);
+        complete_file(
+            &mut composer,
+            "@prog",
+            /*cursor*/ "@prog".len(),
+            "prog",
+            PathBuf::from("program"),
+        );
+        assert_eq!(composer.current_text(), "@program ");
+
+        let (result, _needs_redraw) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(
+            result,
+            InputResult::Submitted {
+                text: "@program".to_string(),
+                text_elements: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn explicit_path_forms_can_be_completed_without_losing_their_lexical_prefix() {
+        let (mut composer, _rx) = new_test_composer();
+        composer.set_mentions_v2_enabled(/*enabled*/ true);
+        composer.set_file_mentions_preserve_at(/*preserve_at*/ true);
+        composer.set_file_mentions_allow_explicit_paths(/*allow_explicit_paths*/ true);
+
+        for path in [
+            "/absolute/path/to/a/file.txt",
+            "../pd/ppd/file.txt",
+            "./file.txt",
+            "./../file.txt",
+            "../././././dir/../.././../file.txt",
+        ] {
+            let text = format!("@{path}");
+            complete_file(
+                &mut composer,
+                &text,
+                /*cursor*/ text.len(),
+                path,
+                PathBuf::from(path),
+            );
+            assert_eq!(composer.current_text(), format!("@{path} "));
+        }
     }
 
     #[test]

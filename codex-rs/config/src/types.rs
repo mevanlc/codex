@@ -718,6 +718,16 @@ pub struct Tui {
     #[serde(default)]
     pub chatbox_placeholder_tips: ChatboxPlaceholderTips,
 
+    /// Keep the leading `@` when a file-search completion is inserted into the composer.
+    /// Defaults to `false`.
+    #[serde(default)]
+    pub file_mentions_preserve_at: bool,
+
+    /// Let `@` file search resolve absolute paths and paths beginning with `./` or `../`.
+    /// Defaults to `false`.
+    #[serde(default)]
+    pub file_mentions_allow_explicit_paths: bool,
+
     /// Start the composer in Vim mode (`Normal`) by default.
     /// Defaults to `false`.
     #[serde(default)]

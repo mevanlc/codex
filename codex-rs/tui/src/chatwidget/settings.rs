@@ -298,6 +298,14 @@ impl ChatWidget {
             .set_mentions_v2_enabled(self.config.features.enabled(Feature::MentionsV2));
     }
 
+    pub(super) fn sync_file_mention_settings(&mut self) {
+        self.bottom_pane
+            .set_file_mentions_preserve_at(self.config.tui_file_mentions_preserve_at);
+        self.bottom_pane.set_file_mentions_allow_explicit_paths(
+            self.config.tui_file_mentions_allow_explicit_paths,
+        );
+    }
+
     pub(super) fn current_model_supports_personality(&self) -> bool {
         let model = self.current_model();
         self.model_catalog

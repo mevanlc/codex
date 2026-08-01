@@ -1,9 +1,11 @@
 //! Session-based orchestration for `@` file searches.
 //!
-//! `ChatComposer` publishes every change of the `@token` as
-//! `AppEvent::StartFileSearch(query)`. This manager owns a single
-//! `codex-file-search` session for the current search root, updates the query
-//! on every keystroke, and drops the session when the query becomes empty.
+//! `ChatComposer` publishes every change of the `@token` as a
+//! [`FileSearchRequest`]. This manager owns a single `codex-file-search`
+//! session for the current search root, updates the query on every keystroke,
+//! and drops the session when the query becomes empty. Opt-in explicit path
+//! searches derive their root from `/`, `./`, or `../` syntax while retaining
+//! the user's lexical path prefix in results.
 
 use codex_file_search as file_search;
 use std::path::PathBuf;
@@ -13,6 +15,21 @@ use std::sync::Mutex;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FileSearchRequest {
+    pub(crate) query: String,
+    pub(crate) allow_explicit_paths: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PreparedFileSearch {
+    display_query: String,
+    search_query: String,
+    search_dir: PathBuf,
+    path_prefix: String,
+    result_root: PathBuf,
+}
+
 pub(crate) struct FileSearchManager {
     state: Arc<Mutex<SearchState>>,
     search_dir: PathBuf,
@@ -20,7 +37,8 @@ pub(crate) struct FileSearchManager {
 }
 
 struct SearchState {
-    latest_query: String,
+    latest_request: Option<FileSearchRequest>,
+    active_search: Option<PreparedFileSearch>,
     session: Option<file_search::FileSearchSession>,
     session_token: usize,
 }
@@ -29,7 +47,8 @@ impl FileSearchManager {
     pub fn new(search_dir: PathBuf, tx: AppEventSender) -> Self {
         Self {
             state: Arc::new(Mutex::new(SearchState {
-                latest_query: String::new(),
+                latest_request: None,
+                active_search: None,
                 session: None,
                 session_token: 0,
             })),
@@ -46,33 +65,45 @@ impl FileSearchManager {
         #[expect(clippy::unwrap_used)]
         let mut st = self.state.lock().unwrap();
         st.session.take();
-        st.latest_query.clear();
+        st.latest_request = None;
+        st.active_search = None;
     }
 
     /// Call whenever the user edits the `@` token.
-    pub fn on_user_query(&self, query: String) {
+    pub fn on_user_query(&self, request: FileSearchRequest) {
         #[expect(clippy::unwrap_used)]
         let mut st = self.state.lock().unwrap();
-        if query == st.latest_query {
+        if st.latest_request.as_ref() == Some(&request) {
             return;
         }
-        st.latest_query.clear();
-        st.latest_query.push_str(&query);
 
-        if query.is_empty() {
+        let prepared = prepare_file_search(&self.search_dir, &request);
+        st.latest_request = Some(request);
+
+        if prepared.display_query.is_empty() || prepared.search_query.is_empty() {
             st.session.take();
+            st.active_search = Some(prepared);
             return;
         }
+
+        if st
+            .active_search
+            .as_ref()
+            .is_none_or(|active| active.search_dir != prepared.search_dir)
+        {
+            st.session.take();
+        }
+        st.active_search = Some(prepared.clone());
 
         if st.session.is_none() {
-            self.start_session_locked(&mut st);
+            self.start_session_locked(&mut st, prepared.search_dir);
         }
         if let Some(session) = st.session.as_ref() {
-            session.update_query(&query);
+            session.update_query(&prepared.search_query);
         }
     }
 
-    fn start_session_locked(&self, st: &mut SearchState) {
+    fn start_session_locked(&self, st: &mut SearchState, search_dir: PathBuf) {
         st.session_token = st.session_token.wrapping_add(1);
         let session_token = st.session_token;
         let reporter = Arc::new(TuiSessionReporter {
@@ -81,7 +112,7 @@ impl FileSearchManager {
             session_token,
         });
         let session = file_search::create_session(
-            vec![self.search_dir.clone()],
+            vec![search_dir],
             file_search::FileSearchOptions {
                 compute_indices: true,
                 ..Default::default()
@@ -99,6 +130,61 @@ impl FileSearchManager {
     }
 }
 
+fn prepare_file_search(
+    search_dir: &std::path::Path,
+    request: &FileSearchRequest,
+) -> PreparedFileSearch {
+    let explicit_path = request.allow_explicit_paths
+        && (request.query.starts_with('/')
+            || request.query.starts_with("./")
+            || request.query.starts_with("../"));
+    let Some((directory, search_query)) = explicit_path
+        .then(|| request.query.rsplit_once('/'))
+        .flatten()
+    else {
+        return PreparedFileSearch {
+            display_query: request.query.clone(),
+            search_query: request.query.clone(),
+            search_dir: search_dir.to_path_buf(),
+            path_prefix: String::new(),
+            result_root: search_dir.to_path_buf(),
+        };
+    };
+
+    let path_prefix = format!("{directory}/");
+    let explicit_search_dir = if path_prefix.starts_with('/') {
+        PathBuf::from(&path_prefix)
+    } else {
+        search_dir.join(&path_prefix)
+    };
+    PreparedFileSearch {
+        display_query: request.query.clone(),
+        search_query: search_query.to_string(),
+        search_dir: explicit_search_dir,
+        path_prefix,
+        result_root: search_dir.to_path_buf(),
+    }
+}
+
+fn prepare_match(
+    active: &PreparedFileSearch,
+    mut matched: file_search::FileMatch,
+) -> file_search::FileMatch {
+    if active.path_prefix.is_empty() {
+        return matched;
+    }
+
+    matched.path = PathBuf::from(&active.path_prefix).join(matched.path);
+    matched.root = active.result_root.clone();
+    let index_offset = u32::try_from(active.path_prefix.chars().count()).unwrap_or(u32::MAX);
+    if let Some(indices) = matched.indices.as_mut() {
+        for index in indices {
+            *index = index.saturating_add(index_offset);
+        }
+    }
+    matched
+}
+
 struct TuiSessionReporter {
     state: Arc<Mutex<SearchState>>,
     app_tx: AppEventSender,
@@ -109,18 +195,25 @@ impl TuiSessionReporter {
     fn send_snapshot(&self, snapshot: &file_search::FileSearchSnapshot) {
         #[expect(clippy::unwrap_used)]
         let st = self.state.lock().unwrap();
+        let Some(active) = st.active_search.as_ref() else {
+            return;
+        };
         if st.session_token != self.session_token
-            || st.latest_query.is_empty()
-            || snapshot.query.is_empty()
+            || active.display_query.is_empty()
+            || snapshot.query != active.search_query
         {
             return;
         }
-        let query = snapshot.query.clone();
+        let query = active.display_query.clone();
+        let matches = snapshot
+            .matches
+            .iter()
+            .cloned()
+            .map(|matched| prepare_match(active, matched))
+            .collect();
         drop(st);
-        self.app_tx.send(AppEvent::FileSearchResult {
-            query,
-            matches: snapshot.matches.clone(),
-        });
+        self.app_tx
+            .send(AppEvent::FileSearchResult { query, matches });
     }
 }
 
@@ -131,3 +224,7 @@ impl file_search::SessionReporter for TuiSessionReporter {
 
     fn on_complete(&self) {}
 }
+
+#[cfg(test)]
+#[path = "file_search_tests.rs"]
+mod tests;

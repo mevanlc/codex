@@ -39,7 +39,6 @@ use super::ActivePopup;
 use super::ChatComposer;
 use super::ComposerDraft;
 use super::InputResult;
-use crate::app_event::AppEvent;
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
 use crate::key_hint::KeyBindingListExt;
@@ -108,8 +107,7 @@ impl ChatComposer {
         self.draft.paste_burst.clear_window_after_non_char();
 
         if self.popups.current_file_query.is_some() {
-            self.app_event_tx
-                .send(AppEvent::StartFileSearch(String::new()));
+            self.request_file_search(String::new());
             self.popups.current_file_query = None;
         }
         self.popups.active = ActivePopup::None;

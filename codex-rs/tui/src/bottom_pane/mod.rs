@@ -372,6 +372,17 @@ impl BottomPane {
         self.request_redraw();
     }
 
+    pub fn set_file_mentions_preserve_at(&mut self, preserve_at: bool) {
+        self.composer.set_file_mentions_preserve_at(preserve_at);
+        self.request_redraw();
+    }
+
+    pub fn set_file_mentions_allow_explicit_paths(&mut self, allow_explicit_paths: bool) {
+        self.composer
+            .set_file_mentions_allow_explicit_paths(allow_explicit_paths);
+        self.request_redraw();
+    }
+
     pub fn take_mention_bindings(&mut self) -> Vec<MentionBinding> {
         self.composer.take_mention_bindings()
     }

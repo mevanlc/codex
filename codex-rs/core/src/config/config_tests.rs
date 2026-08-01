@@ -1030,6 +1030,8 @@ fn config_toml_deserializes_model_availability_nux() {
             animations: true,
             show_tooltips: true,
             chatbox_placeholder_tips: ChatboxPlaceholderTips::default(),
+            file_mentions_preserve_at: false,
+            file_mentions_allow_explicit_paths: false,
             vim_mode_default: false,
             raw_output_mode: false,
             alternate_screen: AltScreenMode::default(),
@@ -3955,6 +3957,8 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             animations: true,
             show_tooltips: true,
             chatbox_placeholder_tips: ChatboxPlaceholderTips::default(),
+            file_mentions_preserve_at: false,
+            file_mentions_allow_explicit_paths: false,
             vim_mode_default: false,
             raw_output_mode: false,
             alternate_screen: AltScreenMode::Auto,
@@ -3971,6 +3975,47 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             model_availability_nux: ModelAvailabilityNuxConfig::default(),
             terminal_resize_reflow_max_rows: None,
         }
+    );
+}
+
+#[tokio::test]
+async fn runtime_config_resolves_file_mention_settings() {
+    let default_config = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("load default config");
+    assert_eq!(
+        (
+            default_config.tui_file_mentions_preserve_at,
+            default_config.tui_file_mentions_allow_explicit_paths,
+        ),
+        (false, false)
+    );
+
+    let config_toml = toml::from_str(
+        r#"
+[tui]
+file_mentions_preserve_at = true
+file_mentions_allow_explicit_paths = true
+"#,
+    )
+    .expect("file mention settings should deserialize");
+    let configured = Config::load_from_base_config_with_overrides(
+        config_toml,
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("load file mention settings");
+    assert_eq!(
+        (
+            configured.tui_file_mentions_preserve_at,
+            configured.tui_file_mentions_allow_explicit_paths,
+        ),
+        (true, true)
     );
 }
 

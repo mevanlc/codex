@@ -751,6 +751,12 @@ pub struct Config {
     /// - `off`: Use a generic placeholder instead.
     pub chatbox_placeholder_tips: ChatboxPlaceholderTips,
 
+    /// Keep the leading `@` when a file-search completion is inserted into the TUI composer.
+    pub tui_file_mentions_preserve_at: bool,
+
+    /// Let TUI file search resolve absolute paths and paths beginning with `./` or `../`.
+    pub tui_file_mentions_allow_explicit_paths: bool,
+
     /// Persisted startup availability NUX state for model tooltips.
     pub model_availability_nux: ModelAvailabilityNuxConfig,
 
@@ -4216,6 +4222,14 @@ impl Config {
                 .as_ref()
                 .map(|t| t.chatbox_placeholder_tips)
                 .unwrap_or_default(),
+            tui_file_mentions_preserve_at: cfg
+                .tui
+                .as_ref()
+                .is_some_and(|t| t.file_mentions_preserve_at),
+            tui_file_mentions_allow_explicit_paths: cfg
+                .tui
+                .as_ref()
+                .is_some_and(|t| t.file_mentions_allow_explicit_paths),
             model_availability_nux: cfg
                 .tui
                 .as_ref()
