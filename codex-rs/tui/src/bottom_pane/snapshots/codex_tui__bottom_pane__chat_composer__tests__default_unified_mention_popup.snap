@@ -10,4 +10,4 @@ expression: terminal.backend()
 "                                                                                                    "
 "> Sample Plugin  Plugin with skills and an MCP server                                         Plugin"
 "                                                                                                    "
-"  enter insert · esc close · ←/→ switch search modes     [All Results]   Filesystem Only    Plugins "
+"  enter insert · esc close · ←/→ modes    [All Results]   Filesystem    Filesystem (All)    Plugins "

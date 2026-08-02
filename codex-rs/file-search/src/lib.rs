@@ -647,6 +647,7 @@ mod tests {
 
     use super::*;
     use pretty_assertions::assert_eq;
+    use std::collections::BTreeSet;
     use std::fs;
     use std::sync::Arc;
     use std::sync::Condvar;
@@ -1182,6 +1183,54 @@ mod tests {
                 .matches
                 .iter()
                 .any(|m| m.path.as_path() == Path::new(".vscode/settings.json"))
+        );
+    }
+
+    #[test]
+    fn disabling_ignore_rules_exposes_hidden_and_gitignored_entries() {
+        let repo = tempfile::tempdir().unwrap();
+        fs::create_dir(repo.path().join(".git")).unwrap();
+        fs::create_dir(repo.path().join("ignored-dir")).unwrap();
+        fs::write(
+            repo.path().join(".gitignore"),
+            ".hidden-ignored-target\nignored-dir/\n",
+        )
+        .unwrap();
+        fs::write(repo.path().join(".hidden-visible-target"), "visible").unwrap();
+        fs::write(repo.path().join(".hidden-ignored-target"), "ignored").unwrap();
+        fs::write(repo.path().join("ignored-dir/hidden-target"), "ignored").unwrap();
+
+        let search = |respect_gitignore| {
+            run(
+                "hidden-target",
+                vec![repo.path().to_path_buf()],
+                FileSearchOptions {
+                    limit: NonZero::new(20).unwrap(),
+                    exclude: Vec::new(),
+                    threads: NonZero::new(2).unwrap(),
+                    compute_indices: false,
+                    respect_gitignore,
+                },
+                /*cancel_flag*/ None,
+            )
+            .unwrap()
+            .matches
+            .into_iter()
+            .map(|matched| matched.path)
+            .collect::<BTreeSet<_>>()
+        };
+
+        assert_eq!(
+            search(/*respect_gitignore*/ true),
+            BTreeSet::from([PathBuf::from(".hidden-visible-target")])
+        );
+        assert_eq!(
+            search(/*respect_gitignore*/ false),
+            BTreeSet::from([
+                PathBuf::from(".hidden-ignored-target"),
+                PathBuf::from(".hidden-visible-target"),
+                PathBuf::from("ignored-dir/hidden-target"),
+            ])
         );
     }
 }

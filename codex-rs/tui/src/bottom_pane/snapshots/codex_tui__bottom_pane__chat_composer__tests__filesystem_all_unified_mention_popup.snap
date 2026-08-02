@@ -3,11 +3,11 @@ source: tui/src/bottom_pane/chat_composer.rs
 expression: terminal.backend()
 ---
 "                                                                                                    "
-"› @../pd/ppd/file.txt                                                                               "
+"› @hidden-target                                                                                    "
 "                                                                                                    "
 "                                                                                                    "
 "                                                                                                    "
 "                                                                                                    "
-"> file.txt  ../pd/ppd/                                                                        File  "
+"> .hidden-target  ignored/                                                                    File  "
 "                                                                                                    "
-"  enter insert · esc close · ←/→ modes    [All Results]   Filesystem    Filesystem (All)    Plugins "
+"  enter insert · esc close · ←/→ modes     All Results    Filesystem   [Filesystem (All)]   Plugins "

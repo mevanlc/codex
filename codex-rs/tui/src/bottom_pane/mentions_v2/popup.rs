@@ -11,6 +11,7 @@ use super::render::render_popup;
 use super::search_mode::SearchMode;
 use crate::bottom_pane::popup_consts::MAX_POPUP_ROWS;
 use crate::bottom_pane::scroll_state::ScrollState;
+use crate::file_search::FileSearchScope;
 
 pub(crate) struct Popup {
     query: String,
@@ -51,8 +52,17 @@ impl Popup {
         self.refresh_rows();
     }
 
-    pub(crate) fn set_file_matches(&mut self, query: &str, matches: Vec<FileMatch>) {
-        self.file_search.set_matches(query, matches);
+    pub(crate) fn file_search_scope(&self) -> FileSearchScope {
+        self.search_mode.file_search_scope()
+    }
+
+    pub(crate) fn set_file_matches(
+        &mut self,
+        query: &str,
+        scope: FileSearchScope,
+        matches: Vec<FileMatch>,
+    ) {
+        self.file_search.set_matches(query, scope, matches);
         self.refresh_rows();
     }
 
@@ -73,14 +83,22 @@ impl Popup {
         self.state.ensure_visible(len, MAX_POPUP_ROWS.min(len));
     }
 
-    pub(crate) fn previous_search_mode(&mut self) {
+    pub(crate) fn previous_search_mode(&mut self) -> Option<FileSearchScope> {
         self.search_mode = self.search_mode.previous();
+        let scope_changed = self
+            .file_search
+            .set_scope(self.search_mode.file_search_scope());
         self.refresh_rows();
+        scope_changed.then_some(self.search_mode.file_search_scope())
     }
 
-    pub(crate) fn next_search_mode(&mut self) {
+    pub(crate) fn next_search_mode(&mut self) -> Option<FileSearchScope> {
         self.search_mode = self.search_mode.next();
+        let scope_changed = self
+            .file_search
+            .set_scope(self.search_mode.file_search_scope());
         self.refresh_rows();
+        scope_changed.then_some(self.search_mode.file_search_scope())
     }
 
     pub(crate) fn calculate_required_height(&self, _width: u16) -> u16 {
@@ -116,15 +134,38 @@ impl WidgetRef for Popup {
     }
 }
 
-#[derive(Default)]
 struct FileSearch {
+    scope: FileSearchScope,
     pending_query: String,
     display_query: String,
     waiting: bool,
     matches: Vec<FileMatch>,
 }
 
+impl Default for FileSearch {
+    fn default() -> Self {
+        Self {
+            scope: FileSearchScope::Standard,
+            pending_query: String::new(),
+            display_query: String::new(),
+            waiting: false,
+            matches: Vec::new(),
+        }
+    }
+}
+
 impl FileSearch {
+    fn set_scope(&mut self, scope: FileSearchScope) -> bool {
+        if self.scope == scope {
+            return false;
+        }
+        self.scope = scope;
+        self.display_query.clear();
+        self.matches.clear();
+        self.waiting = !self.pending_query.is_empty();
+        true
+    }
+
     fn set_query(&mut self, query: &str) {
         if query.is_empty() {
             self.pending_query.clear();
@@ -137,8 +178,8 @@ impl FileSearch {
         }
     }
 
-    fn set_matches(&mut self, query: &str, matches: Vec<FileMatch>) {
-        if query != self.pending_query {
+    fn set_matches(&mut self, query: &str, scope: FileSearchScope, matches: Vec<FileMatch>) {
+        if query != self.pending_query || scope != self.scope {
             return;
         }
 

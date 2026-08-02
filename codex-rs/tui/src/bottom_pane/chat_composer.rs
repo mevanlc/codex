@@ -245,6 +245,7 @@ use super::slash_commands::ServiceTierCommand;
 use super::slash_commands::SlashCommandItem;
 use crate::bottom_pane::paste_burst::FlushResult;
 use crate::file_search::FileSearchRequest;
+use crate::file_search::FileSearchScope;
 use crate::history_cell::sanitize_user_text;
 use crate::key_hint::KeyBindingListExt;
 use crate::keymap::EditorKeymap;
@@ -1781,7 +1782,12 @@ impl ChatComposer {
     }
 
     /// Integrate results from an asynchronous file search.
-    pub(crate) fn on_file_search_result(&mut self, query: String, matches: Vec<FileMatch>) {
+    pub(crate) fn on_file_search_result(
+        &mut self,
+        query: String,
+        scope: FileSearchScope,
+        matches: Vec<FileMatch>,
+    ) {
         // Only apply if user is still editing a token starting with `query`.
         let current_opt = if self.mentions_v2_enabled {
             self.current_mentions_v2_token()
@@ -1801,7 +1807,7 @@ impl ChatComposer {
                 popup.set_matches(&query, matches);
             }
             ActivePopup::MentionV2(popup) => {
-                popup.set_file_matches(&query, matches);
+                popup.set_file_matches(&query, scope, matches);
             }
             _ => {}
         }
@@ -2182,7 +2188,8 @@ impl ChatComposer {
             return (InputResult::None, true);
         }
         self.footer.mode = reset_mode_after_activity(self.footer.mode);
-        let can_switch_search_mode = self.current_editable_at_token().is_some();
+        let search_mode_query = self.current_editable_at_token();
+        let can_switch_search_mode = search_mode_query.is_some();
 
         let ActivePopup::MentionV2(popup) = &mut self.popups.active else {
             unreachable!();
@@ -2191,6 +2198,7 @@ impl ChatComposer {
         let mut selected: Option<MentionV2Selection> = None;
         let mut close_popup = false;
         let mut submit_without_popup = false;
+        let mut file_search_scope_change = None;
 
         let result = match key_event {
             KeyEvent {
@@ -2222,7 +2230,7 @@ impl ChatComposer {
                 ..
             } => {
                 if can_switch_search_mode {
-                    popup.previous_search_mode();
+                    file_search_scope_change = popup.previous_search_mode();
                     (InputResult::None, true)
                 } else {
                     self.handle_input_basic(key_event)
@@ -2234,7 +2242,7 @@ impl ChatComposer {
                 ..
             } => {
                 if can_switch_search_mode {
-                    popup.next_search_mode();
+                    file_search_scope_change = popup.next_search_mode();
                     (InputResult::None, true)
                 } else {
                     self.handle_input_basic(key_event)
@@ -2269,6 +2277,10 @@ impl ChatComposer {
             }
             input => self.handle_input_basic(input),
         };
+
+        if let (Some(query), Some(scope)) = (search_mode_query, file_search_scope_change) {
+            self.request_file_search_with_scope(query, scope);
+        }
 
         if close_popup {
             let token_range = self
@@ -3776,10 +3788,15 @@ impl ChatComposer {
     }
 
     fn request_file_search(&self, query: String) {
+        self.request_file_search_with_scope(query, FileSearchScope::Standard);
+    }
+
+    fn request_file_search_with_scope(&self, query: String, scope: FileSearchScope) {
         self.app_event_tx
             .send(AppEvent::StartFileSearch(FileSearchRequest {
                 query,
                 allow_explicit_paths: self.file_mentions_allow_explicit_paths,
+                scope,
             }));
     }
 
@@ -4038,17 +4055,25 @@ impl ChatComposer {
         }
 
         if query.is_empty() {
-            self.request_file_search(String::new());
+            let scope = match &self.popups.active {
+                ActivePopup::MentionV2(popup) => popup.file_search_scope(),
+                _ => FileSearchScope::Standard,
+            };
+            self.request_file_search_with_scope(String::new(), scope);
             self.popups.current_file_query = None;
         } else {
             let new_popup = !matches!(self.popups.active, ActivePopup::MentionV2(_));
+            let scope = match &self.popups.active {
+                ActivePopup::MentionV2(popup) => popup.file_search_scope(),
+                _ => FileSearchScope::Standard,
+            };
             if new_popup {
                 // A fresh popup has no cached matches, and the app-owned file-search manager can
                 // retain an identical query. Reset it before issuing the query so results arrive.
-                self.request_file_search(String::new());
+                self.request_file_search_with_scope(String::new(), scope);
             }
             if new_popup || self.popups.current_file_query.as_deref() != Some(query.as_str()) {
-                self.request_file_search(query.clone());
+                self.request_file_search_with_scope(query.clone(), scope);
                 self.popups.current_file_query = Some(query.clone());
             }
         }
@@ -4862,6 +4887,7 @@ mod tests {
     use image::ImageBuffer;
     use image::Rgba;
     use pretty_assertions::assert_eq;
+    use std::path::Path;
     use std::path::PathBuf;
     use tempfile::tempdir;
 
@@ -7502,6 +7528,167 @@ mod tests {
     }
 
     #[test]
+    fn filesystem_all_unified_mention_popup_snapshot() {
+        snapshot_composer_state(
+            "filesystem_all_unified_mention_popup",
+            /*enhanced_keys_supported*/ false,
+            |composer| {
+                composer.set_mentions_v2_enabled(/*enabled*/ true);
+                composer.set_text_content("@hidden-target".to_string(), Vec::new(), Vec::new());
+                let _ =
+                    composer.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+                let _ =
+                    composer.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+                composer.on_file_search_result(
+                    "hidden-target".to_string(),
+                    FileSearchScope::All,
+                    vec![FileMatch {
+                        score: 42,
+                        path: PathBuf::from("ignored/.hidden-target"),
+                        match_type: codex_file_search::MatchType::File,
+                        root: PathBuf::from("/workspace/project"),
+                        indices: None,
+                    }],
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn filesystem_all_results_do_not_leak_into_standard_search_modes() {
+        let (mut composer, mut rx) = new_test_composer();
+        composer.set_mentions_v2_enabled(/*enabled*/ true);
+        composer.set_text_content("@needle".to_string(), Vec::new(), Vec::new());
+
+        assert_eq!(
+            std::iter::from_fn(|| rx.try_recv().ok())
+                .filter_map(|event| match event {
+                    AppEvent::StartFileSearch(request) => Some(request),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                FileSearchRequest {
+                    query: String::new(),
+                    allow_explicit_paths: false,
+                    scope: FileSearchScope::Standard,
+                },
+                FileSearchRequest {
+                    query: "needle".to_string(),
+                    allow_explicit_paths: false,
+                    scope: FileSearchScope::Standard,
+                },
+            ]
+        );
+
+        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        assert!(rx.try_recv().is_err());
+        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        let AppEvent::StartFileSearch(expanded_request) =
+            rx.try_recv().expect("expanded search request")
+        else {
+            panic!("expected expanded file search request");
+        };
+        assert_eq!(
+            expanded_request,
+            FileSearchRequest {
+                query: "needle".to_string(),
+                allow_explicit_paths: false,
+                scope: FileSearchScope::All,
+            }
+        );
+
+        composer.on_file_search_result(
+            "needle".to_string(),
+            FileSearchScope::Standard,
+            vec![FileMatch {
+                score: 10,
+                path: PathBuf::from("standard-needle"),
+                match_type: codex_file_search::MatchType::File,
+                root: PathBuf::from("/workspace/project"),
+                indices: None,
+            }],
+        );
+        let ActivePopup::MentionV2(popup) = &composer.popups.active else {
+            panic!("expected unified mention popup");
+        };
+        assert!(popup.selected().is_none());
+
+        composer.on_file_search_result(
+            "needle".to_string(),
+            FileSearchScope::All,
+            vec![FileMatch {
+                score: 20,
+                path: PathBuf::from("ignored/.hidden-needle"),
+                match_type: codex_file_search::MatchType::File,
+                root: PathBuf::from("/workspace/project"),
+                indices: None,
+            }],
+        );
+        let ActivePopup::MentionV2(popup) = &composer.popups.active else {
+            panic!("expected unified mention popup");
+        };
+        assert!(matches!(
+            popup.selected(),
+            Some(MentionV2Selection::File(path))
+                if path.as_path() == Path::new("ignored/.hidden-needle")
+        ));
+
+        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        let AppEvent::StartFileSearch(standard_request) =
+            rx.try_recv().expect("standard search request")
+        else {
+            panic!("expected standard file search request");
+        };
+        assert_eq!(
+            standard_request,
+            FileSearchRequest {
+                query: "needle".to_string(),
+                allow_explicit_paths: false,
+                scope: FileSearchScope::Standard,
+            }
+        );
+        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        assert!(rx.try_recv().is_err());
+
+        composer.on_file_search_result(
+            "needle".to_string(),
+            FileSearchScope::All,
+            vec![FileMatch {
+                score: 20,
+                path: PathBuf::from("ignored/.hidden-needle"),
+                match_type: codex_file_search::MatchType::File,
+                root: PathBuf::from("/workspace/project"),
+                indices: None,
+            }],
+        );
+        let ActivePopup::MentionV2(popup) = &composer.popups.active else {
+            panic!("expected unified mention popup");
+        };
+        assert!(popup.selected().is_none());
+
+        composer.on_file_search_result(
+            "needle".to_string(),
+            FileSearchScope::Standard,
+            vec![FileMatch {
+                score: 10,
+                path: PathBuf::from("standard-needle"),
+                match_type: codex_file_search::MatchType::File,
+                root: PathBuf::from("/workspace/project"),
+                indices: None,
+            }],
+        );
+        let ActivePopup::MentionV2(popup) = &composer.popups.active else {
+            panic!("expected unified mention popup");
+        };
+        assert!(matches!(
+            popup.selected(),
+            Some(MentionV2Selection::File(path))
+                if path.as_path() == Path::new("standard-needle")
+        ));
+    }
+
+    #[test]
     fn explicit_path_file_popup_snapshot() {
         snapshot_composer_state(
             "explicit_path_file_popup",
@@ -7513,6 +7700,7 @@ mod tests {
                 composer.set_text_content(format!("@{query}"), Vec::new(), Vec::new());
                 composer.on_file_search_result(
                     query.to_string(),
+                    FileSearchScope::Standard,
                     vec![FileMatch {
                         score: 42,
                         path: PathBuf::from(query),
@@ -7561,7 +7749,7 @@ mod tests {
             Ok(AppEvent::StartFileSearch(request)) if request.query == "foo"
         ));
 
-        composer.on_file_search_result("foo".to_string(), Vec::new());
+        composer.on_file_search_result("foo".to_string(), FileSearchScope::Standard, Vec::new());
         let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(matches!(composer.popups.active, ActivePopup::None));
 
@@ -7615,10 +7803,12 @@ mod tests {
                 FileSearchRequest {
                     query: String::new(),
                     allow_explicit_paths: true,
+                    scope: FileSearchScope::Standard,
                 },
                 FileSearchRequest {
                     query: query.to_string(),
                     allow_explicit_paths: true,
+                    scope: FileSearchScope::Standard,
                 },
             ]
         );
@@ -10272,6 +10462,7 @@ mod tests {
         composer.insert_str(" @ma");
         composer.on_file_search_result(
             "ma".to_string(),
+            FileSearchScope::Standard,
             vec![FileMatch {
                 score: 1,
                 path: PathBuf::from("src/main.rs"),
@@ -10322,6 +10513,7 @@ mod tests {
             .unwrap_or_else(|| PathBuf::from("/tmp"));
         composer.on_file_search_result(
             query.to_string(),
+            FileSearchScope::Standard,
             vec![FileMatch {
                 score: 1,
                 path: selected_path,

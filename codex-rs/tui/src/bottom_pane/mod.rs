@@ -1707,8 +1707,13 @@ impl BottomPane {
         self.composer.record_replayed_user_message_history(entry);
     }
 
-    pub(crate) fn on_file_search_result(&mut self, query: String, matches: Vec<FileMatch>) {
-        self.composer.on_file_search_result(query, matches);
+    pub(crate) fn on_file_search_result(
+        &mut self,
+        query: String,
+        scope: crate::file_search::FileSearchScope,
+        matches: Vec<FileMatch>,
+    ) {
+        self.composer.on_file_search_result(query, scope, matches);
         self.request_redraw();
     }
 

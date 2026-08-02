@@ -48,6 +48,7 @@ use crate::bottom_pane::StatusLineItem;
 use crate::bottom_pane::TerminalTitleItem;
 use crate::chatwidget::UserMessage;
 use crate::file_search::FileSearchRequest;
+use crate::file_search::FileSearchScope;
 use crate::goal_files::GoalDraft;
 use codex_app_server_protocol::AskForApproval;
 use codex_config::types::ApprovalsReviewer;
@@ -333,6 +334,7 @@ pub(crate) enum AppEvent {
     /// still relevant.
     FileSearchResult {
         query: String,
+        scope: FileSearchScope,
         matches: Vec<FileMatch>,
     },
 

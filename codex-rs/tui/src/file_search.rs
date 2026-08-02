@@ -19,6 +19,22 @@ use crate::app_event_sender::AppEventSender;
 pub(crate) struct FileSearchRequest {
     pub(crate) query: String,
     pub(crate) allow_explicit_paths: bool,
+    pub(crate) scope: FileSearchScope,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FileSearchScope {
+    Standard,
+    All,
+}
+
+impl FileSearchScope {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::All => "all",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,6 +44,7 @@ struct PreparedFileSearch {
     search_dir: PathBuf,
     path_prefix: String,
     result_root: PathBuf,
+    scope: FileSearchScope,
 }
 
 pub(crate) struct FileSearchManager {
@@ -86,24 +103,27 @@ impl FileSearchManager {
             return;
         }
 
-        if st
-            .active_search
-            .as_ref()
-            .is_none_or(|active| active.search_dir != prepared.search_dir)
-        {
+        if st.active_search.as_ref().is_none_or(|active| {
+            active.search_dir != prepared.search_dir || active.scope != prepared.scope
+        }) {
             st.session.take();
         }
         st.active_search = Some(prepared.clone());
 
         if st.session.is_none() {
-            self.start_session_locked(&mut st, prepared.search_dir);
+            self.start_session_locked(&mut st, prepared.search_dir, prepared.scope);
         }
         if let Some(session) = st.session.as_ref() {
             session.update_query(&prepared.search_query);
         }
     }
 
-    fn start_session_locked(&self, st: &mut SearchState, search_dir: PathBuf) {
+    fn start_session_locked(
+        &self,
+        st: &mut SearchState,
+        search_dir: PathBuf,
+        scope: FileSearchScope,
+    ) {
         st.session_token = st.session_token.wrapping_add(1);
         let session_token = st.session_token;
         let reporter = Arc::new(TuiSessionReporter {
@@ -115,6 +135,7 @@ impl FileSearchManager {
             vec![search_dir],
             file_search::FileSearchOptions {
                 compute_indices: true,
+                respect_gitignore: scope == FileSearchScope::Standard,
                 ..Default::default()
             },
             reporter,
@@ -148,6 +169,7 @@ fn prepare_file_search(
             search_dir: search_dir.to_path_buf(),
             path_prefix: String::new(),
             result_root: search_dir.to_path_buf(),
+            scope: request.scope,
         };
     };
 
@@ -163,6 +185,7 @@ fn prepare_file_search(
         search_dir: explicit_search_dir,
         path_prefix,
         result_root: search_dir.to_path_buf(),
+        scope: request.scope,
     }
 }
 
@@ -205,6 +228,7 @@ impl TuiSessionReporter {
             return;
         }
         let query = active.display_query.clone();
+        let scope = active.scope;
         let matches = snapshot
             .matches
             .iter()
@@ -212,8 +236,11 @@ impl TuiSessionReporter {
             .map(|matched| prepare_match(active, matched))
             .collect();
         drop(st);
-        self.app_tx
-            .send(AppEvent::FileSearchResult { query, matches });
+        self.app_tx.send(AppEvent::FileSearchResult {
+            query,
+            scope,
+            matches,
+        });
     }
 }
 

@@ -48,14 +48,15 @@ fn footer_hint_line() -> Line<'static> {
         key_hint::plain(KeyCode::Left).into(),
         "/".dim(),
         key_hint::plain(KeyCode::Right).into(),
-        " switch search modes".dim(),
+        " modes".dim(),
     ])
 }
 
 fn search_mode_indicator_line(active_search_mode: SearchMode) -> Line<'static> {
     let modes = [
         SearchMode::Results,
-        SearchMode::FilesystemOnly,
+        SearchMode::Filesystem,
+        SearchMode::FilesystemAll,
         SearchMode::Tools,
     ];
     let mut spans = Vec::with_capacity(modes.len() * 2 - 1);
@@ -68,7 +69,9 @@ fn search_mode_indicator_line(active_search_mode: SearchMode) -> Line<'static> {
         if search_mode == active_search_mode {
             let label = format!("[{}]", search_mode.label());
             let span = match search_mode {
-                SearchMode::Results | SearchMode::FilesystemOnly => label.cyan().bold(),
+                SearchMode::Results | SearchMode::Filesystem | SearchMode::FilesystemAll => {
+                    label.cyan().bold()
+                }
                 SearchMode::Tools => label.magenta().bold(),
             };
             spans.push(span);

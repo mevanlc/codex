@@ -1,9 +1,11 @@
 use super::candidate::MentionType;
+use crate::file_search::FileSearchScope;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SearchMode {
     Results,
-    FilesystemOnly,
+    Filesystem,
+    FilesystemAll,
     Tools,
 }
 
@@ -11,15 +13,17 @@ impl SearchMode {
     pub(super) fn previous(self) -> Self {
         match self {
             Self::Results => Self::Tools,
-            Self::FilesystemOnly => Self::Results,
-            Self::Tools => Self::FilesystemOnly,
+            Self::Filesystem => Self::Results,
+            Self::FilesystemAll => Self::Filesystem,
+            Self::Tools => Self::FilesystemAll,
         }
     }
 
     pub(super) fn next(self) -> Self {
         match self {
-            Self::Results => Self::FilesystemOnly,
-            Self::FilesystemOnly => Self::Tools,
+            Self::Results => Self::Filesystem,
+            Self::Filesystem => Self::FilesystemAll,
+            Self::FilesystemAll => Self::Tools,
             Self::Tools => Self::Results,
         }
     }
@@ -27,17 +31,25 @@ impl SearchMode {
     pub(super) fn accepts(self, mention_type: MentionType) -> bool {
         match self {
             Self::Results => true,
-            Self::FilesystemOnly => {
+            Self::Filesystem | Self::FilesystemAll => {
                 matches!(mention_type, MentionType::File | MentionType::Directory)
             }
             Self::Tools => matches!(mention_type, MentionType::Plugin | MentionType::Skill),
         }
     }
 
+    pub(super) fn file_search_scope(self) -> FileSearchScope {
+        match self {
+            Self::FilesystemAll => FileSearchScope::All,
+            Self::Results | Self::Filesystem | Self::Tools => FileSearchScope::Standard,
+        }
+    }
+
     pub(super) fn label(self) -> &'static str {
         match self {
             Self::Results => "All Results",
-            Self::FilesystemOnly => "Filesystem Only",
+            Self::Filesystem => "Filesystem",
+            Self::FilesystemAll => "Filesystem (All)",
             Self::Tools => "Plugins",
         }
     }
