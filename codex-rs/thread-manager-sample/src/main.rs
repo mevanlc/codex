@@ -223,6 +223,8 @@ fn new_config(model: Option<String>, arg0_paths: Arg0DispatchPaths) -> anyhow::R
         animations: true,
         show_tooltips: true,
         chatbox_placeholder_tips: ChatboxPlaceholderTips::default(),
+        tui_file_mentions_preserve_at: false,
+        tui_file_mentions_allow_explicit_paths: true,
         model_availability_nux: ModelAvailabilityNuxConfig::default(),
         tui_alternate_screen: AltScreenMode::Auto,
         tui_status_line: None,
