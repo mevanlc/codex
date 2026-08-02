@@ -1,6 +1,12 @@
 use super::*;
 use codex_file_search::MatchType;
 use pretty_assertions::assert_eq;
+use std::fs;
+use std::path::Path;
+use std::time::Duration;
+use tempfile::tempdir;
+use tokio::sync::mpsc::unbounded_channel;
+use tokio::time::timeout;
 
 #[test]
 fn explicit_path_queries_derive_search_roots_without_normalizing_the_prefix() {
@@ -122,5 +128,46 @@ fn explicit_path_matches_retain_the_typed_prefix_and_shift_match_indices() {
             root: PathBuf::from("/workspace/project"),
             indices: Some(vec![10, 13]),
         }
+    );
+}
+
+#[tokio::test]
+async fn explicit_directory_query_emits_results_for_an_empty_basename() {
+    let root = tempdir().unwrap();
+    let cwd = root.path().join("additude");
+    fs::create_dir(&cwd).unwrap();
+    fs::write(root.path().join(".hidden-ignored-target"), "ignored").unwrap();
+
+    let (tx, mut rx) = unbounded_channel();
+    let manager = FileSearchManager::new(cwd, AppEventSender::new(tx));
+    manager.on_user_query(FileSearchRequest {
+        query: "../".to_string(),
+        allow_explicit_paths: true,
+        scope: FileSearchScope::All,
+    });
+
+    let matches = timeout(Duration::from_secs(5), async {
+        loop {
+            let event = rx.recv().await.expect("file search event");
+            if let AppEvent::FileSearchResult {
+                query,
+                scope,
+                matches,
+            } = event
+                && !matches.is_empty()
+            {
+                assert_eq!(query, "../");
+                assert_eq!(scope, FileSearchScope::All);
+                break matches;
+            }
+        }
+    })
+    .await
+    .expect("explicit directory search result");
+
+    assert!(
+        matches
+            .iter()
+            .any(|matched| matched.path.as_path() == Path::new("../.hidden-ignored-target"))
     );
 }

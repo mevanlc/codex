@@ -7555,6 +7555,34 @@ mod tests {
     }
 
     #[test]
+    fn filesystem_all_explicit_directory_popup_snapshot() {
+        snapshot_composer_state(
+            "filesystem_all_explicit_directory_popup",
+            /*enhanced_keys_supported*/ false,
+            |composer| {
+                composer.set_mentions_v2_enabled(/*enabled*/ true);
+                composer.set_file_mentions_allow_explicit_paths(/*allow_explicit_paths*/ true);
+                composer.set_text_content("@../".to_string(), Vec::new(), Vec::new());
+                let _ =
+                    composer.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+                let _ =
+                    composer.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+                composer.on_file_search_result(
+                    "../".to_string(),
+                    FileSearchScope::All,
+                    vec![FileMatch {
+                        score: 42,
+                        path: PathBuf::from("../.hidden-ignored-target"),
+                        match_type: codex_file_search::MatchType::File,
+                        root: PathBuf::from("/workspace/project"),
+                        indices: None,
+                    }],
+                );
+            },
+        );
+    }
+
+    #[test]
     fn filesystem_all_results_do_not_leak_into_standard_search_modes() {
         let (mut composer, mut rx) = new_test_composer();
         composer.set_mentions_v2_enabled(/*enabled*/ true);

@@ -97,7 +97,7 @@ impl FileSearchManager {
         let prepared = prepare_file_search(&self.search_dir, &request);
         st.latest_request = Some(request);
 
-        if prepared.display_query.is_empty() || prepared.search_query.is_empty() {
+        if prepared.display_query.is_empty() {
             st.session.take();
             st.active_search = Some(prepared);
             return;
