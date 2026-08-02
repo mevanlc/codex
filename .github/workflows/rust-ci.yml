@@ -159,6 +159,11 @@ jobs:
         working-directory: tools/argument-comment-lint
         run: cargo test
         env:
+          # Required here, not redundant: this step runs in tools/argument-comment-lint,
+          # so the [env] block in codex-rs/.cargo/config.toml does not apply (cargo
+          # discovers config from the cwd, not the manifest). Keep the value in sync
+          # with that file, with `rust_min_stack` in justfile, and with
+          # rust-ci-full.yml / rust-ci-full-nextest-platform.yml.
           RUST_MIN_STACK: "8388608" # 8 MiB
 
       - name: Check for a clean worktree

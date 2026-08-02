@@ -9,3 +9,26 @@ rustflags = ["-C", "link-arg=/STACK:8388608", "-C", "link-arg=/arm64hazardfree"]
 
 [target.'cfg(all(windows, target_env = "gnu"))']
 rustflags = ["-C", "link-arg=-Wl,--stack,8388608"]
+
+# Match the 8 MiB main-thread stack the Windows link-args above reserve. Several
+# TUI tests overflow the 2 MiB default that Rust gives spawned threads, and the
+# test harness runs each test on a spawned thread. Without this, a bare
+# `cargo nextest run` / `cargo test` aborts with "fatal runtime error: stack
+# overflow".
+#
+# Cargo only applies this when the variable is absent from the environment, so an
+# explicit `RUST_MIN_STACK=... cargo ...` still wins.
+#
+# RUST_MIN_STACK is set in four places; keep the value in sync:
+#   - here: covers any cargo invocation whose cwd is codex-rs or below. Cargo
+#     discovers config by walking up from the cwd, not from the manifest, so this
+#     reaches nothing outside codex-rs. It does reach `cargo nextest run
+#     --archive-file` replays, because cargo applies [env] when it execs the
+#     cargo-nextest subcommand and nextest passes its own env to test binaries.
+#   - justfile (`rust_min_stack`): `just test`
+#   - .github/workflows/rust-ci.yml and rust-ci-full.yml: the argument-comment-lint
+#     steps, which run in tools/argument-comment-lint and so are NOT covered here
+#   - .github/workflows/rust-ci-full-nextest-platform.yml: runs in codex-rs, so it
+#     is covered here, but stays explicit for visibility at the call site
+[env]
+RUST_MIN_STACK = "8388608"

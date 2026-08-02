@@ -406,6 +406,11 @@ jobs:
           "${test_command[@]}"
         env:
           RUST_BACKTRACE: 1
+          # This job runs in codex-rs, so the [env] block in codex-rs/.cargo/config.toml
+          # already supplies this (it survives the --archive-file replay above). Kept
+          # explicit so the requirement is visible at the call site. Keep the value in
+          # sync with that file, with `rust_min_stack` in justfile, and with
+          # rust-ci.yml / rust-ci-full.yml.
           RUST_MIN_STACK: "8388608" # 8 MiB
           NEXTEST_STATUS_LEVEL: leak
 

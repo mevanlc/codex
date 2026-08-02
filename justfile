@@ -4,6 +4,11 @@ export JUST_SHELL := justfile_directory() / "scripts/just-shell.py"
 set shell := ["python3", "-c", 'import os, runpy; runpy.run_path(os.environ["JUST_SHELL"], run_name="__main__")']
 set windows-shell := ["python", "-c", 'import os, runpy; runpy.run_path(os.environ["JUST_SHELL"], run_name="__main__")']
 
+# 8 MiB thread stack: several TUI tests overflow Rust's 2 MiB default for spawned
+# threads, and the test harness runs each test on one. Used by the `test` recipes
+# below. Also set in codex-rs/.cargo/config.toml (which covers bare `cargo test` /
+# `cargo nextest run` under codex-rs) and in .github/workflows/rust-ci.yml,
+# rust-ci-full.yml, and rust-ci-full-nextest-platform.yml. Keep the value in sync.
 rust_min_stack := "8388608" # 8 MiB
 python := if os_family() == "windows" { "python" } else { "python3" }
 
