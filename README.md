@@ -12,7 +12,7 @@ This fork maintains a build of Codex CLI that runs natively on Android via [Term
 
 - **Cross-platform fork releases** — GitHub-hosted runners build Linux, macOS, and Windows for amd64 and arm64, while the self-hosted A1 runner builds `aarch64-linux-android`
 - **Android code-mode / JS REPL** — Android builds link a prebuilt `librusty_v8` and ship `codex-code-mode-host` alongside `codex`
-- **`build-fork.sh`** — one build-and-install script for macOS, Linux, and Termux, with Termux auto-detection and target-dir pruning
+- **`install-fork.sh`** — one build-and-install script for macOS, Linux, and Termux, with Termux auto-detection and target-dir pruning
 - **`[tui].primary_accent`** — replace Codex's cyan accent with a color of your choosing
 - **`[tui].chatbox_placeholder_tips`** — turn off the rotating composer tips
 - **File mention settings** — optionally preserve the `@` prefix and complete explicit paths
@@ -111,13 +111,13 @@ The underlying mechanism is a new experimental `turn/retract` app-server request
 
 ## Building
 
-`codex-rs/scripts/build-fork.sh` builds `codex` and `codex-code-mode-host` and installs both into `~/.local/bin`:
+`codex-rs/scripts/install-fork.sh` builds `codex` and `codex-code-mode-host` and installs both into `~/.local/bin`:
 
 ```shell
 git clone https://github.com/mevanlc/codex.git
 cd codex
-./codex-rs/scripts/build-fork.sh               # lite profile: fast, unoptimized
-./codex-rs/scripts/build-fork.sh -p release    # optimized
+./codex-rs/scripts/install-fork.sh               # lite profile: fast, unoptimized
+./codex-rs/scripts/install-fork.sh -p release    # optimized
 ```
 
 The script stamps a version derived from the newest `rust-v*` tag reachable from `HEAD` (restoring `Cargo.toml` on exit), re-signs the binaries on macOS, and warns if `~/.local/bin/codex` is not what `codex` actually resolves to on `PATH`.
