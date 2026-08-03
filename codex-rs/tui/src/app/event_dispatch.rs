@@ -1235,8 +1235,9 @@ impl App {
                     .await;
             }
             AppEvent::LaunchExternalEditor => {
-                if self.chat_widget.external_editor_state() == ExternalEditorState::Active {
-                    self.launch_external_editor(tui).await;
+                if let ExternalEditorState::Active(mode) = self.chat_widget.external_editor_state()
+                {
+                    self.launch_external_editor(tui, mode).await;
                 }
             }
             AppEvent::OpenWindowsSandboxEnablePrompt {

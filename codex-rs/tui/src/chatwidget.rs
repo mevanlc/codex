@@ -524,11 +524,18 @@ pub(crate) struct ChatWidgetInit {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ExternalEditorMode {
+    #[default]
+    DraftOnly,
+    DraftWithLastAgentResponse,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum ExternalEditorState {
     #[default]
     Closed,
-    Requested,
-    Active,
+    Requested(ExternalEditorMode),
+    Active(ExternalEditorMode),
 }
 
 /// Maintains the per-session UI state and interaction state machines for the chat screen.

@@ -588,6 +588,11 @@ pub(crate) fn active_binding_specs(
     {
         return Ok(specs.to_vec());
     }
+    if let Some(action_id) = keymap_action_id(context, action)
+        && let Some(specs) = runtime_keymap.chords.default_specs(action_id)
+    {
+        return Ok(specs.to_vec());
+    }
 
     let bindings = bindings_for_action(runtime_keymap, context, action).ok_or_else(|| {
         format!("Unknown keymap action `{context}.{action}`. Reopen /keymap and choose an action.")
@@ -949,6 +954,7 @@ mod tests {
                 "Editor.insert_newline",
                 "Composer.queue",
                 "Global.open_external_editor",
+                "Global.open_external_editor_with_quote",
                 "Global.copy",
                 "Global.toggle_vim_mode",
                 "Editor.delete_backward_word",

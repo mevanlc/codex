@@ -308,7 +308,6 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    #[cfg(test)]
     pub(crate) fn last_agent_markdown_text(&self) -> Option<&str> {
         self.transcript.last_agent_markdown.as_deref()
     }

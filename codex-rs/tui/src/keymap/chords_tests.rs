@@ -92,6 +92,85 @@ fn resolves_chords_for_actions_in_different_contexts() {
 }
 
 #[test]
+fn quoted_external_editor_has_a_default_chord_that_can_be_overridden() {
+    let runtime = RuntimeKeymap::from_config(&TuiKeymap::default()).expect("valid default keymap");
+    let action = keymap_action_id("global", "open_external_editor_with_quote")
+        .expect("known quoted editor action");
+
+    assert_eq!(
+        runtime.chords.default_specs(action),
+        Some(["ctrl-x ctrl-e".to_string()].as_slice())
+    );
+
+    let now = Instant::now();
+    let contexts = KeymapContextSet::new(KeymapContext::Global);
+    let mut matcher = KeyChordMatcher::default();
+    assert!(matches!(
+        matcher.advance(
+            key_event(key_hint::ctrl(KeyCode::Char('x'))),
+            &runtime.chords,
+            contexts,
+            now,
+        ),
+        KeyChordMatch::Pending(_)
+    ));
+    let KeyChordMatch::Completed(dispatch_event) = matcher.advance(
+        key_event(key_hint::ctrl(KeyCode::Char('e'))),
+        &runtime.chords,
+        contexts,
+        now,
+    ) else {
+        panic!("default chord must dispatch quoted editor action");
+    };
+    assert!(
+        runtime
+            .app
+            .open_external_editor_with_quote
+            .is_pressed(dispatch_event)
+    );
+
+    let mut config = TuiKeymap::default();
+    config.global.open_external_editor_with_quote = Some(binding("ctrl-q"));
+    let remapped = RuntimeKeymap::from_config(&config).expect("valid quoted editor remap");
+    assert_eq!(remapped.chords.default_specs(action), None);
+    assert_eq!(
+        user_bindings(&remapped.app.open_external_editor_with_quote),
+        [key_hint::ctrl(KeyCode::Char('q'))]
+    );
+}
+
+#[test]
+fn configured_single_binding_can_shadow_the_default_quoted_editor_prefix() {
+    let mut config = TuiKeymap::default();
+    config.global.copy = Some(binding("ctrl-x"));
+
+    let runtime = RuntimeKeymap::from_config(&config).expect("explicit single binding wins");
+    let action = keymap_action_id("global", "open_external_editor_with_quote")
+        .expect("known quoted editor action");
+
+    assert_eq!(runtime.chords.default_specs(action), None);
+    assert!(runtime.app.open_external_editor_with_quote.is_empty());
+    assert_eq!(runtime.app.copy, vec![key_hint::ctrl(KeyCode::Char('x'))]);
+}
+
+#[test]
+fn configured_chord_can_shadow_the_same_default_quoted_editor_chord() {
+    let mut config = TuiKeymap::default();
+    config.global.copy = Some(binding("ctrl-x ctrl-e"));
+
+    let runtime = RuntimeKeymap::from_config(&config).expect("explicit chord wins");
+    let quoted_editor = keymap_action_id("global", "open_external_editor_with_quote")
+        .expect("known quoted editor action");
+    let copy = keymap_action_id("global", "copy").expect("known copy action");
+
+    assert_eq!(runtime.chords.default_specs(quoted_editor), None);
+    assert_eq!(
+        runtime.chords.configured_specs(copy),
+        Some(["ctrl-x ctrl-e".to_string()].as_slice())
+    );
+}
+
+#[test]
 fn composer_chord_inherits_global_fallback() {
     let mut config = TuiKeymap::default();
     config.global.submit = Some(binding("ctrl-x enter"));

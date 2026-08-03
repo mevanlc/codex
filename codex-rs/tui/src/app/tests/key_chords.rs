@@ -7,6 +7,8 @@ use super::make_test_app;
 use super::start_config_write_test_app_server;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
+use crate::chatwidget::ExternalEditorMode;
+use crate::chatwidget::ExternalEditorState;
 use crate::chatwidget::tests::helpers::render_bottom_popup;
 use crate::keymap::KeymapContext;
 use crate::test_support::test_path_display;
@@ -80,6 +82,27 @@ async fn completed_global_chord_reuses_the_existing_action_handler() -> Result<(
     press(&mut app, &mut tui, &mut app_server, ctrl('t')).await?;
     assert!(!app.key_chord_matcher.is_pending());
     assert!(app.overlay.is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn quoted_editor_default_chord_is_distinct_from_plain_external_editor() -> Result<()> {
+    let (mut app, mut tui, mut app_server) = chord_app().await?;
+
+    press(&mut app, &mut tui, &mut app_server, ctrl('x')).await?;
+    press(&mut app, &mut tui, &mut app_server, ctrl('e')).await?;
+    assert_eq!(
+        app.chat_widget.external_editor_state(),
+        ExternalEditorState::Requested(ExternalEditorMode::DraftWithLastAgentResponse)
+    );
+
+    app.chat_widget
+        .set_external_editor_state(ExternalEditorState::Closed);
+    press(&mut app, &mut tui, &mut app_server, ctrl('g')).await?;
+    assert_eq!(
+        app.chat_widget.external_editor_state(),
+        ExternalEditorState::Requested(ExternalEditorMode::DraftOnly)
+    );
     Ok(())
 }
 

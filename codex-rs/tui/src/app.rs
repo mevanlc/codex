@@ -34,6 +34,7 @@ use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
 use crate::bottom_pane::popup_consts::standard_popup_hint_line;
 use crate::chatwidget::ChatWidget;
+use crate::chatwidget::ExternalEditorMode;
 use crate::chatwidget::ExternalEditorState;
 use crate::chatwidget::ReplayKind;
 use crate::chatwidget::ThreadInputState;
@@ -1362,9 +1363,11 @@ See the Codex keymap documentation for supported actions and examples."
                     {
                         self.handle_pet_picker_preview_image_render_error(tui, err)?;
                     }
-                    if self.chat_widget.external_editor_state() == ExternalEditorState::Requested {
+                    if let ExternalEditorState::Requested(mode) =
+                        self.chat_widget.external_editor_state()
+                    {
                         self.chat_widget
-                            .set_external_editor_state(ExternalEditorState::Active);
+                            .set_external_editor_state(ExternalEditorState::Active(mode));
                         self.app_event_tx.send(AppEvent::LaunchExternalEditor);
                     }
                 }

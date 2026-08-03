@@ -1,5 +1,6 @@
 use std::env;
 use std::fs;
+use std::ops::Range;
 use std::process::Stdio;
 
 use color_eyre::eyre::Report;
@@ -17,6 +18,106 @@ pub(crate) enum EditorError {
     ParseFailed,
     #[error("editor command is empty")]
     EmptyCommand,
+}
+
+pub(crate) struct EditorBuffer {
+    initial_text: String,
+    agent_quote: Option<String>,
+}
+
+impl EditorBuffer {
+    pub(crate) fn new(draft: &str, last_agent_response: Option<&str>) -> Self {
+        let agent_quote = last_agent_response
+            .filter(|response| !response.is_empty())
+            .map(|response| {
+                response
+                    .lines()
+                    .map(|line| format!("> {line}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
+        let initial_text = match (draft.is_empty(), agent_quote.as_deref()) {
+            (_, None) => draft.to_string(),
+            (true, Some(agent_quote)) => agent_quote.to_string(),
+            (false, Some(agent_quote)) => format!("{draft}\n\n{agent_quote}"),
+        };
+        Self {
+            initial_text,
+            agent_quote,
+        }
+    }
+
+    pub(crate) fn initial_text(&self) -> &str {
+        &self.initial_text
+    }
+
+    pub(crate) fn edited_prompt(&self, edited_text: &str) -> String {
+        let mut prompt = edited_text.to_string();
+        if let Some(agent_quote) = self.agent_quote.as_deref()
+            && let Some(range) = find_whitespace_insensitive_block(&prompt, agent_quote)
+        {
+            prompt.replace_range(range, "");
+        }
+        prompt.trim_end().to_string()
+    }
+}
+
+fn find_whitespace_insensitive_block(haystack: &str, needle: &str) -> Option<Range<usize>> {
+    haystack
+        .char_indices()
+        .filter_map(|(start, _)| whitespace_insensitive_match_at(haystack, needle, start))
+        .filter(|range| match_starts_on_line(haystack, range.start))
+        .rfind(|range| match_ends_on_line(haystack, range.end))
+}
+
+fn match_starts_on_line(text: &str, start: usize) -> bool {
+    text[..start].rsplit_once('\n').map_or_else(
+        || text[..start].chars().all(char::is_whitespace),
+        |(_, prefix)| prefix.chars().all(char::is_whitespace),
+    )
+}
+
+fn match_ends_on_line(text: &str, end: usize) -> bool {
+    text[end..].split_once('\n').map_or_else(
+        || text[end..].chars().all(char::is_whitespace),
+        |(suffix, _)| suffix.chars().all(char::is_whitespace),
+    )
+}
+
+fn whitespace_insensitive_match_at(
+    haystack: &str,
+    needle: &str,
+    start: usize,
+) -> Option<Range<usize>> {
+    let mut haystack_chars = haystack[start..].char_indices().peekable();
+    let mut needle_chars = needle.chars().peekable();
+    let mut end = start;
+
+    while let Some(needle_char) = needle_chars.next() {
+        if needle_char.is_whitespace() {
+            while needle_chars.peek().is_some_and(|ch| ch.is_whitespace()) {
+                needle_chars.next();
+            }
+            let (offset, haystack_char) = haystack_chars.next()?;
+            if !haystack_char.is_whitespace() {
+                return None;
+            }
+            end = start + offset + haystack_char.len_utf8();
+            while let Some((offset, haystack_char)) =
+                haystack_chars.next_if(|(_, haystack_char)| haystack_char.is_whitespace())
+            {
+                end = start + offset + haystack_char.len_utf8();
+            }
+        } else {
+            let (offset, haystack_char) = haystack_chars.next()?;
+            if haystack_char != needle_char {
+                return None;
+            }
+            end = start + offset + haystack_char.len_utf8();
+        }
+    }
+
+    Some(start..end)
 }
 
 /// Tries to resolve the full path to a Windows program, respecting PATH + PATHEXT.
@@ -167,5 +268,58 @@ mod tests {
         let cmd = vec![script_path.to_string_lossy().to_string()];
         let result = run_editor("seed", &cmd).await.unwrap();
         assert_eq!(result, "edited".to_string());
+    }
+
+    #[test]
+    fn quoted_buffer_places_draft_above_line_prefixed_agent_response() {
+        let buffer = EditorBuffer::new(
+            "Please revise the explanation.",
+            Some("First paragraph.\n\n- first item\n- second item"),
+        );
+
+        assert_eq!(
+            buffer.initial_text(),
+            "Please revise the explanation.\n\n> First paragraph.\n> \n> - first item\n> - second item"
+        );
+    }
+
+    #[test]
+    fn quoted_buffer_omits_separator_when_draft_is_empty() {
+        let buffer = EditorBuffer::new("", Some("Agent response"));
+
+        assert_eq!(buffer.initial_text(), "> Agent response");
+        assert_eq!(buffer.edited_prompt(buffer.initial_text()), "");
+    }
+
+    #[test]
+    fn draft_only_buffer_preserves_existing_external_editor_behavior() {
+        let buffer = EditorBuffer::new("Draft prompt", None);
+
+        assert_eq!(buffer.initial_text(), "Draft prompt");
+        assert_eq!(buffer.edited_prompt("Edited prompt\n\n"), "Edited prompt");
+    }
+
+    #[test]
+    fn edited_prompt_removes_agent_quote_with_unicode_whitespace_differences() {
+        let buffer = EditorBuffer::new("Original prompt", Some("First  line\nSecond\tline"));
+        let edited = "Revised prompt\n\n> First\u{2003}line \n\t> Second line\n";
+
+        assert_eq!(buffer.edited_prompt(edited), "Revised prompt");
+    }
+
+    #[test]
+    fn edited_prompt_keeps_quote_when_non_whitespace_content_changes() {
+        let buffer = EditorBuffer::new("", Some("Agent response"));
+        let edited = "New prompt\n\n> Agent changed response";
+
+        assert_eq!(buffer.edited_prompt(edited), edited);
+    }
+
+    #[test]
+    fn edited_prompt_does_not_remove_quote_prefix_from_a_longer_line() {
+        let buffer = EditorBuffer::new("", Some("Agent response"));
+        let edited = "> Agent response with an addition";
+
+        assert_eq!(buffer.edited_prompt(edited), edited);
     }
 }

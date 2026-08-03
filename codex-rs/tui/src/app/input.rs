@@ -84,7 +84,11 @@ impl App {
         }
     }
 
-    pub(super) async fn launch_external_editor(&mut self, tui: &mut tui::Tui) {
+    pub(super) async fn launch_external_editor(
+        &mut self,
+        tui: &mut tui::Tui,
+        mode: ExternalEditorMode,
+    ) {
         let editor_cmd = match external_editor::resolve_editor_command() {
             Ok(cmd) => cmd,
             Err(external_editor::EditorError::MissingEditor) => {
@@ -106,16 +110,24 @@ impl App {
             }
         };
 
-        let seed = self.chat_widget.composer_text_with_pending();
+        let draft = self.chat_widget.composer_text_with_pending();
+        let last_agent_response = match mode {
+            ExternalEditorMode::DraftOnly => None,
+            ExternalEditorMode::DraftWithLastAgentResponse => {
+                self.chat_widget.last_agent_markdown_text()
+            }
+        };
+        let buffer = external_editor::EditorBuffer::new(&draft, last_agent_response);
         let editor_result = tui
-            .with_restored(|| async { external_editor::run_editor(&seed, &editor_cmd).await })
+            .with_restored(|| async {
+                external_editor::run_editor(buffer.initial_text(), &editor_cmd).await
+            })
             .await;
         self.reset_external_editor_state(tui);
 
         match editor_result {
             Ok(new_text) => {
-                // Trim trailing whitespace
-                let cleaned = new_text.trim_end().to_string();
+                let cleaned = buffer.edited_prompt(&new_text);
                 self.chat_widget.apply_external_edit(cleaned);
             }
             Err(err) => {
@@ -128,9 +140,13 @@ impl App {
         tui.frame_requester().schedule_frame();
     }
 
-    pub(super) fn request_external_editor_launch(&mut self, tui: &mut tui::Tui) {
+    pub(super) fn request_external_editor_launch(
+        &mut self,
+        tui: &mut tui::Tui,
+        mode: ExternalEditorMode,
+    ) {
         self.chat_widget
-            .set_external_editor_state(ExternalEditorState::Requested);
+            .set_external_editor_state(ExternalEditorState::Requested(mode));
         self.chat_widget.set_footer_hint_override(Some(vec![(
             EXTERNAL_EDITOR_HINT.to_string(),
             String::new(),
@@ -273,7 +289,26 @@ impl App {
                 && self.chat_widget.can_launch_external_editor()
                 && self.chat_widget.external_editor_state() == ExternalEditorState::Closed
             {
-                self.request_external_editor_launch(tui);
+                self.request_external_editor_launch(tui, ExternalEditorMode::DraftOnly);
+            }
+            return;
+        }
+
+        if app_keymap_shortcuts_available
+            && self
+                .keymap
+                .app
+                .open_external_editor_with_quote
+                .is_pressed(key_event)
+        {
+            if self.overlay.is_none()
+                && self.chat_widget.can_launch_external_editor()
+                && self.chat_widget.external_editor_state() == ExternalEditorState::Closed
+            {
+                self.request_external_editor_launch(
+                    tui,
+                    ExternalEditorMode::DraftWithLastAgentResponse,
+                );
             }
             return;
         }

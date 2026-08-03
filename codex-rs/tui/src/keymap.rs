@@ -78,6 +78,8 @@ pub(crate) struct AppKeymap {
     pub(crate) open_transcript: Vec<KeyBinding>,
     /// Open external editor for the current draft.
     pub(crate) open_external_editor: Vec<KeyBinding>,
+    /// Open external editor with the last agent response quoted below the current draft.
+    pub(crate) open_external_editor_with_quote: Vec<KeyBinding>,
     /// Copy the last agent response to the clipboard.
     pub(crate) copy: Vec<KeyBinding>,
     /// Clear the terminal UI.
@@ -519,7 +521,12 @@ impl RuntimeKeymap {
     /// parsing `TuiKeymap`, because doing so would ignore explicit user
     /// unbindings and conflict diagnostics.
     pub(crate) fn defaults() -> Self {
-        Self::built_in_defaults()
+        match Self::from_config(&TuiKeymap::default()) {
+            Ok(keymap) => keymap,
+            Err(error) => {
+                panic!("built-in TUI keybindings must resolve without conflicts: {error}")
+            }
+        }
     }
 
     /// Resolve a runtime keymap from config, applying precedence and validation.
@@ -552,6 +559,11 @@ impl RuntimeKeymap {
                 keymap.global.open_external_editor.as_ref(),
                 &defaults.app.open_external_editor,
                 "tui.keymap.global.open_external_editor",
+            )?,
+            open_external_editor_with_quote: resolve_bindings(
+                keymap.global.open_external_editor_with_quote.as_ref(),
+                &defaults.app.open_external_editor_with_quote,
+                "tui.keymap.global.open_external_editor_with_quote",
             )?,
             copy: resolve_bindings(
                 keymap.global.copy.as_ref(),
@@ -959,6 +971,10 @@ impl RuntimeKeymap {
                 keymap.global.open_external_editor.as_ref(),
                 app.open_external_editor.as_slice(),
             ),
+            (
+                keymap.global.open_external_editor_with_quote.as_ref(),
+                app.open_external_editor_with_quote.as_slice(),
+            ),
             (keymap.global.copy.as_ref(), app.copy.as_slice()),
             (
                 keymap.global.clear_terminal.as_ref(),
@@ -1097,6 +1113,7 @@ impl RuntimeKeymap {
             app: AppKeymap {
                 open_transcript: default_bindings![ctrl(KeyCode::Char('t'))],
                 open_external_editor: default_bindings![ctrl(KeyCode::Char('g'))],
+                open_external_editor_with_quote: default_bindings![],
                 copy: default_bindings![ctrl(KeyCode::Char('o'))],
                 clear_terminal: default_bindings![ctrl(KeyCode::Char('l'))],
                 toggle_vim_mode: default_bindings![],
@@ -1370,6 +1387,10 @@ impl RuntimeKeymap {
                     "open_external_editor",
                     self.app.open_external_editor.as_slice(),
                 ),
+                (
+                    "open_external_editor_with_quote",
+                    self.app.open_external_editor_with_quote.as_slice(),
+                ),
                 ("copy", self.app.copy.as_slice()),
                 ("clear_terminal", self.app.clear_terminal.as_slice()),
                 ("toggle_vim_mode", self.app.toggle_vim_mode.as_slice()),
@@ -1413,6 +1434,10 @@ impl RuntimeKeymap {
                 (
                     "open_external_editor",
                     self.app.open_external_editor.as_slice(),
+                ),
+                (
+                    "open_external_editor_with_quote",
+                    self.app.open_external_editor_with_quote.as_slice(),
                 ),
                 ("copy", self.app.copy.as_slice()),
                 ("clear_terminal", self.app.clear_terminal.as_slice()),
@@ -1463,6 +1488,10 @@ impl RuntimeKeymap {
                 (
                     "open_external_editor",
                     self.app.open_external_editor.as_slice(),
+                ),
+                (
+                    "open_external_editor_with_quote",
+                    self.app.open_external_editor_with_quote.as_slice(),
                 ),
                 ("copy", self.app.copy.as_slice()),
                 ("clear_terminal", self.app.clear_terminal.as_slice()),
@@ -1528,6 +1557,10 @@ impl RuntimeKeymap {
                 (
                     "open_external_editor",
                     self.app.open_external_editor.as_slice(),
+                ),
+                (
+                    "open_external_editor_with_quote",
+                    self.app.open_external_editor_with_quote.as_slice(),
                 ),
                 ("copy", self.app.copy.as_slice()),
                 ("clear_terminal", self.app.clear_terminal.as_slice()),

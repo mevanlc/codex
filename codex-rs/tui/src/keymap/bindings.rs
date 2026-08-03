@@ -213,6 +213,7 @@ define_runtime_action_bindings! {
     "global" => Global, app, global [
         open_transcript,
         open_external_editor,
+        open_external_editor_with_quote,
         copy,
         clear_terminal,
         toggle_vim_mode,
