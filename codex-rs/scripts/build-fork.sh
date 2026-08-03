@@ -49,12 +49,14 @@ Platform Notes
   macOS:
     Xcode Command Line Tools required (xcode-select --install).
     Homebrew deps: brew install cmake pkg-config openssl protobuf
-    Apple Silicon (M1+) builds natively; no special flags needed.
+    Apple Silicon (M1+) builds natively. V8 prebuilts come from the matching
+    openai/codex rusty-v8 release.
 
   Linux (x86_64 / aarch64):
     Debian/Ubuntu: apt install build-essential cmake pkg-config libssl-dev
     Fedora/RHEL:   dnf install gcc cmake openssl-devel pkg-config
-    Builds with default features including code-mode (V8).
+    Builds with default features including code-mode. V8 prebuilts come from
+    the matching openai/codex rusty-v8 release.
 
   Windows:
     Requires Visual Studio Build Tools (MSVC) or the full VS installer.
@@ -230,19 +232,20 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Termux/Android: use prebuilt V8 from mevanlc/codex releases and link C++
-# runtime for native C++ deps (oboe-sys, onig_sys).
-V8_PREBUILT_BASE="https://github.com/mevanlc/codex/releases/download"
 # Derive the prebuilt tag from the v8 crate pin. The archive embeds the crate's
 # C++ shims, whose signatures change between V8 majors, so a stale tag links
 # cleanly but misbehaves at runtime.
 V8_CRATE_VERSION="$(sed -n 's/^v8 = "=\(.*\)"$/\1/p' "$CARGO_TOML" | head -1)"
-V8_PREBUILT_TAG="v8-v${V8_CRATE_VERSION}"
+if [[ -z "$V8_CRATE_VERSION" ]]; then
+	echo "Error: could not read the v8 pin from $CARGO_TOML" >&2
+	exit 1
+fi
+
 if [[ "$(uname -m)" == "aarch64" ]] && [[ -f /system/build.prop ]]; then
-	if [[ -z "$V8_CRATE_VERSION" ]]; then
-		echo "Error: could not read the v8 pin from $CARGO_TOML" >&2
-		exit 1
-	fi
+	# Termux/Android: use the fork's Android prebuilt and link the C++ runtime for
+	# native C++ deps (oboe-sys, onig_sys).
+	V8_PREBUILT_BASE="https://github.com/mevanlc/codex/releases/download"
+	V8_PREBUILT_TAG="v8-v${V8_CRATE_VERSION}"
 	export RUSTY_V8_ARCHIVE="${V8_PREBUILT_BASE}/${V8_PREBUILT_TAG}/librusty_v8_release_aarch64-linux-android.a.gz"
 	# Key the cache on the tag so a version bump cannot reuse an old binding.
 	V8_BINDING="/tmp/v8_src_binding-${V8_PREBUILT_TAG}.rs"
@@ -256,6 +259,36 @@ if [[ "$(uname -m)" == "aarch64" ]] && [[ -f /system/build.prop ]]; then
 	clang_rt_builtins="$(clang --print-resource-dir)/lib/linux/libclang_rt.builtins-aarch64-android.a"
 	export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-lc++_static -C link-arg=-lc++abi -C link-arg=${clang_rt_builtins}"
 	echo "Termux detected: using prebuilt V8 from ${V8_PREBUILT_TAG}"
+else
+	# Desktop code-mode enables V8's sandbox, whose matching archives are
+	# published with Codex rather than in the default rusty_v8 release.
+	V8_TARGET="$(rustc -vV | sed -n 's/^host: //p')"
+	V8_PROFILE="ptrcomp_sandbox_release"
+	V8_PREBUILT_TAG="rusty-v8-v${V8_CRATE_VERSION}"
+	V8_PREBUILT_BASE="https://github.com/openai/codex/releases/download/${V8_PREBUILT_TAG}"
+	case "$V8_TARGET" in
+		*-pc-windows-msvc)
+			V8_ARCHIVE="rusty_v8_${V8_PROFILE}_${V8_TARGET}.lib.gz"
+			;;
+		aarch64-apple-darwin|x86_64-apple-darwin|aarch64-unknown-linux-gnu|x86_64-unknown-linux-gnu|aarch64-unknown-linux-musl|x86_64-unknown-linux-musl)
+			V8_ARCHIVE="librusty_v8_${V8_PROFILE}_${V8_TARGET}.a.gz"
+			;;
+		*)
+			echo "Error: no Codex V8 prebuilt is published for host target $V8_TARGET" >&2
+			exit 1
+			;;
+	esac
+	V8_BINDING_NAME="src_binding_${V8_PROFILE}_${V8_TARGET}.rs"
+	V8_BINDING_DIR="${TMPDIR:-/tmp}/codex-rusty-v8/${V8_PREBUILT_TAG}"
+	V8_BINDING="${V8_BINDING_DIR}/${V8_BINDING_NAME}"
+	if [[ ! -f "$V8_BINDING" ]]; then
+		mkdir -p "$V8_BINDING_DIR"
+		curl -fsSL -o "${V8_BINDING}.tmp" "${V8_PREBUILT_BASE}/${V8_BINDING_NAME}"
+		mv "${V8_BINDING}.tmp" "$V8_BINDING"
+	fi
+	export RUSTY_V8_ARCHIVE="${V8_PREBUILT_BASE}/${V8_ARCHIVE}"
+	export RUSTY_V8_SRC_BINDING_PATH="$V8_BINDING"
+	echo "Using OpenAI Codex V8 prebuilt from ${V8_PREBUILT_TAG} for ${V8_TARGET}"
 fi
 
 # Build binaries

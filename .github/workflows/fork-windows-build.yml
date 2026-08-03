@@ -52,6 +52,10 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ matrix.target }}
+
       - name: Configure MSVC toolchain
         uses: ./.github/actions/setup-msvc-env
         with:

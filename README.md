@@ -130,7 +130,7 @@ The script stamps a version derived from the newest `rust-v*` tag reachable from
 | `--prune-mode MODE`    | `incremental` (default), `sweep`, `aggressive`, or `auto`                               |
 | `--prune-every-days D` | Prune at most once per D days (default `1`)                                             |
 
-`--help` also prints per-platform prerequisites. On Termux (aarch64 with `/system/build.prop` present) the script auto-detects the platform, points `RUSTY_V8_ARCHIVE` at the prebuilt V8 hosted on this repo's releases, and adds the link flags needed for `libc++` and `__clear_cache`. Termux prerequisites: `pkg install rust binutils cmake openssl pkg-config`.
+`--help` also prints per-platform prerequisites. Desktop builds use the exact-version sandboxed V8 archive and binding published by `openai/codex`. On Termux (aarch64 with `/system/build.prop` present), the script instead points `RUSTY_V8_ARCHIVE` at the Android prebuilt hosted on this repo's releases and adds the link flags needed for `libc++` and `__clear_cache`. Termux prerequisites: `pkg install rust binutils cmake openssl pkg-config`.
 
 This fork also raises `[profile.release]` to `opt-level = 3` with fat LTO.
 
