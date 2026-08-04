@@ -3115,8 +3115,16 @@
           "description": "Opt into receiving experimental API methods and fields.",
           "type": "boolean"
         },
+        "extensions": {
+          "additionalProperties": true,
+          "description": "MCP extension settings declared by the app-server client.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "mcpServerOpenaiFormElicitation": {
-          "description": "Allow downstream MCP servers to request OpenAI extended form elicitations.",
+          "description": "Legacy opt-in for the `openai/form` MCP extension.\n\nNew clients should declare `openai/form` in [`Self::extensions`].",
           "type": "boolean"
         },
         "optOutNotificationMethods": {
@@ -6218,6 +6226,16 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "onboardingEntrypoint": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/DesktopOnboardingEntrypoint"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "success": {
@@ -9394,6 +9412,12 @@
         ],
         "title": "DeprecationNoticeNotification",
         "type": "object"
+      },
+      "DesktopOnboardingEntrypoint": {
+        "enum": [
+          "life_sciences"
+        ],
+        "type": "string"
       },
       "DynamicToolCallOutputContentItem": {
         "oneOf": [

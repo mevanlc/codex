@@ -2243,7 +2243,7 @@ mod tests {
         Ok(())
     }
 
-    async fn start_test_embedded_app_server(
+    pub(crate) async fn start_test_embedded_app_server(
         config: Config,
     ) -> color_eyre::Result<InProcessAppServerClient> {
         let state_db =

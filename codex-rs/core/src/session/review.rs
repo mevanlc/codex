@@ -48,11 +48,8 @@ pub(super) async fn spawn_review_thread(
     let mut per_turn_config = (*config).clone();
     per_turn_config.model = Some(model.clone());
     per_turn_config.features = review_features.clone();
-    per_turn_config.permissions.shell_environment_policy = parent_turn_context
-        .config
-        .permissions
-        .shell_environment_policy
-        .clone();
+    per_turn_config.permissions = parent_turn_context.config.permissions.clone();
+    per_turn_config.approvals_reviewer = parent_turn_context.config.approvals_reviewer;
     per_turn_config.codex_linux_sandbox_exe =
         parent_turn_context.config.codex_linux_sandbox_exe.clone();
     per_turn_config.compact_prompt = parent_turn_context.config.compact_prompt.clone();
@@ -98,7 +95,7 @@ pub(super) async fn spawn_review_thread(
         review_turn_id.clone(),
         #[allow(deprecated)]
         parent_turn_context.cwd.clone(),
-        &parent_turn_context.permission_profile,
+        &parent_turn_context.permission_profile(),
         parent_turn_context.windows_sandbox_level,
         parent_turn_context.network.is_some(),
     ));
@@ -106,7 +103,7 @@ pub(super) async fn spawn_review_thread(
     let extension_data = Arc::new(codex_extension_api::ExtensionData::new(
         review_turn_id.clone(),
     ));
-    extension_data.insert(parent_turn_context.turn_skills.snapshot.clone());
+    extension_data.insert(parent_turn_context.skills_snapshot().as_ref().clone());
 
     let review_turn_context = TurnContext {
         sub_id: review_turn_id.clone(),
@@ -137,8 +134,6 @@ pub(super) async fn spawn_review_thread(
             .clone(),
         multi_agent_version: MultiAgentVersion::Disabled,
         personality: parent_turn_context.personality,
-        approval_policy: parent_turn_context.approval_policy.clone(),
-        permission_profile: parent_turn_context.permission_profile(),
         network: parent_turn_context.network.clone(),
         windows_sandbox_level: parent_turn_context.windows_sandbox_level,
         #[allow(deprecated)]
@@ -147,7 +142,6 @@ pub(super) async fn spawn_review_thread(
         dynamic_tools: parent_turn_context.dynamic_tools.clone(),
         turn_metadata_state,
         extension_data,
-        turn_skills: TurnSkillsContext::new(parent_turn_context.turn_skills.snapshot.clone()),
         turn_timing_state: Arc::new(TurnTimingState::default()),
         terminal_error: Arc::new(Mutex::new(None)),
         server_model_warning_emitted: AtomicBool::new(false),

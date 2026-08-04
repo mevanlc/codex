@@ -7,7 +7,6 @@
 
 mod apply_patch;
 mod apps;
-mod audio_preparation;
 mod client;
 mod client_common;
 mod realtime_context;
@@ -89,9 +88,9 @@ pub mod sandboxing;
 mod session_prefix;
 mod session_startup_prewarm;
 pub mod skills;
+pub(crate) use skills::HostSkillsService;
 pub(crate) use skills::SkillInjections;
 pub(crate) use skills::SkillMetadata;
-pub(crate) use skills::SkillsService;
 pub(crate) use skills::build_skill_injections;
 pub(crate) use skills::build_skill_name_counts;
 pub(crate) use skills::collect_explicit_skill_mentions;
