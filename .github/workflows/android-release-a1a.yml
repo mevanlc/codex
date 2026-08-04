@@ -62,7 +62,7 @@ jobs:
     name: Build ${{ matrix.label }}
     needs: metadata
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    timeout-minutes: 360
     env:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       CARGO_PROFILE_RELEASE_DEBUG: "0"
@@ -273,7 +273,7 @@ jobs:
     name: Build ${{ matrix.label }}
     needs: metadata
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    timeout-minutes: 360
     env:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       CARGO_PROFILE_RELEASE_DEBUG: "0"
@@ -394,7 +394,7 @@ jobs:
     name: Build Android/Termux arm64 on A1
     needs: metadata
     runs-on: [self-hosted, Linux, ARM64]
-    timeout-minutes: 120
+    timeout-minutes: 360
     defaults:
       run:
         working-directory: codex-rs
