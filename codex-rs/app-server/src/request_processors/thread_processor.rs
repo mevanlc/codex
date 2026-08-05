@@ -2375,15 +2375,22 @@ impl ThreadRequestProcessor {
         include_turns: bool,
     ) -> Result<Option<Thread>, ThreadReadViewError> {
         let fallback_provider = self.config.model_provider_id.as_str();
-        if include_turns
-            && self
+        if include_turns {
+            let Some(stored_thread) = self
                 .read_stored_thread_for_read(thread_id, /*include_history*/ false)
                 .await?
-                .is_some_and(|thread| matches!(thread.history_mode, ThreadHistoryMode::Paginated))
-        {
-            return Err(ThreadReadViewError::InvalidRequest(
-                "paginated threads do not support thread/read(includeTurns=true)".to_string(),
-            ));
+            else {
+                return Ok(None);
+            };
+            if matches!(stored_thread.history_mode, ThreadHistoryMode::Paginated) {
+                let (mut thread, _) =
+                    thread_from_stored_thread(stored_thread, fallback_provider, &self.config.cwd);
+                thread.turns = self
+                    .paginated_thread_full_turns(thread_id)
+                    .await
+                    .map_err(ThreadReadViewError::JsonRpc)?;
+                return Ok(Some(thread));
+            }
         }
         let Some(stored_thread) = self
             .read_stored_thread_for_read(thread_id, /*include_history*/ include_turns)
@@ -2448,11 +2455,6 @@ impl ThreadRequestProcessor {
                 "ephemeral threads do not support includeTurns".to_string(),
             ));
         }
-        if include_turns && matches!(config_snapshot.history_mode, ThreadHistoryMode::Paginated) {
-            return Err(ThreadReadViewError::InvalidRequest(
-                "paginated threads do not support thread/read(includeTurns=true)".to_string(),
-            ));
-        }
         let fallback_thread =
             build_thread_from_loaded_snapshot(thread_id, &config_snapshot, loaded_thread);
         let mut thread = if let Some(mut thread) = persisted_thread {
@@ -2481,6 +2483,20 @@ impl ThreadRequestProcessor {
         self.attach_thread_name(thread_id, thread).await;
 
         if include_turns {
+            if matches!(
+                thread.history_mode,
+                codex_app_server_protocol::ThreadHistoryMode::Paginated
+            ) {
+                self.thread_store
+                    .persist_thread(thread_id)
+                    .await
+                    .map_err(|err| thread_read_history_load_error(thread_id, err))?;
+                thread.turns = self
+                    .paginated_thread_full_turns(thread_id)
+                    .await
+                    .map_err(ThreadReadViewError::JsonRpc)?;
+                return Ok(());
+            }
             let history = loaded_thread
                 .load_history(/*include_archived*/ true)
                 .await
@@ -2746,8 +2762,8 @@ impl ThreadRequestProcessor {
         }
     }
 
-    // Older clients omit `excludeTurns` and expect full `thread.turns` on resume.
-    // Remove this slow path once all clients use paginated resume bootstrap.
+    // Older clients expect full `thread.turns` from resume and `thread/read(includeTurns=true)`.
+    // Keep this slow compatibility path until all clients page history directly.
     async fn paginated_thread_full_turns(
         &self,
         thread_id: ThreadId,
@@ -3156,8 +3172,6 @@ impl ThreadRequestProcessor {
             matches!(thread.history_mode, ThreadHistoryMode::Paginated).then_some(thread.thread_id)
         });
         let paginated_resume = paginated_thread_id.is_some();
-        let needs_paginated_projection =
-            paginated_resume && (include_turns || initial_turns_page.is_some());
 
         let history_cwd = thread_history.session_cwd();
         let runtime_workspace_roots = runtime_workspace_roots.map(resolve_runtime_workspace_roots);
@@ -3246,7 +3260,7 @@ impl ThreadRequestProcessor {
                 // Paginated JSONL is canonical, but its SQLite projection can lag after a
                 // previous write failure. Persist after reopening the live writer so legacy
                 // response hydration reads the latest durable turns and items.
-                if needs_paginated_projection
+                if paginated_resume
                     && let Err(error) = self
                         .thread_store
                         .persist_thread(thread_id)
@@ -3342,12 +3356,6 @@ impl ThreadRequestProcessor {
                 let active_permission_profile = thread_response_active_permission_profile(
                     config_snapshot.active_permission_profile,
                 );
-                let token_usage_turn_id = include_turns.then(|| {
-                    restored_token_usage_turn_id(
-                        response_history.get_rollout_items(),
-                        thread.turns.as_slice(),
-                    )
-                });
                 let mut initial_turns_page = if let Some(params) = initial_turns_page.as_ref() {
                     let initial_turns_page_result = if paginated_resume {
                         self.paginated_resume_initial_turns_page(thread_id, params)
@@ -3371,6 +3379,18 @@ impl ThreadRequestProcessor {
                 } else {
                     None
                 };
+                let token_usage_turn_id = (include_turns || paginated_resume)
+                    .then(|| {
+                        let turns = if thread.turns.is_empty() {
+                            initial_turns_page
+                                .as_ref()
+                                .map_or(&[][..], |page| page.data.as_slice())
+                        } else {
+                            thread.turns.as_slice()
+                        };
+                        restored_token_usage_turn_id(response_history.get_rollout_items(), turns)
+                    })
+                    .filter(|turn_id| !turn_id.is_empty());
                 if redact_resume_payloads {
                     redact_thread_resume_payloads(&mut thread.turns);
                     if let Some(initial_turns_page) = initial_turns_page.as_mut() {
@@ -3583,6 +3603,12 @@ impl ThreadRequestProcessor {
                     )
                     .await?;
             }
+            if paginated_resume && (include_turns || params.initial_turns_page.is_some()) {
+                self.thread_store
+                    .persist_thread(existing_thread_id)
+                    .await
+                    .map_err(thread_store_resume_read_error)?;
+            }
             let history_items = if needs_history {
                 source_thread
                     .history
@@ -3641,15 +3667,6 @@ impl ThreadRequestProcessor {
                 .thread_goal_processor
                 .pending_resume_goal_state(existing_thread.as_ref())
                 .await;
-            if paginated_resume && (include_turns || params.initial_turns_page.is_some()) {
-                // Paginated JSONL is canonical, but its SQLite projection can lag after a
-                // previous write failure. Persist before legacy response hydration reads the
-                // latest durable turns and items.
-                self.thread_store
-                    .persist_thread(existing_thread_id)
-                    .await
-                    .map_err(thread_store_resume_read_error)?;
-            }
             let paginated_turns = if paginated_resume && include_turns {
                 Some(self.paginated_thread_full_turns(existing_thread_id).await?)
             } else {
@@ -4229,7 +4246,7 @@ impl ThreadRequestProcessor {
         };
         let ephemeral_token_usage_turn_id = (ephemeral && include_turns)
             .then(|| restored_token_usage_turn_id(&history_items, ephemeral_turns.as_slice()));
-        let paginated_history_items = paginated_source.then(|| Arc::clone(&history_items));
+        let token_usage_history_items = paginated_source.then(|| Arc::clone(&history_items));
 
         let new_thread = if let Some(prepared_fork) = prepared_fork {
             self.thread_manager
@@ -4358,7 +4375,9 @@ impl ThreadRequestProcessor {
                 restored_token_usage_turn_id(
                     history
                         .as_ref()
-                        .map_or(&[], |history| history.items.as_slice()),
+                        .map(|history| history.items.as_slice())
+                        .or_else(|| token_usage_history_items.as_deref().map(Vec::as_slice))
+                        .unwrap_or(&[]),
                     thread.turns.as_slice(),
                 )
             });
@@ -4379,7 +4398,7 @@ impl ThreadRequestProcessor {
         if paginated_source && include_turns {
             thread.turns = self.paginated_thread_full_turns(thread_id).await?;
             token_usage_turn_id = Some(restored_token_usage_turn_id(
-                paginated_history_items
+                token_usage_history_items
                     .as_deref()
                     .map_or(&[], Vec::as_slice),
                 thread.turns.as_slice(),
@@ -4901,6 +4920,7 @@ enum ThreadReadViewError {
     InvalidRequest(String),
     Unsupported(&'static str),
     Internal(String),
+    JsonRpc(JSONRPCErrorError),
 }
 
 fn thread_read_view_error(err: ThreadReadViewError) -> JSONRPCErrorError {
@@ -4910,6 +4930,7 @@ fn thread_read_view_error(err: ThreadReadViewError) -> JSONRPCErrorError {
             unsupported_thread_store_operation(operation)
         }
         ThreadReadViewError::Internal(message) => internal_error(message),
+        ThreadReadViewError::JsonRpc(error) => error,
     }
 }
 

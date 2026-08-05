@@ -17,6 +17,7 @@ use crate::tools::network_approval::begin_network_approval;
 use crate::tools::network_approval::finish_deferred_network_approval;
 use crate::tools::network_approval::finish_immediate_network_approval;
 use crate::tools::sandboxing::ApprovalCtx;
+use crate::tools::sandboxing::ApprovalRequestReasons;
 use crate::tools::sandboxing::ExecApprovalRequirement;
 use crate::tools::sandboxing::SandboxAttempt;
 use crate::tools::sandboxing::SandboxOverride;
@@ -34,7 +35,6 @@ use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::ReviewDecision;
 use codex_sandboxing::SandboxManager;
 use codex_sandboxing::SandboxType;
-use codex_utils_path_uri::PathUri;
 use std::time::Instant;
 
 pub(crate) struct ToolOrchestrator {
@@ -151,15 +151,10 @@ impl ToolOrchestrator {
         // 1) Approval
         let mut already_approved = false;
 
-        let workspace_roots = tool.workspace_roots(req);
-        let permission_profile = turn_ctx.config.permissions.permission_profile();
-        let materialized_workspace_roots = workspace_roots
-            .iter()
-            .filter_map(|workspace_root| workspace_root.to_abs_path().ok())
-            .collect::<Vec<_>>();
-        let permissions = permission_profile
-            .clone()
-            .materialize_project_roots_with_workspace_roots(&materialized_workspace_roots);
+        let environment = tool.turn_environment(req);
+        let workspace_roots = environment.workspace_roots();
+        let permission_profile = environment.permission_profile();
+        let permissions = environment.permission_profile_with_workspace_roots();
         let file_system_sandbox_policy = permissions.file_system_sandbox_policy();
         let requirement = tool.exec_approval_requirement(req).unwrap_or_else(|| {
             default_exec_approval_requirement(approval_policy, &file_system_sandbox_policy)
@@ -172,17 +167,11 @@ impl ToolOrchestrator {
                         turn: &tool_ctx.turn,
                         call_id: &tool_ctx.call_id,
                         tool_name: &tool_ctx.tool_name,
-                        retry_reason: None,
+                        reasons: ApprovalRequestReasons::default(),
                         network_approval_context: None,
                     };
-                    resolve_tool_approval(
-                        tool,
-                        req,
-                        tool_ctx.call_id.as_str(),
-                        approval_ctx,
-                        ApprovalReviewer::Guardian,
-                    )
-                    .await?;
+                    resolve_tool_approval(tool, req, approval_ctx, ApprovalReviewer::Guardian)
+                        .await?;
                     already_approved = true;
                 } else {
                     otel.tool_decision(
@@ -202,13 +191,15 @@ impl ToolOrchestrator {
                     turn: &tool_ctx.turn,
                     call_id: &tool_ctx.call_id,
                     tool_name: &tool_ctx.tool_name,
-                    retry_reason: reason.clone(),
+                    reasons: ApprovalRequestReasons {
+                        approval: reason.clone(),
+                        retry: None,
+                    },
                     network_approval_context: None,
                 };
                 resolve_tool_approval(
                     tool,
                     req,
-                    tool_ctx.call_id.as_str(),
                     approval_ctx,
                     if strict_auto_review {
                         ApprovalReviewer::Guardian
@@ -250,11 +241,10 @@ impl ToolOrchestrator {
 
         // Platform-specific flag gating is handled by SandboxManager::select_initial.
         let use_legacy_landlock = turn_ctx.config.features.use_legacy_landlock();
-        #[allow(deprecated)]
         let sandbox_policy_cwd = tool
             .sandbox_cwd(req)
             .cloned()
-            .unwrap_or_else(|| PathUri::from_abs_path(&turn_ctx.cwd));
+            .unwrap_or_else(|| environment.cwd().clone());
         let initial_attempt = SandboxAttempt {
             sandbox: initial_sandbox,
             sandbox_requested,
@@ -391,20 +381,26 @@ impl ToolOrchestrator {
                     && tool.should_bypass_approval(approval_policy, already_approved)
                     && network_approval_context.is_none();
                 if !bypass_retry_approval {
+                    let approval_reason = match &requirement {
+                        ExecApprovalRequirement::NeedsApproval { reason, .. } => reason.clone(),
+                        ExecApprovalRequirement::Skip { .. }
+                        | ExecApprovalRequirement::Forbidden { .. } => None,
+                    };
                     let approval_ctx = ApprovalCtx {
                         session: &tool_ctx.session,
                         turn: &tool_ctx.turn,
                         call_id: &tool_ctx.call_id,
                         tool_name: &tool_ctx.tool_name,
-                        retry_reason: Some(retry_reason),
+                        reasons: ApprovalRequestReasons {
+                            approval: approval_reason,
+                            retry: Some(retry_reason),
+                        },
                         network_approval_context: network_approval_context.clone(),
                     };
 
-                    let permission_request_run_id = format!("{}:retry", tool_ctx.call_id);
                     resolve_tool_approval(
                         tool,
                         req,
-                        &permission_request_run_id,
                         approval_ctx,
                         if strict_auto_review {
                             ApprovalReviewer::Guardian

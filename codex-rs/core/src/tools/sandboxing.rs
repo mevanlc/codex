@@ -8,6 +8,7 @@ use crate::sandboxing::ExecOptions;
 use crate::sandboxing::SandboxPermissions;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
+use crate::session::turn_context::TurnEnvironment;
 use crate::state::SessionServices;
 use crate::tools::hook_names::HookToolName;
 use crate::tools::network_approval::NetworkApprovalSpec;
@@ -116,13 +117,19 @@ where
     decision
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ApprovalRequestReasons {
+    pub(crate) approval: Option<String>,
+    pub(crate) retry: Option<String>,
+}
+
 #[derive(Clone)]
 pub(crate) struct ApprovalCtx<'a> {
     pub session: &'a Arc<Session>,
     pub turn: &'a Arc<TurnContext>,
     pub call_id: &'a str,
     pub tool_name: &'a ToolName,
-    pub retry_reason: Option<String>,
+    pub reasons: ApprovalRequestReasons,
     pub network_approval_context: Option<NetworkApprovalContext>,
 }
 
@@ -388,7 +395,7 @@ pub(crate) enum ToolError {
 }
 
 pub(crate) trait ToolRuntime<Req, Out>: Approvable<Req> + Sandboxable {
-    fn workspace_roots<'a>(&self, req: &'a Req) -> &'a [PathUri];
+    fn turn_environment<'a>(&self, req: &'a Req) -> &'a TurnEnvironment;
 
     fn network_approval_spec(&self, _req: &Req, _ctx: &ToolCtx) -> Option<NetworkApprovalSpec> {
         None

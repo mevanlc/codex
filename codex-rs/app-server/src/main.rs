@@ -63,6 +63,10 @@ struct AppServerArgs {
     /// Enable remote control for this app-server process without changing persistence.
     #[arg(long = "remote-control", hide = true)]
     remote_control: bool,
+
+    /// Enable process-only PSP routing for first-party ChatGPT requests.
+    #[arg(long, hide = true)]
+    psp: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -78,6 +82,7 @@ fn main() -> anyhow::Result<()> {
             #[cfg(debug_assertions)]
             disable_plugin_startup_tasks_for_tests,
             remote_control,
+            psp,
         } = AppServerArgs::parse();
         let loader_overrides = if disable_managed_config_from_debug_env() {
             LoaderOverrides::without_managed_config_for_tests()
@@ -90,6 +95,7 @@ fn main() -> anyhow::Result<()> {
         let auth = auth.try_into_settings()?;
         let mut runtime_options = AppServerRuntimeOptions {
             code_mode_host_transport: code_mode_host.into(),
+            psp,
             ..Default::default()
         };
         #[cfg(debug_assertions)]
