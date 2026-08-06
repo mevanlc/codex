@@ -84,7 +84,7 @@ file_mentions_preserve_at = true
 file_mentions_allow_explicit_paths = true
 ```
 
-`file_mentions_preserve_at` keeps the leading `@` in the composer when a file-search result is completed, so `@program` remains `@program` in the prompt sent to the model. It defaults to `false`. `file_mentions_allow_explicit_paths` makes file search recognize absolute paths and relative paths beginning with `./` or `../`, including paths with repeated `.` and `..` components. The completed path retains the lexical form you typed. Explicit paths are enabled by default; set this option to `false` to disable them.
+`file_mentions_preserve_at` keeps the leading `@` in the composer when a file-search result is completed, so `@program` remains `@program` in the prompt sent to the model. It defaults to `false`. `file_mentions_allow_explicit_paths` makes file search recognize absolute paths, home-relative paths beginning with `~/`, and relative paths beginning with `./` or `../`, including paths with repeated `.` and `..` components. Home-relative searches resolve `~` to the current user's home directory while preserving the lexical form you typed in the completed path. Explicit paths are enabled by default; set this option to `false` to disable them.
 
 The unified mention picker offers `Filesystem` for the ordinary file-search scope and `Filesystem (All)` for hidden and ignored entries. `All Results` continues to combine plugins with only the ordinary filesystem scope; expanded filesystem matches appear only under `Filesystem (All)`.
 

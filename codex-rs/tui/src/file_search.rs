@@ -4,7 +4,7 @@
 //! [`FileSearchRequest`]. This manager owns a single `codex-file-search`
 //! session for the current search root, updates the query on every keystroke,
 //! and drops the session when the query becomes empty. Opt-in explicit path
-//! searches derive their root from `/`, `./`, or `../` syntax while retaining
+//! searches derive their root from `/`, `~/`, `./`, or `../` syntax while retaining
 //! the user's lexical path prefix in results.
 
 use codex_file_search as file_search;
@@ -50,6 +50,7 @@ struct PreparedFileSearch {
 pub(crate) struct FileSearchManager {
     state: Arc<Mutex<SearchState>>,
     search_dir: PathBuf,
+    home_dir: Option<PathBuf>,
     app_tx: AppEventSender,
 }
 
@@ -62,6 +63,14 @@ struct SearchState {
 
 impl FileSearchManager {
     pub fn new(search_dir: PathBuf, tx: AppEventSender) -> Self {
+        Self::new_with_home_dir(search_dir, dirs::home_dir(), tx)
+    }
+
+    fn new_with_home_dir(
+        search_dir: PathBuf,
+        home_dir: Option<PathBuf>,
+        tx: AppEventSender,
+    ) -> Self {
         Self {
             state: Arc::new(Mutex::new(SearchState {
                 latest_request: None,
@@ -70,6 +79,7 @@ impl FileSearchManager {
                 session_token: 0,
             })),
             search_dir,
+            home_dir,
             app_tx: tx,
         }
     }
@@ -94,7 +104,7 @@ impl FileSearchManager {
             return;
         }
 
-        let prepared = prepare_file_search(&self.search_dir, &request);
+        let prepared = prepare_file_search(&self.search_dir, self.home_dir.as_deref(), &request);
         st.latest_request = Some(request);
 
         if prepared.display_query.is_empty() {
@@ -153,10 +163,12 @@ impl FileSearchManager {
 
 fn prepare_file_search(
     search_dir: &std::path::Path,
+    home_dir: Option<&std::path::Path>,
     request: &FileSearchRequest,
 ) -> PreparedFileSearch {
     let explicit_path = request.allow_explicit_paths
         && (request.query.starts_with('/')
+            || request.query.starts_with("~/") && home_dir.is_some()
             || request.query.starts_with("./")
             || request.query.starts_with("../"));
     let Some((directory, search_query)) = explicit_path
@@ -174,7 +186,11 @@ fn prepare_file_search(
     };
 
     let path_prefix = format!("{directory}/");
-    let explicit_search_dir = if path_prefix.starts_with('/') {
+    let explicit_search_dir = if let Some(home_relative_path) = path_prefix.strip_prefix("~/")
+        && let Some(home_dir) = home_dir
+    {
+        home_dir.join(home_relative_path)
+    } else if path_prefix.starts_with('/') {
         PathBuf::from(&path_prefix)
     } else {
         search_dir.join(&path_prefix)
