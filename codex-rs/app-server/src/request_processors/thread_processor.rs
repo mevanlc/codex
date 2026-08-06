@@ -3379,18 +3379,20 @@ impl ThreadRequestProcessor {
                 } else {
                     None
                 };
-                let token_usage_turn_id = (include_turns || paginated_resume)
-                    .then(|| {
-                        let turns = if thread.turns.is_empty() {
-                            initial_turns_page
-                                .as_ref()
-                                .map_or(&[][..], |page| page.data.as_slice())
-                        } else {
-                            thread.turns.as_slice()
-                        };
-                        restored_token_usage_turn_id(response_history.get_rollout_items(), turns)
-                    })
-                    .filter(|turn_id| !turn_id.is_empty());
+                let turns = if thread.turns.is_empty() {
+                    initial_turns_page
+                        .as_ref()
+                        .map_or(&[][..], |page| page.data.as_slice())
+                } else {
+                    thread.turns.as_slice()
+                };
+                // A metadata-only legacy resume can still replay usage when the rollout
+                // explicitly identifies the owning turn. This keeps pagination probes cheap
+                // while restoring the status line before the TUI hydrates legacy history.
+                let token_usage_turn_id =
+                    restored_token_usage_turn_id(response_history.get_rollout_items(), turns);
+                let token_usage_turn_id =
+                    (!token_usage_turn_id.is_empty()).then_some(token_usage_turn_id);
                 if redact_resume_payloads {
                     redact_thread_resume_payloads(&mut thread.turns);
                     if let Some(initial_turns_page) = initial_turns_page.as_mut() {
@@ -3422,8 +3424,6 @@ impl ThreadRequestProcessor {
                 self.outgoing
                     .send_response_with_thread_originator(request_id, response, thread_originator)
                     .await;
-                // `excludeTurns` is explicitly the cheap resume path, so avoid
-                // rebuilding history only to attribute a replayed usage update.
                 if let Some(token_usage_turn_id) = token_usage_turn_id {
                     // The client needs restored usage before it starts another turn.
                     // Sending after the response preserves JSON-RPC request ordering while

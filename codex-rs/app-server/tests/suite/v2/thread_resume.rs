@@ -2398,6 +2398,84 @@ async fn thread_resume_emits_restored_token_usage_before_next_turn() -> Result<(
 }
 
 #[tokio::test]
+async fn cold_legacy_resume_restores_explicitly_attributed_usage_without_loading_turns()
+-> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    mock_responses_config(&server.uri()).write(codex_home.path())?;
+    let filename_ts = "2025-01-05T12-00-00";
+    let conversation_id = create_fake_rollout_with_token_usage(
+        codex_home.path(),
+        filename_ts,
+        "2025-01-05T12:00:00Z",
+        "Saved user message",
+        Some("mock_provider"),
+    )?;
+    let path = rollout_path(codex_home.path(), filename_ts, &conversation_id);
+    let canonical_turn_id = "persisted-token-usage-turn";
+    append_rollout_item_to_path(
+        &path,
+        &RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+            turn_id: canonical_turn_id.to_string(),
+            trace_id: None,
+            started_at: None,
+            model_context_window: None,
+            collaboration_mode_kind: Default::default(),
+        })),
+    )
+    .await?;
+    append_rollout_item_to_path(
+        &path,
+        &RolloutItem::EventMsg(EventMsg::TokenCount(TokenCountEvent {
+            info: Some(TokenUsageInfo {
+                total_token_usage: TokenUsage {
+                    total_tokens: 150,
+                    ..Default::default()
+                },
+                last_token_usage: TokenUsage {
+                    total_tokens: 90,
+                    ..Default::default()
+                },
+                model_context_window: Some(200_000),
+            }),
+            rate_limits: None,
+        })),
+    )
+    .await?;
+    let mut app_server = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+
+    let resume_id = app_server
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: conversation_id,
+            exclude_turns: true,
+            ..Default::default()
+        })
+        .await?;
+    let ThreadResumeResponse { thread, .. } =
+        timeout(DEFAULT_READ_TIMEOUT, app_server.read_response(resume_id)).await??;
+    assert!(thread.turns.is_empty());
+
+    let notification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        app_server.read_stream_until_notification_message("thread/tokenUsage/updated"),
+    )
+    .await??;
+    let ServerNotification::ThreadTokenUsageUpdated(notification) = notification.try_into()? else {
+        panic!("expected thread/tokenUsage/updated notification");
+    };
+    assert_eq!(notification.thread_id, thread.id);
+    assert_eq!(notification.turn_id, canonical_turn_id);
+    assert_eq!(notification.token_usage.total.total_tokens, 150);
+    assert_eq!(notification.token_usage.last.total_tokens, 90);
+    assert_eq!(notification.token_usage.model_context_window, Some(200_000));
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn cold_paginated_resume_restores_usage_without_loading_turns() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
