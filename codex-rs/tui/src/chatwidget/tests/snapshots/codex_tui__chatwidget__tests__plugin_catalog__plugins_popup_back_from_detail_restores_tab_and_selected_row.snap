@@ -1,0 +1,15 @@
+---
+source: tui/src/chatwidget/tests/plugin_catalog_tests.rs
+expression: reopened_popup
+---
+  Plugins
+  Workspace.
+  Installed 0 of 2 Workspace plugins.
+
+  All Plugins  Installed (0)  OpenAI Curated  [Workspace]  Add Marketplace
+
+  Type to search plugins
+  [-] Alpha      Available · Alpha plugin.
+› [-] Beta       Available   Press Enter to install or view plugin details.
+
+  space enable/disable · ←/→ select marketplace · enter view details · esc close

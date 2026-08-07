@@ -71,6 +71,7 @@ impl ChatWidget {
         }
 
         self.plugins_active_tab_id = Some(ALL_PLUGINS_TAB_ID.to_string());
+        self.plugin_detail_return_selected_idx = None;
         self.prefetch_plugins();
 
         match self.plugins_cache_for_current_cwd() {
@@ -270,8 +271,8 @@ impl ChatWidget {
             .or_else(|| self.plugins_active_tab_id.clone())
             .or_else(|| Some(ALL_PLUGINS_TAB_ID.to_string()));
         self.plugins_active_tab_id = active_tab_id.clone();
-        let params =
-            self.plugins_popup_params(&response, active_tab_id, /*initial_selected_idx*/ None);
+        let initial_selected_idx = self.plugin_detail_return_selected_idx.take();
+        let params = self.plugins_popup_params(&response, active_tab_id, initial_selected_idx);
         if !self
             .bottom_pane
             .replace_selection_view_if_active(PLUGINS_SELECTION_VIEW_ID, params)
@@ -386,6 +387,9 @@ impl ChatWidget {
     }
 
     pub(crate) fn open_plugin_detail_loading_popup(&mut self, plugin_display_name: &str) {
+        self.plugin_detail_return_selected_idx = self
+            .bottom_pane
+            .selected_index_for_active_view(PLUGINS_SELECTION_VIEW_ID);
         self.plugins_active_tab_id = self
             .bottom_pane
             .active_tab_id_for_active_view(PLUGINS_SELECTION_VIEW_ID)

@@ -114,20 +114,28 @@ async fn plugins_popup_uses_product_labels_for_remote_and_personal_tabs() {
 }
 
 #[tokio::test]
-async fn plugins_popup_preserves_workspace_tab_across_load_and_detail_navigation() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+async fn plugins_popup_back_from_detail_restores_tab_and_selected_row() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.set_feature_enabled(Feature::Plugins, /*enabled*/ true);
 
+    let alpha = plugins_test_remote_summary(
+        "plugins~Plugin_alpha",
+        "alpha",
+        Some("Alpha"),
+        Some("Alpha plugin."),
+        /*installed*/ false,
+    );
+    let beta = plugins_test_remote_summary(
+        "plugins~Plugin_beta",
+        "beta",
+        Some("Beta"),
+        Some("Beta plugin."),
+        /*installed*/ false,
+    );
     let workspace_marketplace = plugins_test_remote_marketplace(
         "workspace-directory",
         "Raw Workspace Directory",
-        vec![plugins_test_remote_summary(
-            "plugins~Plugin_buildkite",
-            "buildkite",
-            Some("Buildkite"),
-            Some("Buildkite pipelines."),
-            /*installed*/ false,
-        )],
+        vec![alpha, beta.clone()],
     );
     chat.add_plugins_output();
     let cwd = chat.config.cwd.clone();
@@ -152,24 +160,61 @@ async fn plugins_popup_preserves_workspace_tab_across_load_and_detail_navigation
     let workspace_popup = render_bottom_popup(&chat, /*width*/ 100);
     assert!(
         workspace_popup.contains("Workspace.")
-            && workspace_popup.contains("Buildkite")
+            && workspace_popup.contains("Alpha")
+            && workspace_popup.contains("Beta")
             && !workspace_popup.contains("Loading Workspace plugins."),
         "expected remote section refresh to keep the Workspace tab active, got:\n{workspace_popup}"
     );
 
-    chat.open_plugin_detail_loading_popup("Buildkite");
-    chat.open_plugins_list(
-        cwd.to_path_buf(),
-        plugins_test_response(vec![
-            plugins_test_curated_marketplace(Vec::new()),
-            workspace_marketplace,
-        ]),
+    chat.handle_key_event(KeyEvent::from(KeyCode::Down));
+    let selected_popup = render_bottom_popup(&chat, /*width*/ 100);
+    assert!(
+        selected_popup
+            .lines()
+            .any(|line| line.contains('›') && line.contains("Beta")),
+        "expected Beta to be selected before opening details, got:\n{selected_popup}"
     );
+
+    while rx.try_recv().is_ok() {}
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    let plugin_display_name = match rx.try_recv() {
+        Ok(AppEvent::OpenPluginDetailLoading {
+            plugin_display_name,
+        }) => plugin_display_name,
+        other => panic!("expected OpenPluginDetailLoading event, got {other:?}"),
+    };
+    assert_eq!(plugin_display_name, "Beta");
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(AppEvent::FetchPluginDetail { .. })
+    ));
+
+    chat.open_plugin_detail_loading_popup(&plugin_display_name);
+    let mut beta_detail = plugins_test_detail(beta, Some("Beta plugin."), &[], &[], &[], &[]);
+    beta_detail.marketplace_name = workspace_marketplace.name;
+    beta_detail.marketplace_path = None;
+    chat.on_plugin_detail_loaded(
+        cwd.to_path_buf(),
+        Ok(PluginReadResponse {
+            plugin: beta_detail,
+        }),
+    );
+
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    let (event_cwd, response) = match rx.try_recv() {
+        Ok(AppEvent::OpenPluginsList { cwd, response }) => (cwd, response),
+        other => panic!("expected OpenPluginsList event, got {other:?}"),
+    };
+    chat.open_plugins_list(event_cwd, response);
     let reopened_popup = render_bottom_popup(&chat, /*width*/ 100);
     assert!(
-        reopened_popup.contains("Workspace.") && reopened_popup.contains("Buildkite"),
-        "expected Back to plugins to preserve the Workspace tab, got:\n{reopened_popup}"
+        reopened_popup.contains("Workspace.")
+            && reopened_popup
+                .lines()
+                .any(|line| line.contains('›') && line.contains("Beta")),
+        "expected Back to plugins to restore the Workspace tab and Beta row, got:\n{reopened_popup}"
     );
+    insta::assert_snapshot!(reopened_popup);
 }
 
 #[tokio::test]
