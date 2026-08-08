@@ -107,7 +107,7 @@ The underlying mechanism is a new experimental `turn/retract` app-server request
 - `flock` is best-effort where the filesystem rejects it (some Android f2fs kernels return `EOPNOTSUPP`): the installation-id lock is skipped, and the per-session PATH directory falls back to a `/proc`-based liveness record so stale-directory cleanup still works.
 - Shell detection prefers `$SHELL` over the `passwd` entry on Android, where Termux's shell is not in `/etc/passwd`.
 - OpenSSL is vendored for `aarch64-linux-android`.
-- Update checks parse full semver, so the fork's `X.Y.Z-<sha>` release versions compare correctly instead of being ignored.
+- Update checks parse full semver and rank the fork's `X.Y.Z-<sha>` snapshots after the matching `X.Y.Z` release. Ordinary prereleases, including `X.Y.Z-alpha.N-<sha>`, remain before the release.
 
 ## Building
 

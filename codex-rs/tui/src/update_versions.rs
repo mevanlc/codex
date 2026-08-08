@@ -1,10 +1,8 @@
+use codex_install_context::is_newer_version;
 use semver::Version;
 
 pub(crate) fn is_newer(latest: &str, current: &str) -> Option<bool> {
-    match (parse_version(latest), parse_version(current)) {
-        (Some(l), Some(c)) => Some(l > c),
-        _ => None,
-    }
+    is_newer_version(latest, current)
 }
 
 pub(crate) fn extract_version_from_latest_tag(latest_tag_name: &str) -> anyhow::Result<String> {
@@ -70,6 +68,7 @@ mod tests {
     fn prerelease_versions_with_git_hashes_are_supported() {
         assert_eq!(is_newer("0.123.1", "0.123.0-a1b2c3d"), Some(true));
         assert_eq!(is_newer("0.123.0-b1c2d3e", "0.123.0-a1b2c3d"), Some(true));
+        assert_eq!(is_newer("0.123.0", "0.123.0-a1b2c3d"), Some(false));
         assert_eq!(
             parse_version("v0.123.0-a1b2c3d").map(|v| v.to_string()),
             Some("0.123.0-a1b2c3d".to_string())

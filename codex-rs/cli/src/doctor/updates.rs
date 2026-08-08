@@ -11,6 +11,7 @@ use std::path::Path;
 use codex_core::config::Config;
 use codex_install_context::InstallContext;
 use codex_install_context::InstallMethod;
+use codex_install_context::is_newer_version;
 use serde::Deserialize;
 
 use super::CheckStatus;
@@ -88,7 +89,7 @@ pub(super) fn updates_check(config: &Config) -> DoctorCheck {
     match fetch_latest_version(&install_context) {
         Ok(latest_version) => {
             details.push(format!("latest version: {latest_version}"));
-            if is_newer(&latest_version, env!("CARGO_PKG_VERSION")) == Some(true) {
+            if is_newer_version(&latest_version, env!("CARGO_PKG_VERSION")) == Some(true) {
                 details.push("latest version status: newer version is available".to_string());
             } else {
                 details.push("latest version status: current version is not older".to_string());
@@ -181,21 +182,6 @@ where
     serde_json::from_str::<T>(&body).map_err(|err| err.to_string())
 }
 
-fn is_newer(latest: &str, current: &str) -> Option<bool> {
-    match (parse_version(latest), parse_version(current)) {
-        (Some(latest), Some(current)) => Some(latest > current),
-        (Some(_), None) | (None, Some(_)) | (None, None) => None,
-    }
-}
-
-fn parse_version(value: &str) -> Option<(u64, u64, u64)> {
-    let mut parts = value.trim().split('.');
-    let major = parts.next()?.parse::<u64>().ok()?;
-    let minor = parts.next()?.parse::<u64>().ok()?;
-    let patch = parts.next()?.parse::<u64>().ok()?;
-    Some((major, minor, patch))
-}
-
 #[derive(Deserialize)]
 struct VersionInfo {
     latest_version: String,
@@ -208,13 +194,6 @@ struct VersionInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn is_newer_compares_plain_semver() {
-        assert_eq!(is_newer("1.2.4", "1.2.3"), Some(true));
-        assert_eq!(is_newer("1.2.3", "1.2.4"), Some(false));
-        assert_eq!(is_newer("1.2.3-beta.1", "1.2.2"), None);
-    }
 
     #[test]
     fn update_action_labels_install_contexts() {
