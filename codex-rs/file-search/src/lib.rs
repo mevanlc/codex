@@ -4,13 +4,10 @@ use crossbeam_channel::after;
 use crossbeam_channel::never;
 use crossbeam_channel::select;
 use crossbeam_channel::unbounded;
-use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
 use nucleo::Config;
-use nucleo::Injector;
 use nucleo::Matcher;
 use nucleo::Nucleo;
-use nucleo::Utf32String;
 use nucleo::pattern::CaseMatching;
 use nucleo::pattern::Normalization;
 use serde::Serialize;
@@ -35,6 +32,7 @@ use nucleo::pattern::AtomKind;
 use nucleo::pattern::Pattern;
 
 mod cli;
+mod walker;
 
 pub use cli::Cli;
 
@@ -211,7 +209,7 @@ pub fn create_session(
     thread::spawn(move || matcher_worker(matcher_inner, work_rx, nucleo));
 
     let walker_inner = inner.clone();
-    thread::spawn(move || walker_worker(walker_inner, override_matcher, injector));
+    thread::spawn(move || walker::worker(walker_inner, override_matcher, injector));
 
     Ok(FileSearchSession { inner })
 }
@@ -400,100 +398,6 @@ fn get_file_path<'a>(path: &'a Path, search_directories: &[PathBuf]) -> Option<(
 
     let (root_idx, rel_path) = best_match?;
     rel_path.to_str().map(|p| (root_idx, p))
-}
-
-/// Walks the search directories and feeds discovered paths into `nucleo`
-/// via the injector.
-///
-/// The walker uses `require_git(true)` to match git's own ignore semantics:
-/// git never reads `.gitignore` files from directories above the repository
-/// root. Without this flag, the `ignore` crate reads `.gitignore` files from
-/// *all* ancestor directories—a deliberate divergence from git intended for
-/// non-git use cases—allowing a broad parent ignore (e.g. `~/.gitignore`
-/// containing `*`) to silently suppress every file in the walk.
-///
-/// When `respect_gitignore` is `false`, all git-related ignore processing is
-/// disabled regardless of this flag.
-fn walker_worker(
-    inner: Arc<SessionInner>,
-    override_matcher: Option<ignore::overrides::Override>,
-    injector: Injector<IndexedEntry>,
-) {
-    let Some(first_root) = inner.search_directories.first() else {
-        let _ = inner.work_tx.send(WorkSignal::WalkComplete);
-        return;
-    };
-
-    let mut walk_builder = WalkBuilder::new(first_root);
-    for root in inner.search_directories.iter().skip(1) {
-        walk_builder.add(root);
-    }
-    walk_builder
-        .threads(inner.threads)
-        // Allow hidden entries.
-        .hidden(false)
-        // Follow symlinks to search their contents.
-        .follow_links(true)
-        // Keep ignore behavior aligned with git repositories: only apply
-        // gitignore rules when a git context exists.
-        .require_git(true);
-    if !inner.respect_gitignore {
-        walk_builder
-            .git_ignore(false)
-            .git_global(false)
-            .git_exclude(false)
-            .ignore(false)
-            .parents(false);
-    }
-    if let Some(override_matcher) = override_matcher {
-        walk_builder.overrides(override_matcher);
-    }
-
-    let walker = walk_builder.build_parallel();
-
-    walker.run(|| {
-        const CHECK_INTERVAL: usize = 1024;
-        let mut n = 0;
-        let search_directories = inner.search_directories.clone();
-        let injector = injector.clone();
-        let cancelled = inner.cancelled.clone();
-        let shutdown = inner.shutdown.clone();
-
-        Box::new(move |entry| {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(_) => return ignore::WalkState::Continue,
-            };
-            let path = entry.path();
-            let Some(full_path) = path.to_str() else {
-                return ignore::WalkState::Continue;
-            };
-            if let Some((_, relative_path)) = get_file_path(path, &search_directories) {
-                let match_type = match entry.file_type() {
-                    Some(file_type) if file_type.is_dir() => MatchType::Directory,
-                    _ => MatchType::File,
-                };
-                injector.push(
-                    IndexedEntry {
-                        full_path: Arc::from(full_path),
-                        match_type,
-                    },
-                    |_, cols| {
-                        cols[0] = Utf32String::from(relative_path);
-                    },
-                );
-            }
-            n += 1;
-            if n >= CHECK_INTERVAL {
-                if cancelled.load(Ordering::Relaxed) || shutdown.load(Ordering::Relaxed) {
-                    return ignore::WalkState::Quit;
-                }
-                n = 0;
-            }
-            ignore::WalkState::Continue
-        })
-    });
-    let _ = inner.work_tx.send(WorkSignal::WalkComplete);
 }
 
 fn matcher_worker(
