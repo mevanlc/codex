@@ -4067,6 +4067,17 @@ impl ThreadRequestProcessor {
             ));
         }
         let source_thread_id = source_thread.thread_id;
+        if let Ok(live_source_thread) = self.thread_manager.get_thread(source_thread_id).await {
+            // Turn notifications can reach clients before a separate fork request observes the
+            // corresponding records through persisted history. Establish a durability barrier for
+            // loaded sources before resolving a named fork boundary.
+            live_source_thread.ensure_rollout_materialized().await;
+            live_source_thread.flush_rollout().await.map_err(|err| {
+                internal_error(format!(
+                    "failed to flush source thread {source_thread_id} before fork: {err}"
+                ))
+            })?;
+        }
         let source_thread_name = source_thread
             .name
             .as_deref()
