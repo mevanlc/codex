@@ -206,6 +206,7 @@ async fn user_turn_selects_symlinked_skill_by_advertised_discovery_path() -> Res
                 },
             ],
             client_id: Some("linked-skill-user-message".to_string()),
+            retractable: false,
         }])
         .await
         .map_err(|error| {
