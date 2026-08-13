@@ -2,8 +2,6 @@
 
 set -euo pipefail
 
-set -x
-
 usage() {
   cat <<'EOF'
 Usage: install-codex-from-gh.sh [--artifact|--release] [--force]
@@ -553,7 +551,7 @@ fi
 
 if [[ -n "$version" ]]; then
   # An explicit version is a deliberate pin, so the "is the installed copy newer?"
-  # test would be wrong here ΓÇö it would refuse every downgrade.
+  # test would be wrong here: it would refuse every downgrade.
   step "Explicit version requested; skipping mtime currency check"
 fi
 
@@ -591,4 +589,3 @@ if [[ -n "$code_mode_host_payload" ]]; then
 fi
 
 step "Installed version: $("$bin_path" --version)"
-
