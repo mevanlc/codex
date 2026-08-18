@@ -92,12 +92,14 @@ pub(crate) fn remap_cyan(color: Color, primary_accent: Option<Color>) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terminal_palette::indexed_color;
+    use crate::terminal_palette::rgb_color;
 
     #[test]
     fn parses_rgb_tuple() {
         assert_eq!(
             parse_primary_accent("1,2,3").expect("valid RGB tuple"),
-            Color::Rgb(1, 2, 3)
+            rgb_color((1, 2, 3))
         );
     }
 
@@ -105,7 +107,7 @@ mod tests {
     fn parses_hex() {
         assert_eq!(
             parse_primary_accent("#00AAFF").expect("valid hex"),
-            Color::Rgb(0, 170, 255)
+            rgb_color((0, 170, 255))
         );
     }
 
@@ -113,7 +115,7 @@ mod tests {
     fn parses_index() {
         assert_eq!(
             parse_primary_accent("14").expect("valid index"),
-            Color::Indexed(14)
+            indexed_color(14)
         );
     }
 

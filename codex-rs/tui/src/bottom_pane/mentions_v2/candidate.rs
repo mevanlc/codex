@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use codex_file_search::MatchType;
 use ratatui::style::Style;
 use ratatui::style::Styled;
 use ratatui::text::Span;
@@ -8,7 +9,10 @@ const TAG_WIDTH: usize = "Plugin".len();
 
 #[derive(Clone, Debug)]
 pub(crate) enum Selection {
-    File(PathBuf),
+    File {
+        path: PathBuf,
+        match_type: MatchType,
+    },
     Tool {
         insert_text: String,
         path: Option<String>,

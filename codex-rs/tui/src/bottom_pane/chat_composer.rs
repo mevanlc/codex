@@ -306,6 +306,7 @@ use codex_app_server_protocol::SkillInterface;
 use codex_app_server_protocol::SkillMetadata;
 use codex_connectors::AppInfo;
 use codex_file_search::FileMatch;
+use codex_file_search::MatchType;
 #[cfg(test)]
 use codex_plugin::AppConnectorId;
 use codex_plugin::PluginCapabilitySummary;
@@ -2114,7 +2115,7 @@ impl ChatComposer {
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                let Some(sel) = popup.selected_match() else {
+                let Some(sel) = popup.selected_match().cloned() else {
                     self.popups.active = ActivePopup::None;
                     return if key_event.code == KeyCode::Enter {
                         self.handle_key_event_without_popup(key_event)
@@ -2123,10 +2124,19 @@ impl ChatComposer {
                     };
                 };
 
-                let sel_path = sel.to_string_lossy().to_string();
+                let sel_path = sel.path.to_string_lossy();
                 if let Some((token_range, _)) =
                     self.current_editable_at_token_range_with_options(/*allow_empty*/ false)
                 {
+                    if key_event.code == KeyCode::Tab && sel.match_type == MatchType::Directory {
+                        self.continue_file_completion_in_directory(token_range, &sel_path);
+                        return (InputResult::None, true);
+                    }
+                    let sel_path = if sel.match_type == MatchType::Directory {
+                        Self::directory_path_with_trailing_slash(&sel_path)
+                    } else {
+                        sel_path.into_owned()
+                    };
                     self.insert_selected_file_path(token_range, &sel_path);
                 }
                 self.popups.active = ActivePopup::None;
@@ -2233,6 +2243,7 @@ impl ChatComposer {
 
         let mut selected: Option<MentionV2Selection> = None;
         let mut close_popup = false;
+        let mut continue_directory_completion = false;
         let mut submit_without_popup = false;
         let mut file_search_scope_change = None;
 
@@ -2298,7 +2309,16 @@ impl ChatComposer {
                 code: KeyCode::Tab, ..
             } => {
                 selected = popup.selected();
-                close_popup = true;
+                continue_directory_completion = selected.as_ref().is_some_and(|selection| {
+                    matches!(
+                        selection,
+                        MentionV2Selection::File {
+                            match_type: MatchType::Directory,
+                            ..
+                        }
+                    )
+                });
+                close_popup = !continue_directory_completion;
                 (InputResult::None, true)
             }
             KeyEvent {
@@ -2318,17 +2338,29 @@ impl ChatComposer {
             self.request_file_search_with_scope(query, scope);
         }
 
-        if close_popup {
-            let token_range = self
-                .current_editable_at_token_range_with_options(/*allow_empty*/ true)
-                .map(|(range, _)| range);
+        let token_range = self
+            .current_editable_at_token_range_with_options(/*allow_empty*/ true)
+            .map(|(range, _)| range);
+        if continue_directory_completion {
+            if let (Some(MentionV2Selection::File { path, .. }), Some(token_range)) =
+                (selected.as_ref(), token_range)
+            {
+                self.continue_file_completion_in_directory(
+                    token_range,
+                    path.to_string_lossy().as_ref(),
+                );
+            }
+        } else if close_popup {
             if let (Some(selected), Some(token_range)) = (selected, token_range) {
                 match selected {
-                    MentionV2Selection::File(path) => {
-                        self.insert_selected_file_path(
-                            token_range,
-                            path.to_string_lossy().as_ref(),
-                        );
+                    MentionV2Selection::File { path, match_type } => {
+                        let path = path.to_string_lossy();
+                        let path = if match_type == MatchType::Directory {
+                            Self::directory_path_with_trailing_slash(&path)
+                        } else {
+                            path.into_owned()
+                        };
+                        self.insert_selected_file_path(token_range, &path);
                     }
                     MentionV2Selection::Tool { insert_text, path } => {
                         self.insert_selected_mention(token_range, &insert_text, path.as_deref());
@@ -2454,6 +2486,30 @@ impl ChatComposer {
         } else {
             self.insert_selected_path(token_range, selected_path);
         }
+    }
+
+    fn directory_path_with_trailing_slash(path: &str) -> String {
+        if path.ends_with('/') {
+            path.to_string()
+        } else {
+            format!("{path}/")
+        }
+    }
+
+    /// Inserts an intermediate directory while retaining the `@` search sigil and active token.
+    fn continue_file_completion_in_directory(
+        &mut self,
+        token_range: Range<usize>,
+        selected_path: &str,
+    ) {
+        let token_range = self.separate_completion_from_adjacent_element(token_range);
+        let selected_path = Self::directory_path_with_trailing_slash(selected_path);
+        let inserted = format!("@{selected_path}");
+        let start_idx = token_range.start;
+        self.draft.textarea.replace_range(token_range, &inserted);
+        self.draft
+            .textarea
+            .set_cursor(start_idx.saturating_add(inserted.len()));
     }
 
     fn trim_text_elements(
@@ -7672,6 +7728,31 @@ mod tests {
     }
 
     #[test]
+    fn directory_tab_continues_explicit_path_completion_snapshot() {
+        snapshot_composer_state(
+            "directory_tab_continues_explicit_path_completion",
+            /*enhanced_keys_supported*/ false,
+            |composer| {
+                composer.set_mentions_v2_enabled(/*enabled*/ true);
+                composer.set_file_mentions_allow_explicit_paths(/*allow_explicit_paths*/ true);
+                composer.set_text_content("@/Appli".to_string(), Vec::new(), Vec::new());
+                composer.on_file_search_result(
+                    "/Appli".to_string(),
+                    FileSearchScope::Standard,
+                    vec![FileMatch {
+                        score: 42,
+                        path: PathBuf::from("/Applications"),
+                        match_type: MatchType::Directory,
+                        root: PathBuf::from("/"),
+                        indices: None,
+                    }],
+                );
+                let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+            },
+        );
+    }
+
+    #[test]
     fn filesystem_all_home_directory_popup_snapshot() {
         snapshot_composer_state(
             "filesystem_all_home_directory_popup",
@@ -7775,7 +7856,7 @@ mod tests {
         };
         assert!(matches!(
             popup.selected(),
-            Some(MentionV2Selection::File(path))
+            Some(MentionV2Selection::File { path, .. })
                 if path.as_path() == Path::new("ignored/.hidden-needle")
         ));
 
@@ -7828,7 +7909,7 @@ mod tests {
         };
         assert!(matches!(
             popup.selected(),
-            Some(MentionV2Selection::File(path))
+            Some(MentionV2Selection::File { path, .. })
                 if path.as_path() == Path::new("standard-needle")
         ));
     }
@@ -10650,6 +10731,25 @@ mod tests {
         query: &str,
         selected_path: PathBuf,
     ) {
+        show_file_completion(
+            composer,
+            text,
+            cursor,
+            query,
+            selected_path,
+            MatchType::File,
+        );
+        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    }
+
+    fn show_file_completion(
+        composer: &mut ChatComposer,
+        text: &str,
+        cursor: usize,
+        query: &str,
+        selected_path: PathBuf,
+        match_type: MatchType,
+    ) {
         composer.set_text_content(text.to_string(), Vec::new(), Vec::new());
         composer.draft.textarea.set_cursor(cursor);
         composer.sync_popups();
@@ -10664,12 +10764,11 @@ mod tests {
             vec![FileMatch {
                 score: 1,
                 path: selected_path,
-                match_type: codex_file_search::MatchType::File,
+                match_type,
                 root,
                 indices: None,
             }],
         );
-        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
     }
 
     #[test]
@@ -10709,6 +10808,90 @@ mod tests {
                 text_elements: Vec::new(),
             }
         );
+    }
+
+    #[test]
+    fn tab_on_directory_continues_unified_explicit_path_completion() {
+        let (mut composer, mut rx) = new_test_composer();
+        composer.set_mentions_v2_enabled(/*enabled*/ true);
+        composer.set_file_mentions_allow_explicit_paths(/*allow_explicit_paths*/ true);
+        show_file_completion(
+            &mut composer,
+            "@/Appli",
+            /*cursor*/ "@/Appli".len(),
+            "/Appli",
+            PathBuf::from("/Applications"),
+            MatchType::Directory,
+        );
+
+        let _ = std::iter::from_fn(|| rx.try_recv().ok()).count();
+        let (result, _needs_redraw) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+
+        assert_eq!(result, InputResult::None);
+        assert_eq!(composer.current_text(), "@/Applications/");
+        assert!(matches!(composer.popups.active, ActivePopup::MentionV2(_)));
+        let requests = std::iter::from_fn(|| rx.try_recv().ok())
+            .filter_map(|event| match event {
+                AppEvent::StartFileSearch(request) => Some(request),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            requests.last(),
+            Some(&FileSearchRequest {
+                query: "/Applications/".to_string(),
+                allow_explicit_paths: true,
+                scope: FileSearchScope::Standard,
+            })
+        );
+    }
+
+    #[test]
+    fn tab_on_directory_continues_legacy_explicit_path_completion() {
+        let (mut composer, _rx) = new_test_composer();
+        composer.set_mentions_v2_enabled(/*enabled*/ false);
+        composer.set_file_mentions_allow_explicit_paths(/*allow_explicit_paths*/ true);
+        show_file_completion(
+            &mut composer,
+            "@/Appli",
+            /*cursor*/ "@/Appli".len(),
+            "/Appli",
+            PathBuf::from("/Applications"),
+            MatchType::Directory,
+        );
+
+        let (result, _needs_redraw) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+
+        assert_eq!(result, InputResult::None);
+        assert_eq!(composer.current_text(), "@/Applications/");
+        assert!(matches!(composer.popups.active, ActivePopup::File(_)));
+    }
+
+    #[test]
+    fn enter_on_directory_finishes_with_trailing_slash_and_honors_preserve_at() {
+        for (preserve_at, expected) in [(false, "/Applications/ "), (true, "@/Applications/ ")] {
+            let (mut composer, _rx) = new_test_composer();
+            composer.set_mentions_v2_enabled(/*enabled*/ true);
+            composer.set_file_mentions_preserve_at(preserve_at);
+            composer.set_file_mentions_allow_explicit_paths(/*allow_explicit_paths*/ true);
+            show_file_completion(
+                &mut composer,
+                "@/Appli",
+                /*cursor*/ "@/Appli".len(),
+                "/Appli",
+                PathBuf::from("/Applications"),
+                MatchType::Directory,
+            );
+
+            let (result, _needs_redraw) =
+                composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+            assert_eq!(result, InputResult::None);
+            assert_eq!(composer.current_text(), expected);
+            assert!(matches!(composer.popups.active, ActivePopup::None));
+        }
     }
 
     #[test]

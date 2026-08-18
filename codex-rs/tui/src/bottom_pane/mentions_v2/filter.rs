@@ -97,7 +97,10 @@ fn file_match_to_row(file_match: &FileMatch) -> SearchResult {
         display_name: file_match.path.to_string_lossy().to_string(),
         description: None,
         mention_type,
-        selection: Selection::File(file_match.path.clone()),
+        selection: Selection::File {
+            path: file_match.path.clone(),
+            match_type: file_match.match_type,
+        },
         match_indices: file_match
             .indices
             .as_ref()

@@ -296,7 +296,6 @@ impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
                 self.terminal_focused.store(false, Ordering::Relaxed);
                 None
             }
-            _ => None,
         }
     }
 }
@@ -546,35 +545,37 @@ mod tests {
         let (broker, handle, _draw_tx, draw_rx, terminal_focused) = setup();
         let mut stream = make_stream(broker, draw_rx, terminal_focused);
 
-        handle.send(Ok(Event::Mouse(MouseEvent::new(
-            MouseEventKind::ScrollUp,
-            1,
-            1,
-            KeyModifiers::NONE,
-        ))));
-        handle.send(Ok(Event::Mouse(MouseEvent::new(
-            MouseEventKind::ScrollDown,
-            1,
-            1,
-            KeyModifiers::NONE,
-        ))));
+        handle.send(Ok(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 1,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        })));
+        handle.send(Ok(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 1,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        })));
 
         let first = stream.next().await;
         let second = stream.next().await;
 
         assert!(matches!(
             first,
-            Some(TuiEvent::Key(KeyEvent::new(
-                KeyCode::Up,
-                KeyModifiers::NONE
-            )))
+            Some(TuiEvent::Key(KeyEvent {
+                code: KeyCode::Up,
+                modifiers: KeyModifiers::NONE,
+                ..
+            }))
         ));
         assert!(matches!(
             second,
-            Some(TuiEvent::Key(KeyEvent::new(
-                KeyCode::Down,
-                KeyModifiers::NONE
-            )))
+            Some(TuiEvent::Key(KeyEvent {
+                code: KeyCode::Down,
+                modifiers: KeyModifiers::NONE,
+                ..
+            }))
         ));
     }
 

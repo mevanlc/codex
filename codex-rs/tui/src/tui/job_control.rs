@@ -189,7 +189,7 @@ impl PreparedResumeAction {
             }
             PreparedResumeAction::RestoreAltScreen => {
                 execute!(terminal.backend_mut(), EnterAlternateScreen)?;
-                let _ = execute!(terminal.backend_mut(), EnableMouseCapture)?;
+                execute!(terminal.backend_mut(), EnableMouseCapture)?;
                 // Enable "alternate scroll" so terminals may translate wheel to arrows
                 execute!(terminal.backend_mut(), EnableAlternateScroll)?;
                 terminal.set_viewport_area(Rect::from(screen_size));
