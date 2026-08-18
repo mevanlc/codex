@@ -3,7 +3,6 @@ use std::io;
 
 use codex_protocol::protocol::HistoryPosition;
 use codex_protocol::protocol::RolloutItem;
-use codex_protocol::protocol::RolloutLine;
 use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_rollout::ModelContextScan;
@@ -135,7 +134,7 @@ fn scan_model_context_from_lineage_blocking(
             Some(end_byte_offset) => ReverseJsonlScanner::new_at(file, end_byte_offset)?,
             None => ReverseJsonlScanner::new(file)?,
         };
-        while let Some(outcome) = scanner.scan_next::<RolloutLine>()? {
+        while let Some(outcome) = scanner.scan_next_rollout_line()? {
             let ScanOutcome::Parsed(line) = outcome else {
                 continue;
             };

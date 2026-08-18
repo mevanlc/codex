@@ -23,9 +23,9 @@ pub(super) fn parse_legacy_rollout_line(bytes: &[u8]) -> Result<Option<RolloutLi
         return Ok(None);
     }
 
-    // Deserializing through Value is intentional. Some historical numeric
-    // payloads fail serde_json's streaming enum path but deserialize correctly
-    // once their tagged object shape has been materialized.
+    // Deserializing through Value and the shared rollout-envelope decoder is
+    // intentional. Some historical numeric payloads cannot survive Serde's
+    // generic buffering for flattened and internally tagged fields.
     let mut value = serde_json::from_slice::<Value>(bytes).map_err(|error| error.to_string())?;
     if should_skip_retired_record(&value) {
         return Ok(None);
@@ -35,7 +35,7 @@ pub(super) fn parse_legacy_rollout_line(bytes: &[u8]) -> Result<Option<RolloutLi
     normalize_legacy_rate_limit_resets(&mut value);
     normalize_legacy_review_entry(&mut value);
     normalize_legacy_command_cwd(&mut value)?;
-    serde_json::from_value(value)
+    codex_rollout::decode_rollout_line(value)
         .map(Some)
         .map_err(|error| error.to_string())
 }

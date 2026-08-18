@@ -85,6 +85,8 @@ use codex_protocol::protocol::ImageGenerationEndEvent;
 use codex_protocol::protocol::McpInvocation;
 use codex_protocol::protocol::McpToolCallEndEvent;
 use codex_protocol::protocol::MultiAgentVersion;
+use codex_protocol::protocol::RateLimitSnapshot;
+use codex_protocol::protocol::RateLimitWindow;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::SessionMeta;
 use codex_protocol::protocol::SessionMetaLine;
@@ -2520,7 +2522,21 @@ async fn cold_paginated_resume_restores_usage_without_loading_turns() -> Result<
                 },
                 model_context_window: Some(200_000),
             }),
-            rate_limits: None,
+            rate_limits: Some(RateLimitSnapshot {
+                limit_id: Some("codex".to_string()),
+                limit_name: None,
+                primary: Some(RateLimitWindow {
+                    used_percent: 9.0,
+                    window_minutes: Some(10_080),
+                    resets_at: Some(1_800_000_000),
+                }),
+                secondary: None,
+                credits: None,
+                individual_limit: None,
+                spend_control_reached: None,
+                plan_type: None,
+                rate_limit_reached_type: None,
+            }),
         })),
     )
     .await?;
