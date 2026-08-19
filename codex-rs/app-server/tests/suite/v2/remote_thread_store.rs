@@ -100,6 +100,7 @@ async fn thread_section_operations_without_sqlite_return_method_not_found() -> R
             request_id: RequestId::Integer(2),
             params: ThreadSectionCreateParams {
                 name: "Work".to_string(),
+                appearance: None,
             },
         },
         ClientRequest::ThreadSectionUpdate {
@@ -107,6 +108,7 @@ async fn thread_section_operations_without_sqlite_return_method_not_found() -> R
             params: ThreadSectionUpdateParams {
                 section_id: section_id.clone(),
                 name: "Projects".to_string(),
+                appearance: None,
             },
         },
         ClientRequest::ThreadSectionDelete {
@@ -117,6 +119,7 @@ async fn thread_section_operations_without_sqlite_return_method_not_found() -> R
             request_id: RequestId::Integer(5),
             params: ThreadSectionCreateParams {
                 name: " ".to_string(),
+                appearance: None,
             },
         },
         ClientRequest::ThreadSectionUpdate {
@@ -124,6 +127,7 @@ async fn thread_section_operations_without_sqlite_return_method_not_found() -> R
             params: ThreadSectionUpdateParams {
                 section_id: " ".to_string(),
                 name: "Work".to_string(),
+                appearance: None,
             },
         },
         ClientRequest::ThreadSectionUpdate {
@@ -131,6 +135,7 @@ async fn thread_section_operations_without_sqlite_return_method_not_found() -> R
             params: ThreadSectionUpdateParams {
                 section_id: PINNED_THREAD_SECTION_ID.to_string(),
                 name: "Pinned again".to_string(),
+                appearance: None,
             },
         },
         ClientRequest::ThreadSectionDelete {
@@ -150,6 +155,7 @@ async fn thread_section_operations_without_sqlite_return_method_not_found() -> R
             params: ThreadSectionUpdateParams {
                 section_id: PINNED_THREAD_SECTION_ID.to_string(),
                 name: " ".to_string(),
+                appearance: None,
             },
         },
     ] {

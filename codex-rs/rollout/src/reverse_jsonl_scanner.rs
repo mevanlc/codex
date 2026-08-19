@@ -3,7 +3,7 @@ use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
 
-use codex_protocol::protocol::RolloutLine;
+use crate::RolloutLine;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
@@ -25,6 +25,8 @@ pub struct ReverseJsonlScanner<R> {
     chunk_position: usize,
     chunk: Vec<u8>,
     record_reversed: Vec<u8>,
+    max_record_bytes: Option<usize>,
+    discarding_oversized_record: bool,
 }
 
 impl<R> ReverseJsonlScanner<R>
@@ -54,7 +56,15 @@ where
             chunk_position: 0,
             chunk: vec![0; READ_CHUNK_SIZE],
             record_reversed: Vec::new(),
+            max_record_bytes: None,
+            discarding_oversized_record: false,
         })
+    }
+
+    /// Skips records larger than the configured limit without buffering or parsing them.
+    pub fn with_max_record_bytes(mut self, max_record_bytes: usize) -> Self {
+        self.max_record_bytes = Some(max_record_bytes);
+        self
     }
 
     /// Scans the next nonblank record.
@@ -83,6 +93,10 @@ where
         loop {
             if self.chunk_position == 0 {
                 if self.next_chunk_end == 0 {
+                    if self.discarding_oversized_record {
+                        self.discarding_oversized_record = false;
+                        return Ok(None);
+                    }
                     return Ok(self.finish_record(&deserialize));
                 }
 
@@ -96,14 +110,36 @@ where
 
             let chunk = &self.chunk[..self.chunk_position];
             if let Some(newline_position) = chunk.iter().rposition(|byte| *byte == b'\n') {
-                self.record_reversed
-                    .extend(chunk[newline_position + 1..].iter().rev().copied());
+                let fragment = &chunk[newline_position + 1..];
+                if !self.discarding_oversized_record {
+                    if self.max_record_bytes.is_some_and(|max_record_bytes| {
+                        self.record_reversed.len().saturating_add(fragment.len()) > max_record_bytes
+                    }) {
+                        self.record_reversed.clear();
+                        self.discarding_oversized_record = true;
+                    } else {
+                        self.record_reversed.extend(fragment.iter().rev().copied());
+                    }
+                }
                 self.chunk_position = newline_position;
+                if self.discarding_oversized_record {
+                    self.discarding_oversized_record = false;
+                    continue;
+                }
                 if let Some(outcome) = self.finish_record(&deserialize) {
                     return Ok(Some(outcome));
                 }
             } else {
-                self.record_reversed.extend(chunk.iter().rev().copied());
+                if !self.discarding_oversized_record {
+                    if self.max_record_bytes.is_some_and(|max_record_bytes| {
+                        self.record_reversed.len().saturating_add(chunk.len()) > max_record_bytes
+                    }) {
+                        self.record_reversed.clear();
+                        self.discarding_oversized_record = true;
+                    } else {
+                        self.record_reversed.extend(chunk.iter().rev().copied());
+                    }
+                }
                 self.chunk_position = 0;
             }
         }

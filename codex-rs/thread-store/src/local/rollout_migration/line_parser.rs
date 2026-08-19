@@ -9,7 +9,7 @@
 //! into paginated history.
 
 use chrono::DateTime;
-use codex_protocol::protocol::RolloutLine;
+use codex_rollout::RolloutLine;
 use codex_utils_path_uri::LegacyAppPathString;
 use codex_utils_path_uri::PathUri;
 use serde_json::Map;
@@ -26,7 +26,11 @@ pub(super) fn parse_legacy_rollout_line(bytes: &[u8]) -> Result<Option<RolloutLi
     // Deserializing through Value and the shared rollout-envelope decoder is
     // intentional. Some historical numeric payloads cannot survive Serde's
     // generic buffering for flattened and internally tagged fields.
-    let mut value = serde_json::from_slice::<Value>(bytes).map_err(|error| error.to_string())?;
+    let value = serde_json::from_slice::<Value>(bytes).map_err(|error| error.to_string())?;
+    parse_legacy_rollout_value(value)
+}
+
+pub(super) fn parse_legacy_rollout_value(mut value: Value) -> Result<Option<RolloutLine>, String> {
     if should_skip_retired_record(&value) {
         return Ok(None);
     }
