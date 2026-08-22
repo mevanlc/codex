@@ -1,0 +1,13 @@
+---
+source: tui/src/bottom_pane/chat_composer.rs
+expression: terminal.backend()
+---
+"                                                                                                    "
+"› @~/.json                                                                                          "
+"                                                                                                    "
+"                                                                                                    "
+"> a-direct.json  ~/                                                                           File  "
+"  z-direct.json  ~/                                                                           File  "
+"  nested.json    ~/.config/                                                                   File  "
+"                                                                                                    "
+"  enter insert · esc close · ←/→ modes    [All Results]   Filesystem    Filesystem (All)    Plugins "

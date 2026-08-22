@@ -76,7 +76,11 @@ fn sort_rows(rows: &mut [SearchResult], filter: &str) {
 
 fn compare_within_rank(a: &SearchResult, b: &SearchResult, filter: &str) -> std::cmp::Ordering {
     if a.mention_type.is_filesystem() && b.mention_type.is_filesystem() {
-        return b.score.cmp(&a.score);
+        let mut compare = codex_file_search::cmp_by_score_desc_then_path_asc::<SearchResult, _, _>(
+            |row| row.score as u32,
+            |row| row.display_name.as_str(),
+        );
+        return compare(a, b);
     }
     if filter.is_empty() {
         return a.display_name.cmp(&b.display_name);
@@ -108,3 +112,7 @@ fn file_match_to_row(file_match: &FileMatch) -> SearchResult {
         score: file_match.score as i32,
     }
 }
+
+#[cfg(test)]
+#[path = "filter_tests.rs"]
+mod tests;

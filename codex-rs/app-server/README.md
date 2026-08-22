@@ -1434,6 +1434,8 @@ The fuzzy file search session API emits per-query notifications:
 - `fuzzyFileSearch/sessionUpdated` — `{ sessionId, query, files }` with the current matching files for the active query.
 - `fuzzyFileSearch/sessionCompleted` — `{ sessionId, query }` once indexing/matching for that query has completed.
 
+Results are ordered by descending fuzzy-match score, then by ascending path depth relative to the supplied root, and finally by path.
+
 ### Thread realtime events (experimental)
 
 The thread realtime API emits thread-scoped notifications for session lifecycle and streaming media:

@@ -27,6 +27,7 @@ enum FileExpectation {
     Any,
     Empty,
     NonEmpty,
+    Count(usize),
 }
 
 fn create_config_toml(codex_home: &Path) -> std::io::Result<()> {
@@ -78,6 +79,7 @@ async fn wait_for_session_updated(
                 FileExpectation::Any => true,
                 FileExpectation::Empty => payload.files.is_empty(),
                 FileExpectation::NonEmpty => !payload.files.is_empty(),
+                FileExpectation::Count(count) => payload.files.len() == count,
             };
             payload.session_id == session_id && payload.query == query && files_match
         }),
@@ -300,6 +302,61 @@ async fn test_fuzzy_file_search_sorts_and_includes_indices() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_fuzzy_file_search_prefers_shallow_equal_score_matches() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path())?;
+    let root = TempDir::new()?;
+    std::fs::create_dir(root.path().join("a"))?;
+    std::fs::write(root.path().join("a/x.json"), "nested")?;
+    std::fs::write(root.path().join("very-long-root-file.json"), "direct")?;
+
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .without_auto_env()
+        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+        .await?;
+    let root_path = root.path().to_string_lossy().to_string();
+    let request_id = mcp
+        .send_fuzzy_file_search_request(
+            ".json",
+            vec![root_path.clone()],
+            /*cancellation_token*/ None,
+        )
+        .await?;
+    let response = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+
+    assert_eq!(
+        response.result,
+        json!({
+            "files": [
+                {
+                    "root": root_path.clone(),
+                    "path": "very-long-root-file.json",
+                    "match_type": "file",
+                    "file_name": "very-long-root-file.json",
+                    "score": 128,
+                    "indices": [19, 20, 21, 22, 23],
+                },
+                {
+                    "root": root_path,
+                    "path": "a/x.json",
+                    "match_type": "file",
+                    "file_name": "x.json",
+                    "score": 128,
+                    "indices": [3, 4, 5, 6, 7],
+                },
+            ]
+        })
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_fuzzy_file_search_accepts_cancellation_token() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path())?;
@@ -374,6 +431,51 @@ async fn test_fuzzy_file_search_session_streams_updates() -> Result<()> {
     let completed = wait_for_session_completed(&mut mcp, session_id).await?;
     assert_eq!(completed.session_id, session_id);
 
+    mcp.stop_fuzzy_file_search_session(session_id).await?;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_fuzzy_file_search_session_prefers_shallow_equal_score_matches() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let root = TempDir::new()?;
+    std::fs::create_dir(root.path().join("a"))?;
+    std::fs::write(root.path().join("a/x.json"), "nested")?;
+    std::fs::write(root.path().join("very-long-root-file.json"), "direct")?;
+    let mut mcp = initialized_mcp(&codex_home).await?;
+
+    let root_path = root.path().to_string_lossy().to_string();
+    let session_id = "session-depth-ranking";
+    mcp.start_fuzzy_file_search_session(session_id, vec![root_path.clone()])
+        .await?;
+    mcp.update_fuzzy_file_search_session(session_id, ".json")
+        .await?;
+
+    let payload =
+        wait_for_session_updated(&mut mcp, session_id, ".json", FileExpectation::Count(2)).await?;
+    assert_eq!(
+        serde_json::to_value(payload.files)?,
+        json!([
+            {
+                "root": root_path.clone(),
+                "path": "very-long-root-file.json",
+                "match_type": "file",
+                "file_name": "very-long-root-file.json",
+                "score": 128,
+                "indices": [19, 20, 21, 22, 23],
+            },
+            {
+                "root": root_path,
+                "path": "a/x.json",
+                "match_type": "file",
+                "file_name": "x.json",
+                "score": 128,
+                "indices": [3, 4, 5, 6, 7],
+            },
+        ])
+    );
+    wait_for_session_completed(&mut mcp, session_id).await?;
     mcp.stop_fuzzy_file_search_session(session_id).await?;
 
     Ok(())

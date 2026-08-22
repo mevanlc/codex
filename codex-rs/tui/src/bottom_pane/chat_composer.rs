@@ -7819,6 +7819,47 @@ mod tests {
     }
 
     #[test]
+    fn home_json_file_popup_prioritizes_immediate_children_snapshot() {
+        snapshot_composer_state(
+            "home_json_file_popup_prioritizes_immediate_children",
+            /*enhanced_keys_supported*/ false,
+            |composer| {
+                composer.set_mentions_v2_enabled(/*enabled*/ true);
+                composer.set_file_mentions_allow_explicit_paths(/*allow_explicit_paths*/ true);
+                let query = "~/.json";
+                composer.set_text_content(format!("@{query}"), Vec::new(), Vec::new());
+                composer.on_file_search_result(
+                    query.to_string(),
+                    FileSearchScope::Standard,
+                    vec![
+                        FileMatch {
+                            score: 128,
+                            path: PathBuf::from("~/.config/nested.json"),
+                            match_type: MatchType::File,
+                            root: PathBuf::from("/workspace/project"),
+                            indices: None,
+                        },
+                        FileMatch {
+                            score: 128,
+                            path: PathBuf::from("~/z-direct.json"),
+                            match_type: MatchType::File,
+                            root: PathBuf::from("/workspace/project"),
+                            indices: None,
+                        },
+                        FileMatch {
+                            score: 128,
+                            path: PathBuf::from("~/a-direct.json"),
+                            match_type: MatchType::File,
+                            root: PathBuf::from("/workspace/project"),
+                            indices: None,
+                        },
+                    ],
+                );
+            },
+        );
+    }
+
+    #[test]
     fn filesystem_all_results_do_not_leak_into_standard_search_modes() {
         let (mut composer, mut rx) = new_test_composer();
         composer.set_mentions_v2_enabled(/*enabled*/ true);

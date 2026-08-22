@@ -310,7 +310,7 @@ pub fn run(
     })
 }
 
-/// Sort matches in-place by descending score, then ascending path.
+/// Sort matches in-place by descending score, ascending path depth, then ascending path.
 #[cfg(test)]
 fn sort_matches(matches: &mut [(u32, String)]) {
     matches.sort_by(cmp_by_score_desc_then_path_asc::<(u32, String), _, _>(
@@ -320,7 +320,8 @@ fn sort_matches(matches: &mut [(u32, String)]) {
 }
 
 /// Returns a comparator closure suitable for `slice.sort_by(...)` that orders
-/// items by descending score and then ascending path using the provided accessors.
+/// items by descending score, ascending path depth, and then ascending path
+/// using the provided accessors.
 pub fn cmp_by_score_desc_then_path_asc<T, FScore, FPath>(
     score_of: FScore,
     path_of: FPath,
@@ -331,9 +332,19 @@ where
 {
     use std::cmp::Ordering;
     move |a, b| match score_of(b).cmp(&score_of(a)) {
-        Ordering::Equal => path_of(a).cmp(path_of(b)),
+        Ordering::Equal => {
+            cmp_paths_by_depth_then_lexical(Path::new(path_of(a)), Path::new(path_of(b)))
+        }
         other => other,
     }
+}
+
+/// Orders paths by component count and then lexically.
+fn cmp_paths_by_depth_then_lexical(left: &Path, right: &Path) -> std::cmp::Ordering {
+    left.components()
+        .count()
+        .cmp(&right.components().count())
+        .then_with(|| left.cmp(right))
 }
 
 #[cfg(test)]
@@ -356,6 +367,60 @@ struct SessionInner {
     shutdown: Arc<AtomicBool>,
     reporter: Arc<dyn SessionReporter>,
     work_tx: Sender<WorkSignal>,
+}
+
+struct RankedMatch<'a> {
+    match_: nucleo::Match,
+    root_idx: usize,
+    relative_path: &'a str,
+}
+
+fn ranked_snapshot_matches<'a>(
+    snapshot: &'a nucleo::Snapshot<IndexedEntry>,
+    search_directories: &[PathBuf],
+    limit: usize,
+) -> Vec<RankedMatch<'a>> {
+    let mut ranked = Vec::with_capacity(limit);
+    let matches = snapshot.matches();
+    let mut group_start = 0;
+
+    while ranked.len() < limit && group_start < matches.len() {
+        let score = matches[group_start].score;
+        let group_end = matches[group_start..]
+            .iter()
+            .position(|match_| match_.score != score)
+            .map_or(matches.len(), |offset| group_start + offset);
+        let remaining = limit - ranked.len();
+        let mut group = matches[group_start..group_end]
+            .iter()
+            .filter_map(|match_| {
+                let item = snapshot.get_item(match_.idx)?;
+                let full_path = item.data.full_path.as_ref();
+                let (root_idx, relative_path) =
+                    get_file_path(Path::new(full_path), search_directories)?;
+                Some(RankedMatch {
+                    match_: *match_,
+                    root_idx,
+                    relative_path,
+                })
+            })
+            .collect::<Vec<_>>();
+        let compare_paths = |left: &RankedMatch<'_>, right: &RankedMatch<'_>| {
+            cmp_paths_by_depth_then_lexical(
+                Path::new(left.relative_path),
+                Path::new(right.relative_path),
+            )
+        };
+        if group.len() > remaining {
+            group.select_nth_unstable_by(remaining, compare_paths);
+            group.truncate(remaining);
+        }
+        group.sort_by(compare_paths);
+        ranked.extend(group);
+        group_start = group_end;
+    }
+
+    ranked
 }
 
 enum WorkSignal {
@@ -461,14 +526,14 @@ fn matcher_worker(
                     let snapshot = nucleo.snapshot();
                     let limit = inner.limit.min(snapshot.matched_item_count() as usize);
                     let pattern = snapshot.pattern().column_pattern(0);
-                    let matches: Vec<_> = snapshot
-                        .matches()
-                        .iter()
-                        .take(limit)
-                        .filter_map(|match_| {
-                            let item = snapshot.get_item(match_.idx)?;
-                            let full_path = item.data.full_path.as_ref();
-                            let (root_idx, relative_path) = get_file_path(Path::new(full_path), &inner.search_directories)?;
+                    let matches: Vec<_> = ranked_snapshot_matches(
+                        snapshot,
+                        &inner.search_directories,
+                        limit,
+                    )
+                        .into_iter()
+                        .filter_map(|ranked_match| {
+                            let item = snapshot.get_item(ranked_match.match_.idx)?;
                             let indices = if let Some(indices_matcher) = indices_matcher.as_mut() {
                                 let mut idx_vec = Vec::<u32>::new();
                                 let haystack = item.matcher_columns[0].slice(..);
@@ -480,10 +545,10 @@ fn matcher_worker(
                                 None
                             };
                             Some(FileMatch {
-                                score: match_.score,
-                                path: PathBuf::from(relative_path),
+                                score: ranked_match.match_.score,
+                                path: PathBuf::from(ranked_match.relative_path),
                                 match_type: item.data.match_type,
-                                root: inner.search_directories[root_idx].clone(),
+                                root: inner.search_directories[ranked_match.root_idx].clone(),
                                 indices,
                             })
                         })
@@ -585,20 +650,21 @@ mod tests {
     }
 
     #[test]
-    fn tie_breakers_sort_by_path_when_scores_equal() {
+    fn tie_breakers_sort_by_depth_then_path_when_scores_equal() {
         let mut matches = vec![
-            (100, "b_path".to_string()),
-            (100, "a_path".to_string()),
-            (90, "zzz".to_string()),
+            (100, "a/nested".to_string()),
+            (100, "z_direct".to_string()),
+            (100, "a_direct".to_string()),
+            (90, "higher/path/score_wins".to_string()),
         ];
 
         sort_matches(&mut matches);
 
-        // Highest score first; ties broken alphabetically.
         let expected = vec![
-            (100, "a_path".to_string()),
-            (100, "b_path".to_string()),
-            (90, "zzz".to_string()),
+            (100, "a_direct".to_string()),
+            (100, "z_direct".to_string()),
+            (100, "a/nested".to_string()),
+            (90, "higher/path/score_wins".to_string()),
         ];
 
         assert_eq!(matches, expected);
@@ -926,6 +992,68 @@ mod tests {
             m.path == std::path::Path::new("docs").join("guides")
                 && m.match_type == MatchType::Directory
         }));
+    }
+
+    #[test]
+    fn run_applies_depth_tie_break_before_limiting_results() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("a")).unwrap();
+        fs::write(root.path().join("a/x.json"), "nested").unwrap();
+        fs::write(root.path().join("very-long-root-file.json"), "direct").unwrap();
+
+        let results = run(
+            ".json",
+            vec![root.path().to_path_buf()],
+            FileSearchOptions {
+                limit: NonZero::new(1).unwrap(),
+                ..Default::default()
+            },
+            /*cancel_flag*/ None,
+        )
+        .expect("run ok");
+
+        assert_eq!(
+            results.matches,
+            vec![FileMatch {
+                score: 128,
+                path: PathBuf::from("very-long-root-file.json"),
+                match_type: MatchType::File,
+                root: root.path().to_path_buf(),
+                indices: None,
+            }]
+        );
+        assert_eq!(results.total_match_count, 2);
+    }
+
+    #[test]
+    fn run_keeps_fuzzy_score_ahead_of_path_depth() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("sub")).unwrap();
+        fs::write(root.path().join("abcde"), "direct").unwrap();
+        fs::write(root.path().join("sub/abce"), "nested").unwrap();
+
+        let results = run(
+            "abe",
+            vec![root.path().to_path_buf()],
+            FileSearchOptions {
+                limit: NonZero::new(1).unwrap(),
+                ..Default::default()
+            },
+            /*cancel_flag*/ None,
+        )
+        .expect("run ok");
+
+        assert_eq!(
+            results.matches,
+            vec![FileMatch {
+                score: 72,
+                path: PathBuf::from("sub/abce"),
+                match_type: MatchType::File,
+                root: root.path().to_path_buf(),
+                indices: None,
+            }]
+        );
+        assert_eq!(results.total_match_count, 2);
     }
 
     #[cfg(unix)]
