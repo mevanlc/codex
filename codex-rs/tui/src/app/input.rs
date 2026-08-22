@@ -118,9 +118,18 @@ impl App {
             }
         };
         let buffer = external_editor::EditorBuffer::new(&draft, last_agent_response);
+        let config = self.chat_widget.config_ref();
+        let file_system_policy = config.permissions.file_system_sandbox_policy();
         let editor_result = tui
             .with_restored(|| async {
-                external_editor::run_editor(buffer.initial_text(), &editor_cmd).await
+                external_editor::run_editor(
+                    buffer.initial_text(),
+                    &editor_cmd,
+                    config.codex_home.as_path(),
+                    &file_system_policy,
+                    config.cwd.as_path(),
+                )
+                .await
             })
             .await;
         self.reset_external_editor_state(tui);
@@ -344,6 +353,11 @@ impl App {
         {
             let enabled = !self.chat_widget.raw_output_mode();
             self.apply_raw_output_mode(tui, enabled, /*notify*/ false);
+            return;
+        }
+
+        if app_keymap_shortcuts_available && self.keymap.app.open_agents.is_pressed(key_event) {
+            self.open_agents_overview(app_server);
             return;
         }
 

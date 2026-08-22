@@ -992,7 +992,6 @@ mod tests {
                     .join(".")
             })
             .collect::<Vec<_>>();
-
         assert_eq!(
             actions,
             vec![

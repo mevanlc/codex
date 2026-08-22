@@ -13,6 +13,7 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::ChatComposer;
 use crate::bottom_pane::InputResult;
+use crate::bottom_pane::QueuedInputAction;
 use crate::render::renderable::Renderable;
 
 /// Action returned from feeding a key event into the ComposerInput.
@@ -64,6 +65,14 @@ impl ComposerInput {
             InputResult::Submitted { text, .. } | InputResult::SubmittedShell { text, .. } => {
                 ComposerAction::Submitted(text)
             }
+            InputResult::Queued {
+                text,
+                text_elements,
+                action: QueuedInputAction::Literal,
+                pending_pastes,
+            } => ComposerAction::Submitted(
+                ChatComposer::expand_pending_pastes(&text, text_elements, &pending_pastes).0,
+            ),
             _ => ComposerAction::None,
         };
         self.drain_app_events();
