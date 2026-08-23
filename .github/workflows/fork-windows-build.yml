@@ -6,6 +6,9 @@ on:
 permissions:
   contents: read
 
+env:
+  CODEX_REPO_ROOT: ${{ github.workspace }}
+
 jobs:
   build:
     name: Build Windows ${{ matrix.arch }}

@@ -9,6 +9,9 @@ on:
 permissions:
   contents: write
 
+env:
+  CODEX_REPO_ROOT: ${{ github.workspace }}
+
 jobs:
   metadata:
     name: Compute release metadata
