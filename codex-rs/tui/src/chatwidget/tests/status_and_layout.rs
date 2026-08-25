@@ -226,6 +226,29 @@ async fn status_line_git_summary_items_render_values() {
 }
 
 #[tokio::test]
+async fn status_line_hostname_items_render_short_and_full_hostnames() {
+    let (mut chat, _rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    let host = gethostname::gethostname().to_string_lossy().into_owned();
+    let expected = if host.is_empty() {
+        (None, None)
+    } else {
+        let hostname = host
+            .split_once('.')
+            .map_or(host.as_str(), |(hostname, _domain)| hostname)
+            .to_string();
+        (Some(hostname), Some(host))
+    };
+
+    assert_eq!(
+        (
+            chat.status_line_value_for_item(crate::bottom_pane::StatusLineItem::Hostname),
+            chat.status_line_value_for_item(crate::bottom_pane::StatusLineItem::Host),
+        ),
+        expected
+    );
+}
+
+#[tokio::test]
 async fn raw_output_status_line_value_only_shows_when_enabled() {
     let (mut chat, _rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
 

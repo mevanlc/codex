@@ -18,6 +18,7 @@ use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::models::PermissionProfile;
 use codex_utils_sandbox_summary::summarize_permission_profile;
+use std::sync::LazyLock;
 
 use super::status_state::TerminalTitleStatusKind;
 
@@ -38,6 +39,16 @@ const TERMINAL_TITLE_ACTION_REQUIRED_INTERVAL: Duration = Duration::from_secs(1)
 /// Prefix shown in the terminal title when the agent is blocked on user input.
 const TERMINAL_TITLE_ACTION_REQUIRED_PREFIX: &str = "[ ! ] Action Required";
 const TERMINAL_TITLE_ACTION_REQUIRED_PREFIX_HIDDEN: &str = "[ . ] Action Required";
+
+static LOCAL_HOST: LazyLock<Option<String>> = LazyLock::new(|| {
+    let host = gethostname::gethostname().to_string_lossy().into_owned();
+    (!host.is_empty()).then_some(host)
+});
+
+fn short_hostname(host: &str) -> &str {
+    host.split_once('.')
+        .map_or(host, |(hostname, _domain)| hostname)
+}
 
 #[derive(Debug)]
 /// Parsed status-surface configuration for one refresh pass.
@@ -682,6 +693,11 @@ impl ChatWidget {
                 ))
             }
             StatusLineItem::ProjectRoot => self.status_line_project_root_name(),
+            StatusLineItem::Hostname => LOCAL_HOST
+                .as_deref()
+                .map(short_hostname)
+                .map(str::to_string),
+            StatusLineItem::Host => LOCAL_HOST.clone(),
             StatusLineItem::GitBranch => self.status_line_branch.clone(),
             StatusLineItem::PullRequestNumber => self
                 .status_line_git_summary
@@ -800,6 +816,8 @@ impl ChatWidget {
             StatusSurfacePreviewItem::Status => return Some(self.run_state_status_text()),
             StatusSurfacePreviewItem::TaskProgress => return self.terminal_title_task_progress(),
             StatusSurfacePreviewItem::CurrentDir => StatusLineItem::CurrentDir,
+            StatusSurfacePreviewItem::Hostname => StatusLineItem::Hostname,
+            StatusSurfacePreviewItem::Host => StatusLineItem::Host,
             StatusSurfacePreviewItem::ThreadTitle => StatusLineItem::ThreadTitle,
             StatusSurfacePreviewItem::GitBranch => StatusLineItem::GitBranch,
             StatusSurfacePreviewItem::PullRequestNumber => StatusLineItem::PullRequestNumber,
