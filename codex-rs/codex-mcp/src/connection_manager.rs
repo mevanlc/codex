@@ -446,7 +446,7 @@ impl McpConnectionSet {
                             }
                             if let Some(tx_event) = tx_event.as_ref() {
                                 for status in [McpStartupStatus::Starting, status] {
-                                    let _ = emit_update(
+                                    emit_update(
                                         submit_id.as_str(),
                                         tx_event,
                                         McpStartupUpdateEvent {
@@ -561,7 +561,7 @@ impl McpConnectionSet {
                     return (server_name, Err(StartupOutcomeError::Cancelled));
                 }
                 if let Some(tx_event) = tx_event.as_ref() {
-                    let _ = emit_update(
+                    emit_update(
                         submit_id.as_str(),
                         tx_event,
                         McpStartupUpdateEvent {
@@ -632,7 +632,7 @@ impl McpConnectionSet {
                         }
                     };
 
-                    let _ = emit_update(
+                    emit_update(
                         submit_id.as_str(),
                         tx_event,
                         McpStartupUpdateEvent {
@@ -684,7 +684,7 @@ impl McpConnectionSet {
                     ..Default::default()
                 };
                 for server_name in &summary.ready {
-                    let _ = emit_update(
+                    emit_update(
                         startup_submit_id.as_str(),
                         &tx_event,
                         McpStartupUpdateEvent {

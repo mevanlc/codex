@@ -19,7 +19,7 @@ This fork maintains a build of Codex CLI that runs natively on Android via [Term
 - **Shell follow-ups** — press Tab in `!` mode to start an agent turn after the command finishes
 - **Retractable steer messages** — pull a still-pending steer back into the composer; backed by a new `turn/retract` app-server method
 - **Unrestricted reasoning shortcuts** — the reasoning hotkeys step all the way into Max and Ultra
-- **Platform fixes** — file-lock fallbacks, `SHELL`-based shell detection on Android, vendored OpenSSL, fork-aware update checks
+- **Platform fixes** — `SHELL`-based shell detection on Android, vendored OpenSSL, fork-aware update checks
 
 Everything else behaves like upstream Codex.
 
@@ -104,7 +104,6 @@ The underlying mechanism is a new experimental `turn/retract` app-server request
 
 ### Platform fixes
 
-- `flock` is best-effort where the filesystem rejects it (some Android f2fs kernels return `EOPNOTSUPP`): the installation-id lock is skipped, and the per-session PATH directory falls back to a `/proc`-based liveness record so stale-directory cleanup still works.
 - Shell detection prefers `$SHELL` over the `passwd` entry on Android, where Termux's shell is not in `/etc/passwd`.
 - OpenSSL is vendored for `aarch64-linux-android`.
 - Update checks parse full semver and rank the fork's `X.Y.Z-<sha>` snapshots after the matching `X.Y.Z` release. Ordinary prereleases, including `X.Y.Z-alpha.N-<sha>`, remain before the release.

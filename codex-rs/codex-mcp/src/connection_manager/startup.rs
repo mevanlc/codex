@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use anyhow::Result;
 use async_channel::Sender;
 use codex_api::SharedAuthProvider;
 use codex_config::McpServerAuth;
@@ -42,13 +41,13 @@ pub(super) async fn emit_update(
     submit_id: &str,
     tx_event: &Sender<Event>,
     update: McpStartupUpdateEvent,
-) -> Result<(), async_channel::SendError<Event>> {
-    tx_event
+) {
+    let _ = tx_event
         .send(Event {
             id: submit_id.to_string(),
             msg: EventMsg::McpStartupUpdate(update),
         })
-        .await
+        .await;
 }
 
 pub(super) fn mcp_startup_failure_reason(
