@@ -284,6 +284,8 @@ use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::ThreadStartedNotification;
 use codex_app_server_protocol::ThreadStatus;
+use codex_app_server_protocol::ThreadTimelineListParams;
+use codex_app_server_protocol::ThreadTimelineListResponse;
 use codex_app_server_protocol::ThreadTurnsListParams;
 use codex_app_server_protocol::ThreadTurnsListResponse;
 use codex_app_server_protocol::ThreadUnarchiveParams;
@@ -301,6 +303,9 @@ use codex_app_server_protocol::TurnItemsView;
 use codex_app_server_protocol::TurnRetractParams;
 use codex_app_server_protocol::TurnRetractResponse;
 use codex_app_server_protocol::TurnRetractStatus;
+use codex_app_server_protocol::TurnSettingsUpdateParams;
+use codex_app_server_protocol::TurnSettingsUpdateResponse;
+use codex_app_server_protocol::TurnSettingsUpdateStatus;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::TurnStatus;
@@ -485,6 +490,7 @@ use codex_thread_store::GitInfoPatch as StoreGitInfoPatch;
 use codex_thread_store::ItemSortKey as StoreItemSortKey;
 use codex_thread_store::ListItemsParams as StoreListItemsParams;
 use codex_thread_store::ListThreadsParams as StoreListThreadsParams;
+use codex_thread_store::ListTimelineParams as StoreListTimelineParams;
 use codex_thread_store::ListTurnsParams as StoreListTurnsParams;
 use codex_thread_store::LoadThreadHistoryParams as StoreLoadThreadHistoryParams;
 use codex_thread_store::LocalThreadStore;
@@ -543,10 +549,12 @@ mod diagnostics;
 mod environment_processor;
 mod feedback_doctor_report;
 mod feedback_processor;
+mod feedback_thread_index;
 mod fs_processor;
 mod git_processor;
 mod initialize_processor;
 mod marketplace_processor;
+mod mcp_event_stream;
 mod mcp_processor;
 mod persisted_resume_settings;
 mod plugins;
@@ -556,6 +564,7 @@ mod remote_control_processor;
 mod search;
 mod thread_enrichment;
 mod thread_fork_goal;
+mod thread_input;
 mod thread_processor;
 mod thread_queue_processor;
 mod thread_sections;
@@ -575,6 +584,8 @@ pub(crate) use fs_processor::FsRequestProcessor;
 pub(crate) use git_processor::GitRequestProcessor;
 pub(crate) use initialize_processor::InitializeRequestProcessor;
 pub(crate) use marketplace_processor::MarketplaceRequestProcessor;
+pub(crate) use mcp_event_stream::McpEventStreamReady;
+pub(crate) use mcp_event_stream::McpEventStreams;
 pub(crate) use mcp_processor::McpRequestProcessor;
 pub(crate) use plugins::PluginRequestProcessor;
 pub(crate) use process_exec_processor::ProcessExecRequestProcessor;
@@ -597,6 +608,14 @@ use crate::thread_state::ThreadState;
 use crate::thread_state::ThreadStateManager;
 use token_usage_replay::restored_token_usage_turn_id;
 use token_usage_replay::send_thread_token_usage_update_to_connection;
+
+pub(crate) fn apply_live_model_settings(
+    thread: &mut Thread,
+    config_snapshot: &ThreadConfigSnapshot,
+) {
+    thread.model = Some(config_snapshot.model.clone());
+    thread.reasoning_effort = config_snapshot.reasoning_effort.clone();
+}
 
 fn resolve_request_cwd(cwd: Option<PathBuf>) -> Result<Option<AbsolutePathBuf>, JSONRPCErrorError> {
     cwd.map(|cwd| {

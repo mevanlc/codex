@@ -261,7 +261,7 @@ jobs:
           set -euo pipefail
           if command -v apt-get >/dev/null 2>&1; then
             sudo apt-get update -y
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libcap-dev
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends build-essential pkg-config libcap-dev
           fi
       - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
         with:

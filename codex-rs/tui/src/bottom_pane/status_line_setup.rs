@@ -738,6 +738,38 @@ mod tests {
     }
 
     #[test]
+    fn setup_view_snapshot_includes_hostname() {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let view = StatusLineSetupView::new(
+            Some(&[
+                StatusLineItem::Hostname.to_string(),
+                StatusLineItem::CurrentDir.to_string(),
+            ]),
+            /*use_theme_colors*/ true,
+            StatusSurfacePreviewData::from_iter([
+                (
+                    StatusLineItem::Hostname.preview_item(),
+                    "ssh-build-01.example.com".to_string(),
+                ),
+                (
+                    StatusLineItem::CurrentDir.preview_item(),
+                    "~/codex-rs".to_string(),
+                ),
+            ]),
+            AppEventSender::new(tx_raw),
+            crate::keymap::RuntimeKeymap::defaults().list,
+        );
+
+        assert_snapshot!(
+            render_lines(&view, /*width*/ 100)
+                .lines()
+                .map(str::trim_end)
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
+    #[test]
     fn setup_view_snapshot_includes_hostname_items() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let view = StatusLineSetupView::new(

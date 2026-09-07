@@ -14,11 +14,11 @@ use crate::status::format_estimated_usd_micros;
 use crate::status::format_tokens_compact;
 use codex_app_server_protocol::AskForApproval;
 use codex_config::ConfigLayerSource;
+use codex_config::os_host_name;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::models::PermissionProfile;
 use codex_utils_sandbox_summary::summarize_permission_profile;
-use std::sync::LazyLock;
 
 use super::status_state::TerminalTitleStatusKind;
 
@@ -39,11 +39,6 @@ const TERMINAL_TITLE_ACTION_REQUIRED_INTERVAL: Duration = Duration::from_secs(1)
 /// Prefix shown in the terminal title when the agent is blocked on user input.
 const TERMINAL_TITLE_ACTION_REQUIRED_PREFIX: &str = "[ ! ] Action Required";
 const TERMINAL_TITLE_ACTION_REQUIRED_PREFIX_HIDDEN: &str = "[ . ] Action Required";
-
-static LOCAL_HOST: LazyLock<Option<String>> = LazyLock::new(|| {
-    let host = gethostname::gethostname().to_string_lossy().into_owned();
-    (!host.is_empty()).then_some(host)
-});
 
 fn short_hostname(host: &str) -> &str {
     host.split_once('.')
@@ -254,11 +249,15 @@ impl ChatWidget {
     /// Empty selections clear the managed title. Non-empty selections render the
     /// current values in configured order, skip unavailable segments, and cache
     /// the last successfully written title so redundant OSC writes are avoided.
-    /// When the `activity` item is present in an animated running state, this also
-    /// schedules the next frame so the title animation keeps advancing.
+    /// Animated titles record their next refresh for the foreground loop, independently
+    /// of full TUI redraws.
     fn refresh_terminal_title_from_selections(&mut self, selections: &StatusSurfaceSelections) {
         self.last_terminal_title_requires_action =
             self.terminal_title_shows_action_required_with_selections(selections);
+        let now = Instant::now();
+        self.terminal_title_next_refresh = self
+            .terminal_title_animation_interval_with_selections(selections)
+            .map(|interval| now + interval);
         if selections.terminal_title_items.is_empty() {
             if let Err(err) = self.clear_managed_terminal_title() {
                 tracing::debug!(error = %err, "failed to clear terminal title");
@@ -266,13 +265,8 @@ impl ChatWidget {
             return;
         }
 
-        let now = Instant::now();
         let title = self.terminal_title_text_for_selections(selections, now);
-        let animation_interval = self.terminal_title_animation_interval_with_selections(selections);
         if self.last_terminal_title == title {
-            if let Some(interval) = animation_interval {
-                self.frame_requester.schedule_frame_in(interval);
-            }
             return;
         }
         match title {
@@ -294,10 +288,6 @@ impl ChatWidget {
                     tracing::debug!(error = %err, "failed to clear terminal title");
                 }
             }
-        }
-
-        if let Some(interval) = animation_interval {
-            self.frame_requester.schedule_frame_in(interval);
         }
     }
 
@@ -693,11 +683,11 @@ impl ChatWidget {
                 ))
             }
             StatusLineItem::ProjectRoot => self.status_line_project_root_name(),
-            StatusLineItem::Hostname => LOCAL_HOST
+            StatusLineItem::Hostname => os_host_name()
                 .as_deref()
                 .map(short_hostname)
                 .map(str::to_string),
-            StatusLineItem::Host => LOCAL_HOST.clone(),
+            StatusLineItem::Host => os_host_name(),
             StatusLineItem::GitBranch => self.status_line_branch.clone(),
             StatusLineItem::PullRequestNumber => self
                 .status_line_git_summary
@@ -774,13 +764,23 @@ impl ChatWidget {
                 .and_then(|usage| usage.estimated_usage_usd_micros)
                 .and_then(format_estimated_usd_micros),
             StatusLineItem::SessionId => self.thread_id.map(|id| id.to_string()),
-            StatusLineItem::FastMode => Some(
-                if self.current_service_tier() == Some(ServiceTier::Fast.request_value()) {
-                    "Fast on".to_string()
-                } else {
-                    "Fast off".to_string()
-                },
-            ),
+            StatusLineItem::FastMode => self
+                .model_catalog
+                .try_list_models()
+                .ok()
+                .and_then(|models| {
+                    models
+                        .into_iter()
+                        .find(|preset| preset.model == self.current_model())
+                })
+                .is_none_or(|preset| preset.supports_fast_mode())
+                .then(|| {
+                    if self.current_service_tier() == Some(ServiceTier::Fast.request_value()) {
+                        "Fast on".to_string()
+                    } else {
+                        "Fast off".to_string()
+                    }
+                }),
             StatusLineItem::RawOutput => self.raw_output_mode().then(|| "raw output".to_string()),
             StatusLineItem::ThreadTitle => self.thread_name.as_ref().map_or_else(
                 || self.thread_id.map(|id| id.to_string()),

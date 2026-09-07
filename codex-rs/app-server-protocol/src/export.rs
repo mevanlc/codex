@@ -55,6 +55,7 @@ const EXPERIMENTAL_CLIENT_METHOD_DEPENDENCY_TYPES: &[&str] = &[
     "ThreadSearchOccurrence",
     "ThreadSearchTextRange",
     "TurnRetractStatus",
+    "TurnSettingsUpdateStatus",
 ];
 const SPECIAL_DEFINITIONS: &[&str] = &[
     "ClientNotification",
