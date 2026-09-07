@@ -244,27 +244,6 @@ async fn status_line_git_summary_items_render_values() {
 }
 
 #[tokio::test]
-async fn status_line_hostname_items_render_short_and_full_hostnames() {
-    let (mut chat, _rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
-    let host = codex_config::os_host_name();
-    let expected = host.as_ref().map_or((None, None), |host| {
-        let hostname = host
-            .split_once('.')
-            .map_or(host.as_str(), |(hostname, _domain)| hostname)
-            .to_string();
-        (Some(hostname), Some(host.clone()))
-    });
-
-    assert_eq!(
-        (
-            chat.status_line_value_for_item(crate::bottom_pane::StatusLineItem::Hostname),
-            chat.status_line_value_for_item(crate::bottom_pane::StatusLineItem::Host),
-        ),
-        expected
-    );
-}
-
-#[tokio::test]
 async fn raw_output_status_line_value_only_shows_when_enabled() {
     let (mut chat, _rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
 
@@ -2908,17 +2887,17 @@ async fn status_line_invalid_items_warn_once() {
 }
 
 #[tokio::test]
-async fn status_line_host_renders_current_machine_hostname() {
+async fn status_line_hostname_renders_current_machine_hostname() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
-    chat.config.tui_status_line = Some(vec!["host".to_string()]);
+    chat.config.tui_status_line = Some(vec!["hostname".to_string()]);
 
     chat.refresh_status_line();
 
     assert_eq!(status_line_text(&chat), codex_config::os_host_name());
     assert!(
         drain_insert_history(&mut rx).is_empty(),
-        "host should be accepted as a status line item"
+        "hostname should be accepted as a status line item"
     );
 }
 

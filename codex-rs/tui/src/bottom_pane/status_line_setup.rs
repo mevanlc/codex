@@ -11,7 +11,7 @@
 //!
 //! - Model information (name, reasoning level)
 //! - Directory paths (current dir, project root)
-//! - Host information (short hostname, full host)
+//! - Machine hostname
 //! - Git information (branch name)
 //! - Permissions profile
 //! - Approval mode
@@ -75,11 +75,8 @@ pub(crate) enum StatusLineItem {
     )]
     ProjectRoot,
 
-    /// System hostname truncated before the first dot.
+    /// Hostname of the machine running Codex.
     Hostname,
-
-    /// Full system hostname.
-    Host,
 
     /// Current git branch name (if in a repository).
     GitBranch,
@@ -166,8 +163,7 @@ impl StatusLineItem {
             StatusLineItem::Reasoning => "Current reasoning level",
             StatusLineItem::CurrentDir => "Current working directory",
             StatusLineItem::ProjectRoot => "Project name (omitted when unavailable)",
-            StatusLineItem::Hostname => "System hostname without domain suffix",
-            StatusLineItem::Host => "Full system hostname",
+            StatusLineItem::Hostname => "Current machine hostname (omitted when unavailable)",
             StatusLineItem::GitBranch => "Current Git branch (omitted when unavailable)",
             StatusLineItem::PullRequestNumber => {
                 "Open pull request number for the current branch (omitted when unavailable)"
@@ -226,7 +222,6 @@ impl StatusLineItem {
             StatusLineItem::CurrentDir => StatusSurfacePreviewItem::CurrentDir,
             StatusLineItem::ProjectRoot => StatusSurfacePreviewItem::ProjectRoot,
             StatusLineItem::Hostname => StatusSurfacePreviewItem::Hostname,
-            StatusLineItem::Host => StatusSurfacePreviewItem::Host,
             StatusLineItem::GitBranch => StatusSurfacePreviewItem::GitBranch,
             StatusLineItem::PullRequestNumber => StatusSurfacePreviewItem::PullRequestNumber,
             StatusLineItem::BranchChanges => StatusSurfacePreviewItem::BranchChanges,
@@ -767,32 +762,6 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n")
         );
-    }
-
-    #[test]
-    fn setup_view_snapshot_includes_hostname_items() {
-        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
-        let view = StatusLineSetupView::new(
-            Some(&[
-                StatusLineItem::Hostname.to_string(),
-                StatusLineItem::Host.to_string(),
-            ]),
-            /*use_theme_colors*/ true,
-            StatusSurfacePreviewData::from_iter([
-                (
-                    StatusLineItem::Hostname.preview_item(),
-                    "builder-01".to_string(),
-                ),
-                (
-                    StatusLineItem::Host.preview_item(),
-                    "builder-01.ci.example.com".to_string(),
-                ),
-            ]),
-            AppEventSender::new(tx_raw),
-            crate::keymap::RuntimeKeymap::defaults().list,
-        );
-
-        assert_snapshot!(render_lines(&view, /*width*/ 100));
     }
 
     fn render_lines(view: &StatusLineSetupView, width: u16) -> String {

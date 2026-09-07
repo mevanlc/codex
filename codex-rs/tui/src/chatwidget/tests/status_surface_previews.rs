@@ -86,11 +86,11 @@ fn cache_rate_limit_snapshot(chat: &mut ChatWidget) {
 }
 
 #[tokio::test]
-async fn status_surface_host_preview_uses_current_machine_hostname() {
+async fn status_surface_hostname_preview_uses_current_machine_hostname() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
     assert_eq!(
-        status_preview_line(&mut chat, &[StatusLineItem::Host]),
+        status_preview_line(&mut chat, &[StatusLineItem::Hostname]),
         codex_config::os_host_name().expect("machine hostname")
     );
 }

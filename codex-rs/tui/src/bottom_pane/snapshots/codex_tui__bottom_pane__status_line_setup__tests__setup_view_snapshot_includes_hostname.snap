@@ -10,7 +10,7 @@ expression: "render_lines(&view,\n100).lines().map(str::trim_end).collect::<Vec<
   >
 › [x] Use theme colors      Apply colors from the active /theme
   ───────────────────────
-  [x] hostname              System hostname without domain suffix
+  [x] hostname              Current machine hostname (omitted when unavailable)
   [x] current-dir           Current working directory
   [ ] model                 Current model name
   [ ] model-with-reasoning  Current model name with reasoning level

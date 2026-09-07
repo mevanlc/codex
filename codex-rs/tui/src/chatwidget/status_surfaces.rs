@@ -40,11 +40,6 @@ const TERMINAL_TITLE_ACTION_REQUIRED_INTERVAL: Duration = Duration::from_secs(1)
 const TERMINAL_TITLE_ACTION_REQUIRED_PREFIX: &str = "[ ! ] Action Required";
 const TERMINAL_TITLE_ACTION_REQUIRED_PREFIX_HIDDEN: &str = "[ . ] Action Required";
 
-fn short_hostname(host: &str) -> &str {
-    host.split_once('.')
-        .map_or(host, |(hostname, _domain)| hostname)
-}
-
 #[derive(Debug)]
 /// Parsed status-surface configuration for one refresh pass.
 ///
@@ -683,11 +678,7 @@ impl ChatWidget {
                 ))
             }
             StatusLineItem::ProjectRoot => self.status_line_project_root_name(),
-            StatusLineItem::Hostname => os_host_name()
-                .as_deref()
-                .map(short_hostname)
-                .map(str::to_string),
-            StatusLineItem::Host => os_host_name(),
+            StatusLineItem::Hostname => os_host_name(),
             StatusLineItem::GitBranch => self.status_line_branch.clone(),
             StatusLineItem::PullRequestNumber => self
                 .status_line_git_summary
@@ -817,7 +808,6 @@ impl ChatWidget {
             StatusSurfacePreviewItem::TaskProgress => return self.terminal_title_task_progress(),
             StatusSurfacePreviewItem::CurrentDir => StatusLineItem::CurrentDir,
             StatusSurfacePreviewItem::Hostname => StatusLineItem::Hostname,
-            StatusSurfacePreviewItem::Host => StatusLineItem::Host,
             StatusSurfacePreviewItem::ThreadTitle => StatusLineItem::ThreadTitle,
             StatusSurfacePreviewItem::GitBranch => StatusLineItem::GitBranch,
             StatusSurfacePreviewItem::PullRequestNumber => StatusLineItem::PullRequestNumber,
