@@ -1,3 +1,6 @@
+#[path = "fork_tui_tests.rs"]
+mod fork_tui;
+
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
 use crate::config::edit::apply_blocking;
@@ -43,8 +46,8 @@ use codex_config::permissions_toml::WorkspaceRootsToml;
 use codex_config::types::AppToolApproval;
 use codex_config::types::ApprovalsReviewer;
 use codex_config::types::BundledSkillsConfig;
-use codex_config::types::ChatboxPlaceholderTips;
 use codex_config::types::FeedbackConfigToml;
+use codex_config::types::ForkTuiOptions;
 use codex_config::types::HistoryPersistence;
 use codex_config::types::McpServerEnvVar;
 use codex_config::types::McpServerOAuthConfig;
@@ -1221,9 +1224,7 @@ fn config_toml_deserializes_model_availability_nux() {
             notification_settings: TuiNotificationSettings::default(),
             animations: true,
             show_tooltips: true,
-            chatbox_placeholder_tips: ChatboxPlaceholderTips::default(),
-            file_mentions_preserve_at: false,
-            file_mentions_allow_explicit_paths: true,
+            fork: ForkTuiOptions::default(),
             auto_recap: true,
             disable_paste_burst: None,
             vim_mode_default: false,
@@ -1233,7 +1234,6 @@ fn config_toml_deserializes_model_availability_nux() {
             status_line_use_colors: true,
             terminal_title: None,
             theme: None,
-            primary_accent: None,
             pet: None,
             pet_anchor: TuiPetAnchor::Composer,
             session_picker_view: None,
@@ -4155,22 +4155,6 @@ theme = "dracula"
 }
 
 #[test]
-fn tui_primary_accent_deserializes_from_toml() {
-    let cfg = r##"
-[tui]
-primary_accent = "#00AAFF"
-"##;
-    let parsed = toml::from_str::<ConfigToml>(cfg).expect("TOML deserialization should succeed");
-    assert_eq!(
-        parsed
-            .tui
-            .as_ref()
-            .and_then(|t| t.primary_accent.as_deref()),
-        Some("#00AAFF"),
-    );
-}
-
-#[test]
 fn tui_session_picker_view_deserializes_from_toml() {
     let cfg = r#"
 [tui]
@@ -4254,9 +4238,7 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             notification_settings: TuiNotificationSettings::default(),
             animations: true,
             show_tooltips: true,
-            chatbox_placeholder_tips: ChatboxPlaceholderTips::default(),
-            file_mentions_preserve_at: false,
-            file_mentions_allow_explicit_paths: true,
+            fork: ForkTuiOptions::default(),
             auto_recap: true,
             disable_paste_burst: None,
             vim_mode_default: false,
@@ -4266,7 +4248,6 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             status_line_use_colors: true,
             terminal_title: None,
             theme: None,
-            primary_accent: None,
             pet: None,
             pet_anchor: TuiPetAnchor::Composer,
             session_picker_view: None,
@@ -4275,47 +4256,6 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             model_availability_nux: ModelAvailabilityNuxConfig::default(),
             terminal_resize_reflow_max_rows: None,
         }
-    );
-}
-
-#[tokio::test]
-async fn runtime_config_resolves_file_mention_settings() {
-    let default_config = Config::load_from_base_config_with_overrides(
-        ConfigToml::default(),
-        ConfigOverrides::default(),
-        tempdir().expect("tempdir").abs(),
-    )
-    .await
-    .expect("load default config");
-    assert_eq!(
-        (
-            default_config.tui_file_mentions_preserve_at,
-            default_config.tui_file_mentions_allow_explicit_paths,
-        ),
-        (false, true)
-    );
-
-    let config_toml = toml::from_str(
-        r#"
-[tui]
-file_mentions_preserve_at = true
-file_mentions_allow_explicit_paths = false
-"#,
-    )
-    .expect("file mention settings should deserialize");
-    let configured = Config::load_from_base_config_with_overrides(
-        config_toml,
-        ConfigOverrides::default(),
-        tempdir().expect("tempdir").abs(),
-    )
-    .await
-    .expect("load file mention settings");
-    assert_eq!(
-        (
-            configured.tui_file_mentions_preserve_at,
-            configured.tui_file_mentions_allow_explicit_paths,
-        ),
-        (true, false)
     );
 }
 

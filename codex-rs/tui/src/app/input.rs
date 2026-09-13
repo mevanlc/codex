@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::app_backtrack::SIDE_EDIT_PREVIOUS_UNAVAILABLE_MESSAGE;
+use crate::quoted_editor_buffer::EditorBuffer;
 
 impl App {
     pub(super) fn route_key_chord_event(
@@ -117,7 +118,7 @@ impl App {
                 self.chat_widget.last_agent_markdown_text()
             }
         };
-        let buffer = external_editor::EditorBuffer::new(&draft, last_agent_response);
+        let buffer = EditorBuffer::new(&draft, last_agent_response);
         let config = self.chat_widget.config_ref();
         let file_system_policy = config.permissions.file_system_sandbox_policy();
         let editor_result = tui

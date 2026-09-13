@@ -207,6 +207,21 @@ pub(super) async fn make_chatwidget_manual_with_auth(
         session_telemetry,
     };
     let mut widget = ChatWidget::new_with_op_target(common, super::CodexOpTarget::Direct(op_tx));
+    // Snapshot fixtures must not inherit the runner's terminal or tmux key hints.
+    // Terminal-specific behavior is exercised with explicit TerminalInfo fixtures.
+    widget.queued_message_edit_hint_binding = queued_message_edit_hint_binding(
+        &RuntimeKeymap::from_config(&widget.config.tui_keymap).expect("valid test keymap"),
+        TerminalInfo {
+            name: TerminalName::Unknown,
+            term_program: None,
+            version: None,
+            term: None,
+            multiplexer: None,
+        },
+    );
+    widget
+        .bottom_pane
+        .set_queued_message_edit_binding(widget.queued_message_edit_hint_binding);
     widget.transcript.active_cell = None;
     widget.transcript.active_cell_revision = 0;
     widget.set_model(&resolved_model);

@@ -16,6 +16,11 @@ async fn reconnect_restores_history_permissions_and_keeps_old_input_paused() -> 
         let id = ThreadId::new();
         let cwd = app.config.cwd.clone();
         app.config.model = Some("gpt-test".into());
+        // Reconnect reconstructs the widget; keep its key hint independent of the terminal.
+        app.config.tui_keymap.chat.edit_queued_message =
+            Some(codex_config::types::KeybindingsSpec::One(
+                codex_config::types::KeybindingSpec("alt-up".into()),
+            ));
         // Avoid platform-specific path widths in the mode-preservation snapshot.
         app.config.tui_status_line = Some(vec!["model-with-reasoning".into()]);
         app.config

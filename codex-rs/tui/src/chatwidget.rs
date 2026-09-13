@@ -1909,9 +1909,9 @@ impl ChatWidget {
         self.config.config_layer_stack = config.config_layer_stack.clone();
         self.config.memories = config.memories.clone();
         self.config.terminal_resize_reflow = config.terminal_resize_reflow;
-        self.config.tui_file_mentions_preserve_at = config.tui_file_mentions_preserve_at;
-        self.config.tui_file_mentions_allow_explicit_paths =
-            config.tui_file_mentions_allow_explicit_paths;
+        self.config.fork_tui.file_mentions_preserve_at = config.fork_tui.file_mentions_preserve_at;
+        self.config.fork_tui.file_mentions_allow_explicit_paths =
+            config.fork_tui.file_mentions_allow_explicit_paths;
         self.sync_mentions_v2_enabled();
         self.sync_file_mention_settings();
     }

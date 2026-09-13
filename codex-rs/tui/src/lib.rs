@@ -169,6 +169,7 @@ mod oss_selection;
 mod pager_overlay;
 mod primary_accent;
 pub(crate) mod public_widgets;
+mod quoted_editor_buffer;
 mod render;
 mod resize_reflow_cap;
 mod resume_picker;
@@ -988,9 +989,9 @@ async fn run_ratatui_app(
 
     tooltips::announcement::prewarm(initial_config.http_client_factory());
 
-    if let Err(err) =
-        crate::primary_accent::configure_from_config(initial_config.tui_primary_accent.as_deref())
-    {
+    if let Err(err) = crate::primary_accent::configure_from_config(
+        initial_config.fork_tui.primary_accent.as_deref(),
+    ) {
         tracing::warn!(error = %err, "invalid [tui].primary_accent; using default cyan accent");
     }
 
@@ -1806,7 +1807,7 @@ impl Drop for TerminalRestoreGuard {
 
 fn apply_primary_accent(config: &mut Config) {
     if let Err(err) =
-        crate::primary_accent::configure_from_config(config.tui_primary_accent.as_deref())
+        crate::primary_accent::configure_from_config(config.fork_tui.primary_accent.as_deref())
     {
         let warning =
             format!("Invalid [tui].primary_accent ({err}). Falling back to default cyan accent.");

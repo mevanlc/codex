@@ -309,7 +309,7 @@ impl ChatWidget {
 }
 
 fn select_chatbox_placeholder(config: &Config) -> String {
-    match config.chatbox_placeholder_tips {
+    match config.fork_tui.chatbox_placeholder_tips {
         ChatboxPlaceholderTips::On => PLACEHOLDER.to_string(),
         ChatboxPlaceholderTips::Off => String::new(),
     }

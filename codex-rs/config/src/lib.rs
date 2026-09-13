@@ -10,6 +10,7 @@ pub mod config_toml;
 mod constraint;
 mod diagnostics;
 mod fingerprint;
+mod fork_tui;
 mod hook_config;
 mod host_name;
 mod in_app_browser_requirements;

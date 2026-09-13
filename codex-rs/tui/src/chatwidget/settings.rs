@@ -307,9 +307,9 @@ impl ChatWidget {
 
     pub(super) fn sync_file_mention_settings(&mut self) {
         self.bottom_pane
-            .set_file_mentions_preserve_at(self.config.tui_file_mentions_preserve_at);
+            .set_file_mentions_preserve_at(self.config.fork_tui.file_mentions_preserve_at);
         self.bottom_pane.set_file_mentions_allow_explicit_paths(
-            self.config.tui_file_mentions_allow_explicit_paths,
+            self.config.fork_tui.file_mentions_allow_explicit_paths,
         );
     }
 

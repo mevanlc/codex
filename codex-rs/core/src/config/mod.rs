@@ -39,7 +39,7 @@ use codex_config::sandbox_mode_requirement_for_permission_profile;
 use codex_config::types::ApprovalsReviewer;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_config::types::AuthKeyringBackendKind;
-use codex_config::types::ChatboxPlaceholderTips;
+use codex_config::types::ForkTuiOptions;
 use codex_config::types::History;
 use codex_config::types::McpServerConfig;
 use codex_config::types::McpServerDisabledReason;
@@ -744,17 +744,8 @@ pub struct Config {
     /// Show startup tooltips in the TUI welcome screen.
     pub show_tooltips: bool,
 
-    /// Controls whether the chatbox placeholder shows a rotating set of tip prompts.
-    ///
-    /// - `on` (default): Show rotating placeholder tips.
-    /// - `off`: Use a generic placeholder instead.
-    pub chatbox_placeholder_tips: ChatboxPlaceholderTips,
-
-    /// Keep the leading `@` when a file-search completion is inserted into the TUI composer.
-    pub tui_file_mentions_preserve_at: bool,
-
-    /// Let TUI file search resolve absolute paths and paths beginning with `./` or `../`.
-    pub tui_file_mentions_allow_explicit_paths: bool,
+    /// Fork-owned TUI options, with the same defaults and keys as `[tui]`.
+    pub fork_tui: ForkTuiOptions,
 
     /// Generate automatic TUI recaps. Manual `/recap` remains available when disabled.
     pub tui_auto_recap: bool,
@@ -794,9 +785,6 @@ pub struct Config {
 
     /// Syntax highlighting theme override (kebab-case name).
     pub tui_theme: Option<String>,
-
-    /// Overrides the default cyan accent used throughout the TUI.
-    pub tui_primary_accent: Option<String>,
 
     /// Pet id preselected by the terminal pet picker.
     pub tui_pet: Option<String>,
@@ -4347,20 +4335,7 @@ impl Config {
                 .unwrap_or_default(),
             animations: cfg.tui.as_ref().map(|t| t.animations).unwrap_or(true),
             show_tooltips: cfg.tui.as_ref().map(|t| t.show_tooltips).unwrap_or(true),
-            chatbox_placeholder_tips: cfg
-                .tui
-                .as_ref()
-                .map(|t| t.chatbox_placeholder_tips)
-                .unwrap_or_default(),
-            tui_file_mentions_preserve_at: cfg
-                .tui
-                .as_ref()
-                .is_some_and(|t| t.file_mentions_preserve_at),
-            tui_file_mentions_allow_explicit_paths: cfg
-                .tui
-                .as_ref()
-                .map(|t| t.file_mentions_allow_explicit_paths)
-                .unwrap_or(true),
+            fork_tui: cfg.tui.as_ref().map(|t| t.fork.clone()).unwrap_or_default(),
             tui_auto_recap: cfg.tui.as_ref().map(|t| t.auto_recap).unwrap_or(/*default*/ true),
             model_availability_nux: cfg
                 .tui
@@ -4390,7 +4365,6 @@ impl Config {
                 .unwrap_or(true),
             tui_terminal_title: cfg.tui.as_ref().and_then(|t| t.terminal_title.clone()),
             tui_theme: cfg.tui.as_ref().and_then(|t| t.theme.clone()),
-            tui_primary_accent: cfg.tui.as_ref().and_then(|t| t.primary_accent.clone()),
             tui_pet: cfg.tui.as_ref().and_then(|t| t.pet.clone()),
             tui_pet_anchor: cfg
                 .tui

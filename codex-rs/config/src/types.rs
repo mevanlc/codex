@@ -3,6 +3,8 @@
 // Note this file should generally be restricted to simple struct/enum
 // definitions that do not contain business logic.
 
+pub use crate::fork_tui::ChatboxPlaceholderTips;
+pub use crate::fork_tui::ForkTuiOptions;
 pub use crate::mcp_types::AppToolApproval;
 pub use crate::mcp_types::McpServerAuth;
 pub use crate::mcp_types::McpServerConfig;
@@ -689,14 +691,6 @@ pub enum TuiPetAnchor {
     ScreenBottom,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum ChatboxPlaceholderTips {
-    #[default]
-    On,
-    Off,
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct TuiNotificationSettings {
@@ -732,6 +726,9 @@ pub const DEFAULT_TERMINAL_RESIZE_REFLOW_FALLBACK_MAX_ROWS: usize = 1_000;
 #[schemars(deny_unknown_fields)]
 pub struct Tui {
     #[serde(default, flatten)]
+    pub fork: ForkTuiOptions,
+
+    #[serde(default, flatten)]
     pub notification_settings: TuiNotificationSettings,
 
     /// Enable animations (welcome screen, shimmer effects, spinners).
@@ -743,23 +740,6 @@ pub struct Tui {
     /// Defaults to `true`.
     #[serde(default = "default_true")]
     pub show_tooltips: bool,
-
-    /// Controls whether the chatbox placeholder shows a rotating set of tip prompts.
-    ///
-    /// - `on` (default): Show rotating placeholder tips.
-    /// - `off`: Use a generic placeholder instead.
-    #[serde(default)]
-    pub chatbox_placeholder_tips: ChatboxPlaceholderTips,
-
-    /// Keep the leading `@` when a file-search completion is inserted into the composer.
-    /// Defaults to `false`.
-    #[serde(default)]
-    pub file_mentions_preserve_at: bool,
-
-    /// Let `@` file search resolve absolute paths and paths beginning with `./` or `../`.
-    /// Defaults to `true`.
-    #[serde(default = "default_true")]
-    pub file_mentions_allow_explicit_paths: bool,
 
     /// Generate automatic conversation recaps when the terminal is unfocused.
     /// Defaults to `true`. Disabling this leaves `/recap` available on demand.
@@ -817,15 +797,6 @@ pub struct Tui {
     /// Use `/theme` in the TUI or see `$CODEX_HOME/themes` for custom themes.
     #[serde(default)]
     pub theme: Option<String>,
-
-    /// Overrides the default cyan accent used throughout the TUI.
-    ///
-    /// Supported formats:
-    /// - `r,g,b` where each channel is `0..255` (for example `0,170,255`)
-    /// - `#RRGGBB` (for example `#00AAFF`)
-    /// - `0..255` ANSI palette index (for example `14`)
-    #[serde(default)]
-    pub primary_accent: Option<String>,
 
     /// Pet id to preselect in the terminal pet picker.
     ///

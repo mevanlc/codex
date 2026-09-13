@@ -16,7 +16,6 @@ use codex_core_api::AskForApproval;
 use codex_core_api::AuthCredentialsStoreMode;
 use codex_core_api::AuthManager;
 use codex_core_api::AutoCompactTokenLimitScope;
-use codex_core_api::ChatboxPlaceholderTips;
 use codex_core_api::CodexAppsToolsCache;
 use codex_core_api::CodexHomeUserInstructionsProvider;
 use codex_core_api::CodexThread;
@@ -225,9 +224,7 @@ fn new_config(model: Option<String>, arg0_paths: Arg0DispatchPaths) -> anyhow::R
         tui_notifications: TuiNotificationSettings::default(),
         animations: true,
         show_tooltips: true,
-        chatbox_placeholder_tips: ChatboxPlaceholderTips::default(),
-        tui_file_mentions_preserve_at: false,
-        tui_file_mentions_allow_explicit_paths: true,
+        fork_tui: Default::default(),
         tui_auto_recap: true,
         model_availability_nux: ModelAvailabilityNuxConfig::default(),
         tui_alternate_screen: AltScreenMode::Auto,
@@ -235,7 +232,6 @@ fn new_config(model: Option<String>, arg0_paths: Arg0DispatchPaths) -> anyhow::R
         tui_status_line_use_colors: true,
         tui_terminal_title: None,
         tui_theme: None,
-        tui_primary_accent: None,
         tui_raw_output_mode: false,
         tui_pet: None,
         tui_pet_anchor: TuiPetAnchor::Composer,
