@@ -11,7 +11,9 @@ use codex_app_server_protocol::ConfigWriteResponse;
 use codex_app_server_protocol::MergeStrategy;
 use codex_app_server_protocol::OverriddenMetadata;
 use codex_app_server_protocol::WriteStatus;
+use codex_config::CONFIG_OVERLAY_FILE;
 use codex_config::CONFIG_TOML_FILE;
+use codex_config::ConfigFileKind;
 use codex_config::ConfigLayerEntry;
 use codex_config::ConfigLayerMetadata;
 use codex_config::ConfigLayerSource;
@@ -219,9 +221,31 @@ impl ConfigManager {
         expected_version: Option<String>,
         edits: Vec<(String, JsonValue, MergeStrategy)>,
     ) -> Result<ConfigWriteResponse, ConfigManagerError> {
-        let allowed_path = self
-            .user_config_path()
-            .map_err(|err| ConfigManagerError::io("failed to resolve user config path", err))?;
+        let mut destination = None;
+        for (key, value, _) in &edits {
+            let kind = parse_key_path(key)
+                .and_then(|path| {
+                    let value = parse_value(value.clone())?;
+                    ConfigFileKind::for_edit(&path, value.as_ref())
+                })
+                .map_err(|message| {
+                    ConfigManagerError::write(ConfigWriteErrorCode::ConfigValidationError, message)
+                })?;
+            if destination.is_some_and(|previous| previous != kind) {
+                return Err(ConfigManagerError::write(
+                    ConfigWriteErrorCode::ConfigValidationError,
+                    "Write shared and fork settings in separate requests",
+                ));
+            }
+            destination = Some(kind);
+        }
+        let destination = destination.unwrap_or(ConfigFileKind::Shared);
+        let allowed_path = if destination == ConfigFileKind::ForkOverlay {
+            AbsolutePathBuf::resolve_path_against_base(CONFIG_OVERLAY_FILE, self.codex_home())
+        } else {
+            self.user_config_path()
+                .map_err(|err| ConfigManagerError::io("failed to resolve user config path", err))?
+        };
         let provided_path = match file_path {
             Some(path) => AbsolutePathBuf::from_absolute_path(PathBuf::from(path))
                 .map_err(|err| ConfigManagerError::io("failed to resolve user config path", err))?,
@@ -231,7 +255,10 @@ impl ConfigManager {
         if !paths_match(&allowed_path, &provided_path) {
             return Err(ConfigManagerError::write(
                 ConfigWriteErrorCode::ConfigLayerReadonly,
-                "Only writes to the user config are allowed",
+                format!(
+                    "These settings must be written to {}",
+                    allowed_path.display()
+                ),
             ));
         }
 
@@ -239,8 +266,17 @@ impl ConfigManager {
             .load_thread_agnostic_config()
             .await
             .map_err(|err| ConfigManagerError::io("failed to load configuration", err))?;
-        let user_layer = match layers.get_active_user_layer() {
+        let provided_path = if destination == ConfigFileKind::ForkOverlay {
+            allowed_path.clone()
+        } else {
+            provided_path
+        };
+        let user_layer = match layers.all_layers_low_to_high().find(|layer| matches!(&layer.name, ConfigLayerSource::User { file, .. } if file == &allowed_path)) {
             Some(layer) => Cow::Borrowed(layer),
+            None if destination == ConfigFileKind::ForkOverlay => Cow::Owned(ConfigLayerEntry::new(
+                ConfigLayerSource::User { file: allowed_path.clone(), profile: None },
+                TomlValue::Table(toml::map::Map::new()),
+            )),
             None => Cow::Owned(create_empty_user_layer(&allowed_path).await?),
         };
 
@@ -393,6 +429,9 @@ impl ConfigManager {
             parsed_segments.push(segments);
         }
 
+        destination.validate(&user_config).map_err(|message| {
+            ConfigManagerError::write(ConfigWriteErrorCode::ConfigValidationError, message)
+        })?;
         validate_config(&user_config).map_err(|err| {
             ConfigManagerError::write(
                 ConfigWriteErrorCode::ConfigValidationError,
@@ -419,7 +458,7 @@ impl ConfigManager {
             )
         })?;
         let updated_layers = layers
-            .with_user_config(&provided_path, user_config.clone())
+            .with_user_config(&allowed_path, user_config.clone())
             .map_err(|err| {
                 ConfigManagerError::write(
                     ConfigWriteErrorCode::ConfigValidationError,
@@ -442,7 +481,8 @@ impl ConfigManager {
                 .map_err(|err| ConfigManagerError::anyhow("failed to persist config.toml", err))?;
         }
 
-        let overridden = first_overridden_edit(&updated_layers, &effective, &parsed_segments);
+        let overridden =
+            first_overridden_edit(&updated_layers, &effective, &parsed_segments, &allowed_path);
         let status = overridden
             .as_ref()
             .map(|_| WriteStatus::OkOverridden)
@@ -451,7 +491,8 @@ impl ConfigManager {
         Ok(ConfigWriteResponse {
             status,
             version: updated_layers
-                .get_active_user_layer()
+                .all_layers_low_to_high()
+                .find(|layer| matches!(&layer.name, ConfigLayerSource::User { file, .. } if file == &allowed_path))
                 .ok_or_else(|| {
                     ConfigManagerError::write(
                         ConfigWriteErrorCode::UserLayerNotFound,
@@ -847,8 +888,12 @@ fn compute_override_metadata(
     layers: &ConfigLayerStack,
     effective: &TomlValue,
     segments: &[String],
+    user_file: &AbsolutePathBuf,
 ) -> Option<OverriddenMetadata> {
-    let user_layer = layers.get_active_user_layer()?;
+    let user_layer = layers.layers_high_to_low().find(|layer| {
+        matches!(&layer.name,
+        ConfigLayerSource::User { file, .. } if file == user_file)
+    })?;
     let user_value = value_at_semantic_path(&user_layer.config, segments);
     let effective_value = value_at_semantic_path(effective, segments);
 
@@ -879,9 +924,10 @@ fn first_overridden_edit(
     layers: &ConfigLayerStack,
     effective: &TomlValue,
     edits: &[Vec<String>],
+    user_file: &AbsolutePathBuf,
 ) -> Option<OverriddenMetadata> {
     for segments in edits {
-        if let Some(meta) = compute_override_metadata(layers, effective, segments) {
+        if let Some(meta) = compute_override_metadata(layers, effective, segments, user_file) {
             return Some(meta);
         }
     }

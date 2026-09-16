@@ -1,4 +1,4 @@
-//! Fork-owned TUI configuration, flattened into the existing `[tui]` table.
+//! Fork-owned TUI configuration, stored under `[tui]` in `config-overlay.toml`.
 //!
 //! Keeping these options together limits changes to upstream config declarations while
 //! preserving their user-facing keys. The same value is carried into the resolved config.

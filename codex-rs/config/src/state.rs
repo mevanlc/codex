@@ -312,11 +312,12 @@ impl ConfigLayerStack {
     /// a profile-v2 layer is active, this returns that profile layer rather than
     /// the base `$CODEX_HOME/config.toml` layer because the active layer is the
     /// writable target for profile-aware edits.
+    /// The fork overlay is excluded: its settings have a separate write destination.
     pub fn get_active_user_layer(&self) -> Option<&ConfigLayerEntry> {
-        self.layers
-            .iter()
-            .rev()
-            .find(|layer| matches!(layer.name, ConfigLayerSource::User { .. }))
+        self.layers.iter().rev().find(|layer| {
+            matches!(&layer.name, ConfigLayerSource::User { file, .. }
+                if crate::ConfigFileKind::for_file(file.as_path()) == crate::ConfigFileKind::Shared)
+        })
     }
 
     pub fn get_user_config_file(&self) -> Option<&AbsolutePathBuf> {
@@ -510,6 +511,28 @@ impl ConfigLayerStack {
 /// Validates before merging so mixed forms and malformed filter entries cannot be normalized away.
 pub(crate) fn validate_enabled_config_layers(layers: &[ConfigLayerEntry]) -> std::io::Result<()> {
     for layer in layers.iter().filter(|layer| !layer.is_disabled()) {
+        match &layer.name {
+            ConfigLayerSource::PackagedDefaults { .. } | ConfigLayerSource::SessionFlags => {}
+            ConfigLayerSource::User { file, .. } => {
+                crate::fork_config::validate_config_file(file.as_path(), &layer.config)?
+            }
+            ConfigLayerSource::Mdm { .. }
+            | ConfigLayerSource::System { .. }
+            | ConfigLayerSource::EnterpriseManaged { .. }
+            | ConfigLayerSource::Project { .. }
+            | ConfigLayerSource::LegacyManagedConfigTomlFromFile { .. }
+            | ConfigLayerSource::LegacyManagedConfigTomlFromMdm => crate::ConfigFileKind::Shared
+                .validate(&layer.config)
+                .map_err(|message| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "{}: {message}",
+                            format_config_layer_source(&layer.name, CONFIG_TOML_FILE)
+                        ),
+                    )
+                })?,
+        }
         validate_shell_environment_policy_filter_config(&layer.config).map_err(|error| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,

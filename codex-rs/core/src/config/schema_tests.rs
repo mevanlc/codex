@@ -11,6 +11,21 @@ fn trim_single_trailing_newline(contents: &str) -> &str {
 }
 
 #[test]
+fn config_overlay_schema_matches_fixture() {
+    let fixture = codex_utils_cargo_bin::find_resource!("config-overlay.schema.json")
+        .expect("overlay schema fixture");
+    let temporary = TempDir::new().expect("tempdir");
+    let generated = temporary.path().join("config-overlay.schema.json");
+    codex_config::schema::write_config_overlay_schema(&generated).expect("generate overlay schema");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(generated).unwrap())
+            .unwrap(),
+        serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(fixture).unwrap())
+            .unwrap(),
+    );
+}
+
+#[test]
 fn config_schema_matches_fixture() {
     let fixture_path = codex_utils_cargo_bin::find_resource!("config.schema.json")
         .expect("resolve config schema fixture path");

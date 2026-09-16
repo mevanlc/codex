@@ -1,0 +1,5 @@
+---
+source: tui/src/local_settings_tests.rs
+expression: "codex_config::ConfigFileKind::Shared.validate(&value).unwrap_err()"
+---
+Move fork setting `tui.primary_accent` to $CODEX_HOME/config-overlay.toml

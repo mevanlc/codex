@@ -56,6 +56,34 @@ Or [build from source](#building).
 
 ## Fork-only settings and behavior
 
+Store fork-only settings in **`$CODEX_HOME/config-overlay.toml`** (normally
+`~/.codex/config-overlay.toml`). This optional file is read automatically by the
+fork; without it, all fork defaults apply. Keep shared settings in `config.toml`
+so official clients can read that file without encountering fork extensions.
+
+The overlay accepts only `tui.primary_accent`, `tui.chatbox_placeholder_tips`,
+`tui.file_mentions_preserve_at`, `tui.file_mentions_allow_explicit_paths`, and
+`tui.keymap.global.open_external_editor_with_quote`. Move any existing entries
+from `config.toml` or profile/project config into the overlay, retaining their
+table structure. Misplaced settings produce an error; startup does not migrate
+or create files. The examples below belong in the overlay.
+
+Fork-setting saves create the overlay when needed; standard saves still use the
+shared config or selected profile. Command-line `-c` overrides remain available.
+The corresponding schemas are `codex-rs/core/config.schema.json` and
+`codex-rs/core/config-overlay.schema.json`.
+
+Config-write RPCs infer the destination from the edited properties when no file
+is specified. Each request edits one file; send shared and fork changes in
+separate requests and use the version reported for the destination file.
+
+To customize the quoted-response editor shortcut (default `ctrl-x ctrl-e`):
+
+```toml
+[tui.keymap.global]
+open_external_editor_with_quote = "ctrl-x g"
+```
+
 ### Primary accent color
 
 Codex uses cyan as its accent color throughout the TUI. `[tui].primary_accent` remaps every cyan cell on the way to the terminal — composer, popups, and scrollback transcript alike:

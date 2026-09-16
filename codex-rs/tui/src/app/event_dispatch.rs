@@ -3240,10 +3240,14 @@ impl App {
 
         let edit =
             crate::legacy_core::config::edit::keymap_bindings_edit(&context, &action, &bindings);
-        match ConfigEditsBuilder::for_config_path(self.local_settings.user_config_path.as_path())
-            .with_edits([edit])
-            .apply()
-            .await
+        match ConfigEditsBuilder::for_config_path(
+            self.local_settings
+                .keymap_config_path(&context, &action)
+                .as_path(),
+        )
+        .with_edits([edit])
+        .apply()
+        .await
         {
             Ok(()) => {
                 self.cancel_pending_key_chord();
@@ -3294,10 +3298,14 @@ impl App {
         };
 
         let edit = crate::legacy_core::config::edit::keymap_binding_clear_edit(&context, &action);
-        match ConfigEditsBuilder::for_config_path(self.local_settings.user_config_path.as_path())
-            .with_edits([edit])
-            .apply()
-            .await
+        match ConfigEditsBuilder::for_config_path(
+            self.local_settings
+                .keymap_config_path(&context, &action)
+                .as_path(),
+        )
+        .with_edits([edit])
+        .apply()
+        .await
         {
             Ok(()) => {
                 self.cancel_pending_key_chord();

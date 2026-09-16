@@ -3864,27 +3864,8 @@
           "description": "Generate automatic conversation recaps when the terminal is unfocused. Defaults to `true`. Disabling this leaves `/recap` available on demand.",
           "type": "boolean"
         },
-        "chatbox_placeholder_tips": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ChatboxPlaceholderTips"
-            }
-          ],
-          "default": "on",
-          "description": "Controls whether the chatbox placeholder shows a rotating set of tip prompts.\n\n- `on` (default): Show rotating placeholder tips. - `off`: Use a generic placeholder instead."
-        },
         "disable_paste_burst": {
           "description": "When true, disables burst-paste detection for typed input entirely. All characters are inserted as they are received, and no buffering or placeholder replacement will occur for fast keypress bursts. Overrides the legacy top-level `disable_paste_burst` setting. Defaults to `false`.",
-          "type": "boolean"
-        },
-        "file_mentions_allow_explicit_paths": {
-          "default": true,
-          "description": "Let `@` file search resolve absolute paths and paths beginning with `./` or `../`. Defaults to `true`.",
-          "type": "boolean"
-        },
-        "file_mentions_preserve_at": {
-          "default": false,
-          "description": "Keep the leading `@` when a file-search completion is inserted into the composer. Defaults to `false`.",
           "type": "boolean"
         },
         "keymap": {
@@ -3954,7 +3935,6 @@
               "copy": null,
               "open_agents": null,
               "open_external_editor": null,
-              "open_external_editor_with_quote": null,
               "open_transcript": null,
               "queue": null,
               "submit": null,
@@ -4117,11 +4097,6 @@
           ],
           "default": "composer",
           "description": "Where the terminal pet should anchor vertically.\n\nDefaults to `composer`, which follows the current TUI composer viewport."
-        },
-        "primary_accent": {
-          "default": null,
-          "description": "Overrides the default cyan accent used throughout the TUI.\n\nSupported formats: - `r,g,b` where each channel is `0..255` (for example `0,170,255`) - `#RRGGBB` (for example `#00AAFF`) - `0..255` ANSI palette index (for example `14`)",
-          "type": "string"
         },
         "question_esc_back": {
           "default": true,
@@ -4633,14 +4608,6 @@
           ],
           "description": "Open the external editor for the current draft."
         },
-        "open_external_editor_with_quote": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/KeybindingsSpec"
-            }
-          ],
-          "description": "Open the external editor with the last agent response quoted below the current draft."
-        },
         "open_transcript": {
           "allOf": [
             {
@@ -4813,7 +4780,6 @@
             "copy": null,
             "open_agents": null,
             "open_external_editor": null,
-            "open_external_editor_with_quote": null,
             "open_transcript": null,
             "queue": null,
             "submit": null,

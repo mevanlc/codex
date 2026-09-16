@@ -220,7 +220,17 @@ pub fn mcp_servers_schema(schema_gen: &mut SchemaGenerator) -> Schema {
 }
 
 /// Build the config schema for `config.toml`.
+#[expect(
+    clippy::expect_used,
+    reason = "serializing and projecting a generated RootSchema preserves its schema structure"
+)]
 pub fn config_schema() -> RootSchema {
+    let value = serde_json::to_value(runtime_config_schema()).expect("serialize runtime schema");
+    serde_json::from_value(crate::fork_config_schema::shared_schema(value))
+        .expect("shared config schema")
+}
+
+fn runtime_config_schema() -> RootSchema {
     let mut schema = SchemaSettings::draft07()
         .with(|settings| {
             settings.option_add_null_type = false;
@@ -288,5 +298,16 @@ pub fn config_schema_json() -> anyhow::Result<Vec<u8>> {
 pub fn write_config_schema(out_path: &Path) -> anyhow::Result<()> {
     let json = config_schema_json()?;
     std::fs::write(out_path, json)?;
+    Ok(())
+}
+
+/// Generate the fork-only overlay schema alongside the shared configuration schema.
+pub fn write_config_overlay_schema(out_path: &Path) -> anyhow::Result<()> {
+    let runtime = serde_json::to_value(runtime_config_schema())?;
+    let overlay = crate::fork_config_schema::overlay_schema(&runtime);
+    std::fs::write(
+        out_path,
+        serde_json::to_vec_pretty(&canonicalize(&overlay))?,
+    )?;
     Ok(())
 }

@@ -91,7 +91,8 @@ pub struct LocalTomlLayer<S> {
 /// config reads.
 ///
 /// Cloud, selected profiles, session flags, and thread-provided layers are not
-/// included. Project discovery uses the executor's system, base-user, and
+/// included. The optional fork overlay is included alongside base-user config.
+/// Project discovery uses the executor's system, base-user, and
 /// legacy managed configuration.
 pub async fn load_local_config_layers(
     fs: &dyn ExecutorFileSystem,
@@ -190,6 +191,25 @@ pub(super) async fn load_local_config_layers_with_overrides(
             toml: user.toml,
         },
     ];
+    let overlay_file = codex_home.join(crate::CONFIG_OVERLAY_FILE);
+    if !overrides.ignore_user_config
+        && let Some(toml) = layer_io::read_config_from_path(
+            fs,
+            &overlay_file,
+            /*log_missing_as_info*/ false,
+            /*strict_config*/ false,
+        )
+        .await?
+    {
+        config_layers.push(LocalTomlLayer {
+            source: ConfigLayerSource::User {
+                file: overlay_file,
+                profile: None,
+            },
+            base_dir: codex_home.clone(),
+            toml,
+        });
+    }
     append_project_layers(fs, &mut config_layers, project_layers.layers).await?;
 
     append_legacy_config_layers(&mut config_layers, loaded_managed, &codex_home)?;

@@ -114,6 +114,7 @@ async fn first_layer_config_error_from_entries(layers: &[ConfigLayerEntry]) -> O
 ///   `%ProgramData%\OpenAI\Codex\config.toml` (Windows)
 /// - cloud     enterprise-managed cloud config bundle fragments
 /// - user      `${CODEX_HOME}/config.toml`
+/// - fork      `${CODEX_HOME}/config-overlay.toml`, when present
 /// - profile   `${CODEX_HOME}/<name>.config.toml`, when selected
 /// - cwd       `${PWD}/config.toml` (loaded but disabled when the directory is untrusted)
 /// - tree      parent directories up to root looking for `./.codex/config.toml` (loaded but disabled when untrusted)
@@ -347,6 +348,26 @@ pub async fn load_config_layers_state(
         }
     }
     layers.push(base_user_layer);
+
+    let overlay_file =
+        AbsolutePathBuf::resolve_path_against_base(crate::CONFIG_OVERLAY_FILE, codex_home);
+    if !ignore_user_config
+        && let Some(config) = layer_io::read_config_from_path(
+            fs,
+            &overlay_file,
+            /*log_missing_as_info*/ false,
+            strict_config,
+        )
+        .await?
+    {
+        layers.push(ConfigLayerEntry::new(
+            ConfigLayerSource::User {
+                file: overlay_file,
+                profile: None,
+            },
+            config,
+        ));
+    }
 
     if active_user_file != base_user_file {
         layers.push(
@@ -614,6 +635,7 @@ async fn load_config_toml_for_required_layer_raw(
                     config_error_from_toml(toml_file.as_path(), &contents, err.clone());
                 io_error_from_config_error(io::ErrorKind::InvalidData, config_error, Some(err))
             })?;
+            crate::fork_config::validate_config_file(toml_file.as_path(), &config)?;
             if strict_config {
                 validate_config_toml_strictly(
                     toml_file.as_path(),
@@ -1771,6 +1793,9 @@ async fn discover_project_layers(
                     }
                 };
                 let mut config = config;
+                if disabled_reason.is_none() {
+                    crate::fork_config::validate_config_file(config_file.as_path(), &config)?;
+                }
                 if disabled_reason.is_none() && strict_config {
                     validate_config_toml_strictly(
                         config_file.as_path(),

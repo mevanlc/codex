@@ -773,7 +773,12 @@ fn apply_blocking_to_resolved_file(
         return Ok(());
     }
 
-    write_atomically(&write_paths.write_path, &document.doc.to_string()).with_context(|| {
+    let contents = document.doc.to_string();
+    codex_config::ConfigFileKind::for_file(resolved_config_file)
+        .validate(&toml::from_str(&contents)?)
+        .map_err(anyhow::Error::msg)?;
+
+    write_atomically(&write_paths.write_path, &contents).with_context(|| {
         format!(
             "failed to persist config at {}",
             write_paths.write_path.display()

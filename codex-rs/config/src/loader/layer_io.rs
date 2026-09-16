@@ -159,6 +159,7 @@ pub(super) async fn read_config_from_path(
     {
         Ok(contents) => match toml::from_str::<TomlValue>(&contents) {
             Ok(value) => {
+                crate::fork_config::validate_config_file(path.as_path(), &value)?;
                 if strict_config {
                     validate_config_toml_strictly(path, &contents, &value)?;
                 }

@@ -18,10 +18,6 @@ auto_recap = false
 vim_mode_default = true
 terminal_resize_reflow_max_rows = 0
 session_picker_view = "comfortable"
-chatbox_placeholder_tips = "off"
-file_mentions_preserve_at = true
-file_mentions_allow_explicit_paths = false
-primary_accent = "3,4,5"
 [history]
 persistence = "none"
 max_bytes = 4096
@@ -31,6 +27,17 @@ fast_default_opt_out = true
     ] {
         let home = tempfile::tempdir()?;
         std::fs::write(home.path().join("config.toml"), config_text)?;
+        if !config_text.is_empty() {
+            std::fs::write(
+                home.path().join(codex_config::CONFIG_OVERLAY_FILE),
+                r#"[tui]
+chatbox_placeholder_tips = "off"
+file_mentions_preserve_at = true
+file_mentions_allow_explicit_paths = false
+primary_accent = "3,4,5"
+"#,
+            )?;
+        }
         let config = ConfigBuilder::default()
             .codex_home(home.path().to_path_buf())
             .loader_overrides(LoaderOverrides {
@@ -114,5 +121,67 @@ async fn local_writes_preserve_selected_user_file_and_home_destinations() -> any
         Some("comfortable")
     );
     assert_eq!(home_config["tui"].get("theme"), None);
+    let overlay = local.keymap_config_path("global", "open_external_editor_with_quote");
+    let clear = crate::legacy_core::config::edit::keymap_binding_clear_edit(
+        "global",
+        "open_external_editor_with_quote",
+    );
+    ConfigEditsBuilder::for_config_path(overlay.as_path())
+        .with_edits([clear.clone()])
+        .apply()
+        .await?;
+    assert!(!overlay.exists());
+    ConfigEditsBuilder::for_config_path(overlay.as_path())
+        .with_edits([crate::legacy_core::config::edit::keymap_binding_edit(
+            "global",
+            "open_external_editor_with_quote",
+            "ctrl-x g",
+        )])
+        .apply()
+        .await?;
+    assert_eq!(
+        std::fs::read_to_string(&selected)?,
+        "[tui]\ntheme = \"nord\"\n"
+    );
+    let reloaded = ConfigBuilder::default()
+        .codex_home(home.path().to_path_buf())
+        .loader_overrides(LoaderOverrides {
+            ignore_project_config: true,
+            ..LoaderOverrides::without_managed_config_for_tests()
+        })
+        .build()
+        .await?;
+    assert_eq!(
+        reloaded.tui_keymap.global.open_external_editor_with_quote,
+        Some(
+            toml::from_str::<codex_config::types::Tui>(
+                "[keymap.global]\nopen_external_editor_with_quote = 'ctrl-x g'"
+            )?
+            .keymap
+            .global
+            .open_external_editor_with_quote
+            .unwrap()
+        )
+    );
+    ConfigEditsBuilder::for_config_path(overlay.as_path())
+        .with_edits([clear])
+        .apply()
+        .await?;
+    let cleared: toml::Value = toml::from_str(&std::fs::read_to_string(overlay)?)?;
+    let cleared: codex_config::config_toml::ConfigToml = cleared.try_into()?;
+    assert_eq!(
+        cleared.tui.unwrap_or_default().keymap,
+        codex_config::types::TuiKeymap::default()
+    );
     Ok(())
+}
+
+#[test]
+fn misplaced_fork_setting_diagnostic() {
+    let value = toml::from_str("[tui]\nprimary_accent = '14'").unwrap();
+    insta::assert_snapshot!(
+        codex_config::ConfigFileKind::Shared
+            .validate(&value)
+            .unwrap_err()
+    );
 }

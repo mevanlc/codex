@@ -1,4 +1,6 @@
 use anyhow::Result;
+#[path = "config_overlay_tests.rs"]
+mod config_overlay;
 use app_test_support::TestAppServer;
 use app_test_support::test_path_buf_with_windows;
 use app_test_support::test_tmp_path_buf;

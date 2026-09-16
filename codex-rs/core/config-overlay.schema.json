@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "ChatboxPlaceholderTips": {
+      "enum": [
+        "on",
+        "off"
+      ],
+      "type": "string"
+    },
+    "KeybindingsSpec": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "One action binding value in config.\n\nThis accepts either:\n\n1. A single key or chord string (`\"ctrl-a\"` or `\"ctrl-x ctrl-s\"`). 2. A list of alternative bindings (`[\"ctrl-a\", \"ctrl-x ctrl-s\"]`).\n\nAn empty list explicitly unbinds the action in that scope. Because an explicit empty list is still a configured value, runtime resolution must not fall through to global or built-in defaults for that action."
+    }
+  },
+  "properties": {
+    "tui": {
+      "additionalProperties": false,
+      "properties": {
+        "chatbox_placeholder_tips": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ChatboxPlaceholderTips"
+            }
+          ],
+          "default": "on",
+          "description": "Controls whether the chatbox placeholder shows a rotating set of tip prompts.\n\n- `on` (default): Show rotating placeholder tips. - `off`: Use a generic placeholder instead."
+        },
+        "file_mentions_allow_explicit_paths": {
+          "default": true,
+          "description": "Let `@` file search resolve absolute paths and paths beginning with `./` or `../`. Defaults to `true`.",
+          "type": "boolean"
+        },
+        "file_mentions_preserve_at": {
+          "default": false,
+          "description": "Keep the leading `@` when a file-search completion is inserted into the composer. Defaults to `false`.",
+          "type": "boolean"
+        },
+        "keymap": {
+          "additionalProperties": false,
+          "properties": {
+            "global": {
+              "additionalProperties": false,
+              "properties": {
+                "open_external_editor_with_quote": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/KeybindingsSpec"
+                    }
+                  ],
+                  "description": "Open the external editor with the last agent response quoted below the current draft."
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "primary_accent": {
+          "default": null,
+          "description": "Overrides the default cyan accent used throughout the TUI.\n\nSupported formats: - `r,g,b` where each channel is `0..255` (for example `0,170,255`) - `#RRGGBB` (for example `#00AAFF`) - `0..255` ANSI palette index (for example `14`)",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "title": "ForkConfigOverlay",
+  "type": "object"
+}

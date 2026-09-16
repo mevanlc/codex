@@ -65,6 +65,22 @@ impl From<&Config> for LocalSettings {
 }
 
 impl LocalSettings {
+    #[expect(
+        clippy::expect_used,
+        reason = "a leaf edit without a value cannot mix file destinations"
+    )]
+    pub(crate) fn keymap_config_path(&self, context: &str, action: &str) -> AbsolutePathBuf {
+        let path = ["tui", "keymap", context, action].map(str::to_string);
+        match codex_config::ConfigFileKind::for_edit(&path, /*value*/ None)
+            .expect("a keymap action has one config destination")
+        {
+            codex_config::ConfigFileKind::ForkOverlay => {
+                self.codex_home.join(codex_config::CONFIG_OVERLAY_FILE)
+            }
+            codex_config::ConfigFileKind::Shared => self.user_config_path.clone(),
+        }
+    }
+
     pub(crate) fn terminal_resize_reflow(&self) -> TerminalResizeReflowConfig {
         TerminalResizeReflowConfig {
             max_rows: match self.tui.terminal_resize_reflow_max_rows {

@@ -1,4 +1,6 @@
 use super::*;
+#[path = "fork_overlay_tests.rs"]
+mod fork_overlay;
 use crate::ConfigRequirementsToml;
 use codex_file_system::CopyOptions;
 use codex_file_system::CreateDirectoryOptions;
