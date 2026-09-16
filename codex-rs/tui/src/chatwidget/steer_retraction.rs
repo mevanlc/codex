@@ -34,10 +34,7 @@ impl ChatWidget {
             .iter_mut()
             .find(|pending| pending.client_id == client_id)
         else {
-            tracing::warn!(
-                client_id,
-                "accepted steer was not present in the pending queue"
-            );
+            // Every user submission now has an ID, including newly started turns.
             return;
         };
         pending.turn_id = Some(turn_id);

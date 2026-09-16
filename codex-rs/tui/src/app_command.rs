@@ -30,6 +30,7 @@ pub(crate) enum AppCommand {
         command: String,
     },
     UserTurn {
+        client_user_message_id: String,
         items: Vec<UserInput>,
         cwd: PathBuf,
         approval_policy: AskForApproval,
@@ -42,7 +43,6 @@ pub(crate) enum AppCommand {
         final_output_json_schema: Option<Value>,
         collaboration_mode: Option<CollaborationMode>,
         personality: Option<Personality>,
-        client_user_message_id: Option<String>,
     },
     RetractSteer {
         expected_turn_id: String,
@@ -118,6 +118,7 @@ impl AppCommand {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn user_turn(
+        client_user_message_id: String,
         items: Vec<UserInput>,
         cwd: PathBuf,
         approval_policy: AskForApproval,
@@ -129,9 +130,9 @@ impl AppCommand {
         final_output_json_schema: Option<Value>,
         collaboration_mode: Option<CollaborationMode>,
         personality: Option<Personality>,
-        client_user_message_id: Option<String>,
     ) -> Self {
         Self::UserTurn {
+            client_user_message_id,
             items,
             cwd,
             approval_policy,
@@ -144,7 +145,6 @@ impl AppCommand {
             final_output_json_schema,
             collaboration_mode,
             personality,
-            client_user_message_id,
         }
     }
 

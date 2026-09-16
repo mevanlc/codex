@@ -96,7 +96,18 @@ While composing a `!` shell command, press Tab to toggle an automatic follow-up 
 
 Upstream binds `Alt+Up` (or `Shift+Left`) to "edit the most recently queued message", and it only reaches messages still queued locally. This fork extends the same binding to _steers_ — messages already handed to an in-flight turn but not yet consumed — and pops the steer back into the composer for editing. The pending-input preview now shows the edit hint whenever anything is retractable, not just for locally queued messages. If the turn consumes the message first, Codex warns that it was already submitted and can no longer be edited.
 
-The underlying mechanism is a new experimental `turn/retract` app-server request taking `threadId`, `expectedTurnId`, and `clientUserMessageId`, and returning `retracted`, `notPending`, or `notRetractable`. Steers that carried additional context or Responses API client metadata are not retractable, because those side effects are applied when the steer is accepted. See [`codex-rs/app-server/README.md`](codex-rs/app-server/README.md) for the request/response shapes.
+The underlying mechanism is an experimental `turn/retract` app-server request. Clients with `capabilities.experimentalApi` can retract a pending steer using its `clientUserMessageId` and the exact active turn ID:
+
+```json
+{ "method": "turn/retract", "id": 33, "params": {
+    "threadId": "thr_123",
+    "expectedTurnId": "turn_456",
+    "clientUserMessageId": "client_msg_124"
+} }
+{ "id": 33, "result": { "status": "retracted" } }
+```
+
+The response status is `notPending` if the input was already consumed, was already retracted, or does not match the active turn. A steer with additional context or Responses API client metadata returns `notRetractable` because those side effects are applied when the steer is accepted.
 
 ### Reasoning shortcuts reach Max and Ultra
 
