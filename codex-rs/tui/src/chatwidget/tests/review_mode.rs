@@ -1,4 +1,5 @@
 use super::*;
+use codex_app_server_protocol::ImageReference;
 use pretty_assertions::assert_eq;
 use std::collections::VecDeque;
 
@@ -380,8 +381,10 @@ async fn restore_thread_input_state_restores_pending_steers_without_downgrading_
             questions: None,
             composer: None,
             safety_buffering_prompt: None,
+            safety_buffering_source: UserMessageSource::Prompt,
             pending_steers: VecDeque::from([expected_pending.clone()]),
             rejected_steers_queue,
+            rejected_steer_sources: VecDeque::new(),
             rejected_steer_history_records: VecDeque::new(),
             queued_user_messages,
             queued_user_message_history_records: VecDeque::new(),
@@ -390,6 +393,7 @@ async fn restore_thread_input_state_restores_pending_steers_without_downgrading_
             submit_pending_steers_after_interrupt: false,
             current_collaboration_mode: chat.current_collaboration_mode.clone(),
             active_collaboration_mask: chat.active_collaboration_mask.clone(),
+            plan_mode_reasoning_effort: chat.config.plan_mode_reasoning_effort.clone(),
             task_running: false,
             agent_turn_running: false,
         }),
@@ -686,7 +690,9 @@ async fn item_completed_pops_pending_steer_with_local_image_and_text_elements() 
         "user-1",
         vec![
             UserInput::Image {
-                url: "data:image/png;base64,placeholder".to_string(),
+                image: ImageReference::Inline {
+                    url: "data:image/png;base64,placeholder".to_string(),
+                },
                 detail: None,
             },
             UserInput::Text {
@@ -900,6 +906,38 @@ async fn queued_message_shortcut_restores_pending_steer_after_retraction_succeed
     assert_eq!(
         chat.bottom_pane.composer_text(),
         "pending steer\ndraft typed while retracting"
+    );
+}
+
+#[tokio::test]
+async fn queued_message_shortcut_restores_preparing_images_before_retracting_a_steer() {
+    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.bottom_pane.set_task_running(/*running*/ true);
+    chat.input_queue
+        .pending_steers
+        .push_back(pending_steer("pending steer"));
+    chat.prepare_image_submission(
+        UserMessage::from("image draft"),
+        UserMessageHistoryRecord::UserMessageText,
+        UserMessageSource::Prompt,
+    );
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+
+    assert!(chat.pending_image_submission.is_none());
+    assert_eq!(chat.bottom_pane.composer_text(), "image draft");
+    assert_eq!(chat.input_queue.pending_steers.len(), 1);
+    assert_eq!(chat.input_queue.pending_steer_retraction_in_flight, None);
+    assert_no_submit_op(&mut op_rx);
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+
+    assert_eq!(
+        op_rx.try_recv().expect("retract steer op"),
+        Op::RetractSteer {
+            expected_turn_id: "turn-1".to_string(),
+            client_user_message_id: "client-pending steer".to_string(),
+        }
     );
 }
 

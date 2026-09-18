@@ -1023,6 +1023,26 @@ mod tests {
             .join("\n");
 
         assert_snapshot!("keymap_picker_first_actions", snapshot);
+        let agents = all_tab
+            .items
+            .iter()
+            .filter(|item| {
+                item.search_value
+                    .as_deref()
+                    .unwrap_or_default()
+                    .starts_with("Agents ")
+            })
+            .map(|item| {
+                format!(
+                    "{} | {} | {}",
+                    item.name,
+                    item.description.as_deref().unwrap_or_default(),
+                    item.search_value.as_deref().unwrap_or_default()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_snapshot!("keymap_picker_agents_actions", agents);
     }
 
     #[test]
@@ -1081,6 +1101,7 @@ mod tests {
                 ("Toggle Vim Mode", Some("unbound"), false),
                 ("Previous Permission Mode", Some("unbound"), false),
                 ("Next Permission Mode", Some("unbound"), false),
+                ("Toggle Voice Mute", Some("unbound"), false),
                 ("Kill Whole Line", Some("unbound"), false),
             ]
         );
@@ -1156,6 +1177,22 @@ mod tests {
             .expect("redo row should render");
 
         assert_snapshot!("keymap_picker_redo", redo_row);
+    }
+
+    #[test]
+    fn picker_voice_toggle_snapshot() {
+        assert_snapshot!(
+            "keymap_voice_toggle",
+            render_picker(
+                build_keymap_action_menu_params(
+                    "chat".into(),
+                    "toggle_voice".into(),
+                    &RuntimeKeymap::defaults(),
+                    &TuiKeymap::default(),
+                ),
+                /*width*/ 80,
+            )
+        );
     }
 
     #[test]
