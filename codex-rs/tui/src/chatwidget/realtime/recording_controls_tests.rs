@@ -10,9 +10,6 @@ use pretty_assertions::assert_eq;
 #[tokio::test]
 async fn voice_mute_shortcut_only_handles_active_current_thread_presses() {
     let (mut chat, _sender, mut events, mut ops) = make_chatwidget_manual_with_sender().await;
-    let config = toml::from_str("[chat]\ntoggle_voice_mute = 'ctrl-x'").unwrap();
-    let runtime = crate::keymap::RuntimeKeymap::from_config(&config).unwrap();
-    chat.apply_keymap_update(config, &runtime);
     let thread_id = activate_voice(&mut chat);
     let shortcut = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
 
@@ -54,9 +51,6 @@ async fn voice_mute_shortcut_only_handles_active_current_thread_presses() {
 #[tokio::test]
 async fn voice_mute_shortcut_accepts_raw_terminal_control_bytes() {
     let (mut chat, _sender, mut events, mut ops) = make_chatwidget_manual_with_sender().await;
-    let config = toml::from_str("[chat]\ntoggle_voice_mute = 'ctrl-x'").unwrap();
-    let runtime = crate::keymap::RuntimeKeymap::from_config(&config).unwrap();
-    chat.apply_keymap_update(config, &runtime);
     activate_voice(&mut chat);
 
     assert!(chat.handle_realtime_microphone_shortcut(KeyEvent::new(
@@ -145,7 +139,7 @@ async fn voice_composer_preserves_normal_colors_across_microphone_states() {
                 .join("\n");
             insta::assert_snapshot!(rows, @r"
             0:
-            1:  voice ● listening   /voice mute   /voice stop
+            1:  voice ● listening ctrl+x mute     /voice stop
             2:    mic ▁▁▁▁▁▁  codex ▁▁▁▁▁▁
             3:
             4: › typed
@@ -430,7 +424,7 @@ async fn narrow_voice_footer_keeps_the_stop_control_before_meters() {
 
     let footer = render_bottom_popup(&chat, /*width*/ 46);
     assert!(footer.contains("voice ● speaking"));
-    assert!(footer.contains("/voice mute"));
+    assert!(footer.contains("ctrl+x mute"));
     assert!(footer.contains("/voice stop"));
     chat.realtime_conversation.speaker_active_until = None;
     chat.realtime_conversation.speaker_level = 1;
@@ -448,7 +442,7 @@ async fn narrow_voice_footer_keeps_the_stop_control_before_meters() {
     assert_eq!(chat.realtime_conversation.speaker_active_until, None);
     let interrupted = render_bottom_popup(&chat, /*width*/ 45);
     assert!(interrupted.contains("voice ● heard"));
-    assert!(interrupted.contains("/voice mute"));
+    assert!(interrupted.contains("ctrl+x mute"));
     assert!(interrupted.contains("/voice stop"));
     chat.realtime_conversation.interruption_acknowledged_until =
         Some(std::time::Instant::now() - super::super::INTERRUPTION_ACKNOWLEDGMENT);
@@ -674,11 +668,11 @@ async fn clipped_voice_composer_keeps_the_draft_and_cursor_visible() {
     › typed
 
     6 rows:
-    voice ● listening   /voice mute   /voice stop
+    voice ● listening ctrl+x mute     /voice stop
     › typed
 
     8 rows:
-    voice ● listening   /voice mute   /voice stop
+    voice ● listening ctrl+x mute     /voice stop
     › typed
     ");
 }

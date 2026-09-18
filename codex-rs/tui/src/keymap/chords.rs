@@ -16,7 +16,6 @@ use super::parse_keybinding;
 use super::runtime_action_bindings;
 use crate::key_hint::KeyBinding;
 use crate::key_hint::ctrl;
-use codex_config::types::KeybindingSpec;
 use codex_config::types::KeybindingsSpec;
 use codex_config::types::TuiKeymap;
 use crossterm::event::KeyCode;
@@ -87,30 +86,52 @@ pub(crate) struct RuntimeChordBinding {
     spec: String,
 }
 
-/// Chord bindings plus active configured/default alternatives in declaration order.
+/// Chord bindings plus configured alternatives in declaration order.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RuntimeChordKeymap {
     pub(crate) bindings: Vec<RuntimeChordBinding>,
     configured_specs: Vec<(KeymapActionId, Vec<String>)>,
-    default_specs: Vec<(KeymapActionId, Vec<String>)>,
 }
 
 impl RuntimeChordKeymap {
     pub(super) fn from_config(keymap: &TuiKeymap) -> Result<Self, String> {
         let mut keymap_chords = Self::default();
         for action in keymap_action_ids() {
-            if let Some(configured) = effective_configured_binding(keymap, action) {
-                let specs = keymap_chords.add_specs(
-                    action,
-                    configured.specs().into_iter().map(KeybindingSpec::as_str),
-                )?;
-                keymap_chords.configured_specs.push((action, specs));
-            } else if let Some(defaults) = default_chord_specs(action)
-                && !configured_binding_shadows_default_chord(keymap, action, defaults)
-            {
-                let specs = keymap_chords.add_specs(action, defaults.iter().copied())?;
-                keymap_chords.default_specs.push((action, specs));
+            let Some(configured) = effective_configured_binding(keymap, action) else {
+                continue;
+            };
+            let mut configured_specs = Vec::new();
+            for spec in configured.specs() {
+                let raw = spec.as_str();
+                if configured_specs.iter().any(|configured| configured == raw) {
+                    continue;
+                }
+                if let Some((prefix, completion)) = raw.split_once(' ') {
+                    let invalid_binding = || {
+                        format!(
+                            "Invalid `{}` = `{raw}`. Use a single key such as `ctrl-a` \
+or a two-stroke chord such as `ctrl-x ctrl-t`.",
+                            action.config_path()
+                        )
+                    };
+                    keymap_chords.bindings.push(RuntimeChordBinding {
+                        action,
+                        chord: KeyChord {
+                            prefix: normalize_chord_binding(
+                                parse_keybinding(prefix).ok_or_else(invalid_binding)?,
+                            ),
+                            completion: normalize_chord_binding(
+                                parse_keybinding(completion).ok_or_else(invalid_binding)?,
+                            ),
+                        },
+                        spec: raw.to_string(),
+                    });
+                }
+                configured_specs.push(raw.to_string());
             }
+            keymap_chords
+                .configured_specs
+                .push((action, configured_specs));
         }
 
         let g = crate::key_hint::plain(KeyCode::Char('g'));
@@ -151,55 +172,11 @@ impl RuntimeChordKeymap {
         Ok(keymap_chords)
     }
 
-    fn add_specs<'a>(
-        &mut self,
-        action: KeymapActionId,
-        specs: impl IntoIterator<Item = &'a str>,
-    ) -> Result<Vec<String>, String> {
-        let mut active_specs = Vec::new();
-        for raw in specs {
-            if active_specs.iter().any(|configured| configured == raw) {
-                continue;
-            }
-            if let Some((prefix, completion)) = raw.split_once(' ') {
-                let invalid_binding = || {
-                    format!(
-                        "Invalid `{}` = `{raw}`. Use a single key such as `ctrl-a` \
-or a two-stroke chord such as `ctrl-x ctrl-t`.",
-                        action.config_path()
-                    )
-                };
-                self.bindings.push(RuntimeChordBinding {
-                    action,
-                    chord: KeyChord {
-                        prefix: normalize_chord_binding(
-                            parse_keybinding(prefix).ok_or_else(invalid_binding)?,
-                        ),
-                        completion: normalize_chord_binding(
-                            parse_keybinding(completion).ok_or_else(invalid_binding)?,
-                        ),
-                    },
-                    spec: raw.to_string(),
-                });
-            }
-            active_specs.push(raw.to_string());
-        }
-        Ok(active_specs)
-    }
-
     pub(crate) fn configured_specs(&self, action: KeymapActionId) -> Option<&[String]> {
         self.configured_specs
             .iter()
             .find_map(|(configured_action, specs)| {
                 (*configured_action == action).then_some(specs.as_slice())
-            })
-    }
-
-    pub(crate) fn default_specs(&self, action: KeymapActionId) -> Option<&[String]> {
-        self.default_specs
-            .iter()
-            .find_map(|(default_action, specs)| {
-                (*default_action == action).then_some(specs.as_slice())
             })
     }
 
@@ -211,7 +188,6 @@ or a two-stroke chord such as `ctrl-x ctrl-t`.",
     ) -> Option<crate::key_hint::ShortcutHint> {
         if let Some(spec) = self
             .configured_specs(action)
-            .or_else(|| self.default_specs(action))
             .and_then(|specs| specs.first())
         {
             return if let Some((prefix, completion)) = spec.split_once(' ') {
@@ -236,55 +212,6 @@ or a two-stroke chord such as `ctrl-x ctrl-t`.",
                     })
             })
     }
-}
-
-const OPEN_EXTERNAL_EDITOR_WITH_QUOTE_DEFAULTS: &[&str] = &["ctrl-x ctrl-e"];
-
-fn default_chord_specs(action: KeymapActionId) -> Option<&'static [&'static str]> {
-    (action.context == KeymapContext::Global && action.action == "open_external_editor_with_quote")
-        .then_some(OPEN_EXTERNAL_EDITOR_WITH_QUOTE_DEFAULTS)
-}
-
-fn configured_binding_shadows_default_chord(
-    keymap: &TuiKeymap,
-    default_action: KeymapActionId,
-    default_specs: &[&str],
-) -> bool {
-    default_specs.iter().any(|default_spec| {
-        let Some((prefix, completion)) = default_spec.split_once(' ') else {
-            return false;
-        };
-        let Some(default_prefix) = parse_keybinding(prefix).map(normalize_chord_binding) else {
-            return false;
-        };
-        let Some(default_completion) = parse_keybinding(completion).map(normalize_chord_binding)
-        else {
-            return false;
-        };
-        keymap_action_ids()
-            .filter(|action| default_action.context.overlaps(action.context))
-            .filter_map(|action| effective_configured_binding(keymap, action))
-            .flat_map(KeybindingsSpec::specs)
-            .any(|spec| {
-                let raw = spec.as_str();
-                if let Some((prefix, completion)) = raw.split_once(' ') {
-                    let configured = parse_keybinding(prefix)
-                        .zip(parse_keybinding(completion))
-                        .map(|(prefix, completion)| KeyChord {
-                            prefix: normalize_chord_binding(prefix),
-                            completion: normalize_chord_binding(completion),
-                        });
-                    configured.is_some_and(|configured| {
-                        configured.prefix == default_prefix
-                            && configured.completion == default_completion
-                    })
-                } else {
-                    parse_keybinding(raw)
-                        .map(normalize_chord_binding)
-                        .is_some_and(|configured| configured.parts() == default_prefix.parts())
-                }
-            })
-    })
 }
 
 /// Outcome of routing one physical key through the chord state machine.

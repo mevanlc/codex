@@ -570,11 +570,6 @@ pub(crate) fn active_binding_specs(
     {
         return Ok(specs.to_vec());
     }
-    if let Some(action_id) = keymap_action_id(context, action)
-        && let Some(specs) = runtime_keymap.chords.default_specs(action_id)
-    {
-        return Ok(specs.to_vec());
-    }
 
     let bindings = bindings_for_action(runtime_keymap, context, action).ok_or_else(|| {
         format!("Unknown keymap action `{context}.{action}`. Reopen /keymap and choose an action.")
@@ -1101,7 +1096,6 @@ mod tests {
                 ("Toggle Vim Mode", Some("unbound"), false),
                 ("Previous Permission Mode", Some("unbound"), false),
                 ("Next Permission Mode", Some("unbound"), false),
-                ("Toggle Voice Mute", Some("unbound"), false),
                 ("Kill Whole Line", Some("unbound"), false),
             ]
         );

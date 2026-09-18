@@ -625,6 +625,15 @@ impl RuntimeKeymap {
     pub(crate) fn from_config(keymap: &TuiKeymap) -> Result<Self, String> {
         let defaults = Self::built_in_defaults();
         let chords = Arc::new(RuntimeChordKeymap::from_config(keymap)?);
+        let quoted_editor_default_is_shadowed =
+            keymap.global.open_external_editor_with_quote.is_none()
+                && (configured_main_surface_alias_is_used(keymap, "alt-g")
+                    || configured_context_alias_is_used(&keymap.vim_search, "alt-g")
+                    || chords.bindings.iter().any(|binding| {
+                        binding.action.context.overlaps(KeymapContext::Global)
+                            && binding.chord.prefix.parts()
+                                == key_hint::alt(KeyCode::Char('g')).parts()
+                    }));
         let side_toggle_default_is_shadowed = keymap.global.toggle_side_conversation.is_none()
             && ["ctrl-/", "ctrl-7"].into_iter().any(|alias| {
                 configured_main_surface_alias_is_used(keymap, alias)
@@ -663,11 +672,15 @@ impl RuntimeKeymap {
                 &defaults.app.open_external_editor,
                 "tui.keymap.global.open_external_editor",
             )?,
-            open_external_editor_with_quote: resolve_bindings(
-                keymap.global.open_external_editor_with_quote.as_ref(),
-                &defaults.app.open_external_editor_with_quote,
-                "tui.keymap.global.open_external_editor_with_quote",
-            )?,
+            open_external_editor_with_quote: if quoted_editor_default_is_shadowed {
+                Vec::new()
+            } else {
+                resolve_bindings(
+                    keymap.global.open_external_editor_with_quote.as_ref(),
+                    &defaults.app.open_external_editor_with_quote,
+                    "tui.keymap.global.open_external_editor_with_quote",
+                )?
+            },
             copy: resolve_bindings(
                 keymap.global.copy.as_ref(),
                 &defaults.app.copy,
@@ -1590,7 +1603,7 @@ impl RuntimeKeymap {
                 open_agents: default_bindings![],
                 open_transcript: default_bindings![ctrl(KeyCode::Char('t'))],
                 open_external_editor: default_bindings![ctrl(KeyCode::Char('g'))],
-                open_external_editor_with_quote: default_bindings![],
+                open_external_editor_with_quote: default_bindings![alt(KeyCode::Char('g'))],
                 copy: default_bindings![ctrl(KeyCode::Char('o'))],
                 clear_terminal: default_bindings![ctrl(KeyCode::Char('l'))],
                 toggle_vim_mode: default_bindings![],

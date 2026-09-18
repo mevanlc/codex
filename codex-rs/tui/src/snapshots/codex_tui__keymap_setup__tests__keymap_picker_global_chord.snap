@@ -13,7 +13,7 @@ expression: "render_picker(params, 120)"
 › Global       - Open Agents                      unbound
   Global       * Open Transcript                  ctrl-t, ctrl-x ctrl-t
   Global         Open External Editor             ctrl-g
-  Global         Open External Editor With Quote  ctrl-x ctrl-e
+  Global         Open External Editor With Quote  alt-g
   Global         Copy                             ctrl-o
   Global         Clear Terminal                   ctrl-l
   Global       - Toggle Vim Mode                  unbound

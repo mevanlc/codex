@@ -5,16 +5,16 @@ expression: "render_picker(params, 78)"
 
   Keymap
   All configurable shortcuts.
-  148 actions, 0 customized, 6 unbound.
+  148 actions, 0 customized, 5 unbound.
 
-  [All]  Common  Customized (0)  Unbound (6)  App  Composer  Editor  Vim
+  [All]  Common  Customized (0)  Unbound (5)  App  Composer  Editor  Vim
   Navigation  Agents  Approval  Debug
 
   Type to search shortcuts
 › Global       - Open Agents                      unbound
   Global         Open Transcript                  ctrl-t
   Global         Open External Editor             ctrl-g
-  Global         Open External Editor With Quote  ctrl-x ctrl-e
+  Global         Open External Editor With Quote  alt-g
   Global         Copy                             ctrl-o
   Global         Clear Terminal                   ctrl-l
   Global       - Toggle Vim Mode                  unbound

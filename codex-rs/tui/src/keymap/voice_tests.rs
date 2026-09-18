@@ -8,12 +8,7 @@ use pretty_assertions::assert_eq;
 #[test]
 fn voice_mute_resolves_custom_bindings_unbinding_and_visible_hints() {
     for (config, expected) in [
-        // The fork's quoted-editor chord owns the default Ctrl+X prefix.
-        ("", None),
-        (
-            "[global]\nopen_external_editor_with_quote = []",
-            Some("ctrl + x"),
-        ),
+        ("", Some("ctrl + x")),
         ("[chat]\ntoggle_voice_mute = 'ctrl-x'", Some("ctrl + x")),
         ("[chat]\ntoggle_voice_mute = 'f8'", Some("f8")),
         ("[chat]\ntoggle_voice_mute = []", None),
@@ -36,6 +31,7 @@ fn voice_mute_default_yields_to_existing_shortcuts_and_chord_prefixes() {
         "[editor]\nkill_line_end = 'ctrl-x'",
         "[global]\ncopy = 'ctrl-x'",
         "[global]\nopen_transcript = 'ctrl-x ctrl-t'",
+        "[global]\nopen_external_editor_with_quote = 'ctrl-x ctrl-e'",
     ] {
         let config = toml::from_str::<TuiKeymap>(config).unwrap();
         let runtime = RuntimeKeymap::from_config(&config).expect("existing binding stays valid");

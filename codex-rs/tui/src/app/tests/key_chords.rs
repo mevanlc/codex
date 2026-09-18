@@ -118,11 +118,16 @@ async fn completed_global_chord_reuses_the_existing_action_handler() -> Result<(
 }
 
 #[tokio::test]
-async fn quoted_editor_default_chord_is_distinct_from_plain_external_editor() -> Result<()> {
+async fn quoted_editor_default_shortcut_is_distinct_from_plain_external_editor() -> Result<()> {
     let (mut app, mut tui, mut app_server) = chord_app().await?;
 
-    press(&mut app, &mut tui, &mut app_server, ctrl('x')).await?;
-    press(&mut app, &mut tui, &mut app_server, ctrl('e')).await?;
+    press(
+        &mut app,
+        &mut tui,
+        &mut app_server,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::ALT),
+    )
+    .await?;
     assert_eq!(
         app.chat_widget.external_editor_state(),
         ExternalEditorState::Requested(ExternalEditorMode::DraftWithLastAgentResponse)

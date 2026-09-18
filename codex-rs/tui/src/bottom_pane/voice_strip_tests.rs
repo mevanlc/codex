@@ -53,7 +53,7 @@ fn active_dashboard_preserves_live_colors_controls_and_width() {
     assert!(actual.starts_with(" voice "));
     assert!(actual.lines().nth(1).unwrap().starts_with("   mic "));
     insta::assert_snapshot!(actual, @r"
-    voice ● listening   /voice mute   /voice stop
+    voice ● listening ctrl+x mute     /voice stop
       mic ▆▅▄▃▂▁  codex ▁▃▄▅▆█
     ");
     assert_eq!(buffer[(7, 0)].fg, Color::Red);
@@ -61,7 +61,7 @@ fn active_dashboard_preserves_live_colors_controls_and_width() {
     assert_eq!(buffer[(22, 1)].fg, Color::Magenta);
     assert!(actual.contains("/voice stop"));
     let (compact, buffer) = rows(&strip, /*width*/ 37);
-    assert!(compact.contains("/voice mute") && compact.contains("/voice stop"));
+    assert!(compact.contains("ctrl+x mute") && compact.contains("/voice stop"));
     assert_eq!(buffer[(36, 0)].symbol(), " ");
     let (narrow, buffer) = rows(&strip, /*width*/ 22);
     assert!(narrow.contains("/voice stop"));

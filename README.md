@@ -77,11 +77,11 @@ Config-write RPCs infer the destination from the edited properties when no file
 is specified. Each request edits one file; send shared and fork changes in
 separate requests and use the version reported for the destination file.
 
-To customize the quoted-response editor shortcut (default `ctrl-x ctrl-e`):
+To customize the quoted-response editor shortcut (default Meta+G, written `alt-g`):
 
 ```toml
 [tui.keymap.global]
-open_external_editor_with_quote = "ctrl-x g"
+open_external_editor_with_quote = "alt-e"
 ```
 
 ### Primary accent color

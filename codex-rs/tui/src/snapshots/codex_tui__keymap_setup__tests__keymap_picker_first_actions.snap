@@ -5,7 +5,7 @@ expression: snapshot
 tab: All (148 selectable)
 tab: Common (21 selectable)
 tab: Customized (0) (0 selectable)
-tab: Unbound (6) (6 selectable)
+tab: Unbound (5) (5 selectable)
 tab: App (19 selectable)
 tab: Composer (5 selectable)
 tab: Editor (17 selectable)
@@ -17,7 +17,7 @@ tab: Debug (1 selectable)
 Open Agents | unbound | Global open_agents Open Agents Open the shared agent-session overview. unbound Default
 Open Transcript | ctrl-t | Global open_transcript Open Transcript Open the transcript overlay. ctrl-t Default
 Open External Editor | ctrl-g | Global open_external_editor Open External Editor Open the current draft in an external editor. ctrl-g Default
-Open External Editor With Quote | ctrl-x ctrl-e | Global open_external_editor_with_quote Open External Editor With Quote Open the current draft with the last agent response quoted below it. ctrl-x ctrl-e Default
+Open External Editor With Quote | alt-g | Global open_external_editor_with_quote Open External Editor With Quote Open the current draft with the last agent response quoted below it. alt-g Default
 Copy | ctrl-o | Global copy Copy Copy the last agent response to the clipboard. ctrl-o Default
 Clear Terminal | ctrl-l | Global clear_terminal Clear Terminal Clear the terminal UI. ctrl-l Default
 Toggle Vim Mode | unbound | Global toggle_vim_mode Toggle Vim Mode Turn Vim composer mode on or off. unbound Default

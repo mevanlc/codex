@@ -10,7 +10,7 @@ expression: rendered
 "                                                            "
 "                                                            "
 "                                                            "
-" voice ● listening                /voice mute   /voice stop "
+" voice ● listening              ctrl+x mute     /voice stop "
 "   mic ▁▁▁▁▁▁  codex ▁▁▁▁▁▁                                 "
 "                                                            "
 "› Ask Codex to do anything                                  "
