@@ -27,10 +27,6 @@ use std::task::Context;
 use std::task::Poll;
 
 use crossterm::event::Event;
-use crossterm::event::KeyCode;
-use crossterm::event::KeyEvent;
-use crossterm::event::KeyModifiers;
-use crossterm::event::MouseEventKind;
 use tokio::sync::broadcast;
 use tokio::sync::watch;
 use tokio_stream::Stream;
@@ -200,7 +196,7 @@ impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
 
     /// Poll the shared crossterm stream for the next mapped `TuiEvent`.
     ///
-    /// This skips events we don't use (and maps relevant mouse events) and keeps polling until it yields
+    /// This skips events we don't use and keeps polling until it yields
     /// a mapped event, hits `Pending`, or sees EOF/error. When the broker is paused, it drops
     /// the underlying stream and returns `Pending` to fully release stdin.
     pub fn poll_crossterm_event(&mut self, cx: &mut Context<'_>) -> Poll<Option<TuiEvent>> {
@@ -267,7 +263,7 @@ impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
         }
     }
 
-    /// Map a crossterm event to a [`TuiEvent`], skipping events we don't use (and mapping wheel events to key events).
+    /// Map a crossterm event to a [`TuiEvent`], preserving mouse coordinates and modifiers.
     fn map_crossterm_event(&mut self, event: Event) -> Option<TuiEvent> {
         match event {
             Event::Key(key_event) => {
@@ -295,17 +291,6 @@ impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
                 Some(TuiEvent::Resize(size))
             }
             Event::Paste(pasted) => Some(TuiEvent::Paste(pasted)),
-            Event::Mouse(mouse_event) => match mouse_event.kind {
-                MouseEventKind::ScrollUp => Some(TuiEvent::Key(KeyEvent::new(
-                    KeyCode::Up,
-                    KeyModifiers::NONE,
-                ))),
-                MouseEventKind::ScrollDown => Some(TuiEvent::Key(KeyEvent::new(
-                    KeyCode::Down,
-                    KeyModifiers::NONE,
-                ))),
-                _ => None,
-            },
             Event::FocusGained => {
                 self.terminal_focused.store(true, Ordering::Relaxed);
                 // Keep the startup-cached palette: querying terminal colors here blocks the
@@ -316,6 +301,7 @@ impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
                 self.terminal_focused.store(false, Ordering::Relaxed);
                 Some(TuiEvent::FocusLost)
             }
+            Event::Mouse(mouse) => Some(TuiEvent::Mouse(mouse)),
         }
     }
 }
@@ -451,26 +437,24 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn key_event_skips_unmapped() {
+    async fn mouse_events_preserve_coordinates_and_do_not_consume_the_next_key() {
         let (broker, handle, _draw_tx, draw_rx, terminal_focused) = setup();
         let mut stream = make_stream(broker, draw_rx, terminal_focused);
-
-        handle.send(Ok(Event::Mouse(MouseEvent {
-            kind: MouseEventKind::Moved,
-            column: 0,
-            row: 0,
-            modifiers: KeyModifiers::NONE,
-        })));
-        handle.send(Ok(Event::Key(KeyEvent::new(
-            KeyCode::Char('a'),
-            KeyModifiers::NONE,
-        ))));
-
-        let next = stream.next().await.unwrap();
-        match next {
-            TuiEvent::Key(key) => {
-                assert_eq!(key, KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
-            }
+        let expected = MouseEvent {
+            kind: MouseEventKind::Drag(crossterm::event::MouseButton::Left),
+            column: 123,
+            row: 42,
+            modifiers: KeyModifiers::SHIFT,
+        };
+        handle.send(Ok(Event::Mouse(expected)));
+        match stream.next().await {
+            Some(TuiEvent::Mouse(actual)) => assert_eq!(actual, expected),
+            other => panic!("expected mouse event, got {other:?}"),
+        }
+        let expected = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
+        handle.send(Ok(Event::Key(expected)));
+        match stream.next().await {
+            Some(TuiEvent::Key(actual)) => assert_eq!(actual, expected),
             other => panic!("expected key event, got {other:?}"),
         }
     }
@@ -594,7 +578,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn mouse_scroll_events_map_to_key_events() {
+    async fn mouse_scroll_events_preserve_coordinates() {
         let (broker, handle, _draw_tx, draw_rx, terminal_focused) = setup();
         let mut stream = make_stream(broker, draw_rx, terminal_focused);
 
@@ -616,16 +600,20 @@ mod tests {
 
         assert!(matches!(
             first,
-            Some(TuiEvent::Key(KeyEvent {
-                code: KeyCode::Up,
+            Some(TuiEvent::Mouse(MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: 1,
+                row: 1,
                 modifiers: KeyModifiers::NONE,
                 ..
             }))
         ));
         assert!(matches!(
             second,
-            Some(TuiEvent::Key(KeyEvent {
-                code: KeyCode::Down,
+            Some(TuiEvent::Mouse(MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: 1,
+                row: 1,
                 modifiers: KeyModifiers::NONE,
                 ..
             }))

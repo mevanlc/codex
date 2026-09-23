@@ -2,12 +2,12 @@
 source: tui/src/bottom_pane/chat_composer.rs
 expression: terminal.backend()
 ---
+"  Mentions                                                                                          "
+"   All Results   Filesystem   Filesystem (All)   Plugins                                            "
+"  /Applications/                                                                                    "
+"› Applications  /                                                                             Dir   "
+"  enter/tab insert · esc close · ↑/↓ select · ←/→ filter                                            "
 "                                                                                                    "
 "› @/Applications/                                                                                   "
 "                                                                                                    "
-"                                                                                                    "
-"                                                                                                    "
-"                                                                                                    "
-"> Applications  /                                                                             Dir   "
-"                                                                                                    "
-"  enter insert · esc close · ←/→ modes    [All Results]   Filesystem    Filesystem (All)    Plugins "
+"                                                                                 100% context left  "

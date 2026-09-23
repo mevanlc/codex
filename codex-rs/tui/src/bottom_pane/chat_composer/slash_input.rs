@@ -390,8 +390,11 @@ impl ChatComposer {
                     }
 
                     self.stage_selected_slash_command_history(&sel);
-                    self.draft.textarea.set_text_clearing_elements("");
-                    self.draft.leave_shell_mode();
+                    if !matches!(sel, CommandItem::Builtin(cmd) if cmd.requires_dispatch_validation())
+                    {
+                        self.draft.textarea.set_text_clearing_elements("");
+                        self.draft.leave_shell_mode();
+                    }
                     return (
                         match sel {
                             CommandItem::Builtin(cmd) => InputResult::Command(cmd),
@@ -686,6 +689,6 @@ mod tests {
             press(&mut composer, KeyCode::Enter),
             InputResult::Command(SlashCommand::Review)
         );
-        assert!(composer.draft.textarea.is_empty());
+        assert_eq!(composer.draft.textarea.text(), "/review ");
     }
 }

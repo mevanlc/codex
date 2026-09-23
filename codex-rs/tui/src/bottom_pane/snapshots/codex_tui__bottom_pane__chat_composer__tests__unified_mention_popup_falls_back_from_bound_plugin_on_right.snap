@@ -2,12 +2,12 @@
 source: tui/src/bottom_pane/chat_composer.rs
 expression: terminal.backend()
 ---
+"  Mentions                                                                                          "
+"   All Results   Filesystem   Filesystem (All)   Plugins                                            "
+"  left                                                                                              "
+"› left  Plugin used to test bound mention fallback.                                           Plugin"
+"  enter/tab insert · esc close · ↑/↓ select · ←/→ filter                                            "
 "                                                                                                    "
 "› @left  @bound                                                                                     "
 "                                                                                                    "
-"                                                                                                    "
-"                                                                                                    "
-"                                                                                                    "
-"> left  Plugin used to test bound mention fallback.                                           Plugin"
-"                                                                                                    "
-"  enter insert · esc close · ←/→ modes    [All Results]   Filesystem    Filesystem (All)    Plugins "
+"                                                                                 100% context left  "

@@ -2,12 +2,12 @@
 source: tui/src/bottom_pane/chat_composer.rs
 expression: terminal.backend()
 ---
+"  Mentions                                                                                          "
+"   All Results   Filesystem   Filesystem (All)   Plugins                                            "
+"  hidden-target                                                                                     "
+"› .hidden-target  ignored/                                                                    File  "
+"  enter/tab insert · esc close · ↑/↓ select · ←/→ filter                                            "
 "                                                                                                    "
 "› @hidden-target                                                                                    "
 "                                                                                                    "
-"                                                                                                    "
-"                                                                                                    "
-"                                                                                                    "
-"> .hidden-target  ignored/                                                                    File  "
-"                                                                                                    "
-"  enter insert · esc close · ←/→ modes     All Results    Filesystem   [Filesystem (All)]   Plugins "
+"                                                                                 100% context left  "

@@ -1,3 +1,4 @@
+use super::helpers::drain_insert_history_transcript;
 use super::*;
 use crate::bottom_pane::ShellFollowUp;
 use crate::bottom_pane::slash_commands::ServiceTierCommand;
@@ -301,6 +302,7 @@ async fn queued_slash_compact_dispatches_after_active_turn() {
     handle_turn_started(&mut chat, "turn-1");
 
     queue_composer_text_with_tab(&mut chat, "/compact");
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
     assert_eq!(chat.input_queue.queued_user_messages.len(), 1);
     assert_eq!(
@@ -828,6 +830,7 @@ async fn goal_slash_command_with_extra_os_emits_set_goal_event() {
     let command = "/goooooooooooal --tokens 98.5K improve benchmark coverage";
 
     submit_composer_text(&mut chat, command);
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
     let event = rx.try_recv().expect("expected goal draft event");
     let AppEvent::SetThreadGoalDraft {
@@ -923,6 +926,8 @@ async fn bare_goal_slash_command_drains_pending_submission_state() {
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
+
     assert_matches!(
         rx.try_recv(),
         Ok(AppEvent::OpenThreadGoalMenu { thread_id: opened }) if opened == thread_id
@@ -950,6 +955,7 @@ async fn goal_control_slash_commands_emit_goal_events() {
             .set_composer_text(command.into(), Vec::new(), Vec::new());
         chat.handle_key_event(KeyCode::Esc.into());
         chat.handle_key_event(KeyCode::Enter.into());
+        assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
         match status {
             Some(status) => {
@@ -1006,6 +1012,7 @@ async fn goal_edit_slash_command_opens_goal_editor() {
         chat.thread_id = thread_id;
 
         submit_composer_text(&mut chat, "/goal edit");
+        assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
         let event = rx.try_recv().expect("expected goal editor event");
         let AppEvent::OpenThreadGoalEditor {
@@ -1944,7 +1951,7 @@ async fn slash_copy_picker_copies_status_fields_and_preserves_source_after_copyi
         );
         chat.copy_selection_with(value, label, |text| {
             assert_eq!(text, value);
-            Ok(None)
+            Ok(crate::clipboard_copy::CopyOutcome::Copied(None))
         });
         drain_insert_history(&mut rx);
         assert!(chat.bottom_pane.no_modal_or_popup_active());
@@ -2096,6 +2103,8 @@ async fn slash_copy_picker_waits_for_submission_after_typing_or_autocomplete() {
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
         let popup = render_bottom_popup(&chat, /*width*/ 80);
         assert!(popup.contains("Whole response"), "picker: {popup}");
         assert!(chat.bottom_pane.composer_text().is_empty());
@@ -2115,6 +2124,8 @@ async fn slash_copy_picker_waits_for_submission_after_paste() {
     assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
     assert!(render_bottom_popup(&chat, /*width*/ 80).contains("Whole response"));
     assert!(chat.bottom_pane.composer_text().is_empty());
     assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
@@ -2250,6 +2261,7 @@ async fn slash_copy_picker_remains_available_from_parent_owned_threads() {
     chat.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
     assert!(!render_bottom_popup(&chat, /*width*/ 80).contains("Whole response"));
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
     assert!(render_bottom_popup(&chat, /*width*/ 80).contains("Whole response"));
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE));
 
@@ -2314,10 +2326,11 @@ async fn slash_export_opens_destination_picker() {
 }
 
 #[tokio::test]
-async fn ctrl_o_copy_reports_when_no_agent_response_exists() {
+async fn copy_action_reports_when_no_agent_response_exists() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
-    chat.handle_key_event(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
+    let (code, modifiers) = crate::keymap::RuntimeKeymap::defaults().app.copy[0].parts();
+    chat.handle_key_event(KeyEvent::new(code, modifiers));
 
     let cells = drain_insert_history(&mut rx);
     assert_eq!(cells.len(), 1, "expected one info message");
@@ -2402,9 +2415,9 @@ async fn slash_keymap_debug_opens_keypress_inspector() {
     let popup = render_bottom_popup(&chat, /*width*/ 80);
     assert!(popup.contains("Keypress Inspector"));
     assert!(popup.contains("Waiting for a keypress"));
-    chat.handle_key_event(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
+    chat.handle_key_event(KeyEvent::new(KeyCode::F(4), KeyModifiers::NONE));
     let popup = render_bottom_popup(&chat, /*width*/ 100);
-    assert!(popup.contains("global.copy (Copy)"));
+    assert!(popup.contains("global.focus_activity"));
     assert!(
         drain_insert_history(&mut rx).is_empty(),
         "debug inspector should open without transcript messages"
@@ -2493,9 +2506,12 @@ async fn slash_copy_preserves_native_lease_after_terminal_copy_or_failure() {
 
     chat.copy_last_agent_markdown_with(|markdown| {
         assert_eq!(markdown, "copy me");
-        Ok(Some(crate::clipboard_copy::ClipboardLease::test()))
+        Ok(crate::clipboard_copy::CopyOutcome::Copied(Some(
+            crate::clipboard_copy::ClipboardLease::test(),
+        )))
     });
 
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
     assert!(chat.clipboard_lease.is_some());
     let cells = drain_insert_history(&mut rx);
     assert_eq!(cells.len(), 1, "expected one success message");
@@ -2505,16 +2521,18 @@ async fn slash_copy_preserves_native_lease_after_terminal_copy_or_failure() {
         "expected success message, got {rendered:?}"
     );
 
-    chat.copy_last_agent_markdown_with(|_| Ok(None));
+    chat.copy_last_agent_markdown_with(|_| Ok(crate::clipboard_copy::CopyOutcome::Requested));
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
     assert!(chat.clipboard_lease.is_some());
     let rendered = lines_to_single_string(&drain_insert_history(&mut rx)[0]);
-    assert!(rendered.contains("Copied last message to clipboard"));
+    insta::assert_snapshot!("unconfirmed_copy", rendered);
 
     chat.copy_last_agent_markdown_with(|markdown| {
         assert_eq!(markdown, "copy me");
         Err("blocked".into())
     });
 
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
     assert!(chat.clipboard_lease.is_some());
     let cells = drain_insert_history(&mut rx);
     assert_eq!(cells.len(), 1, "expected one failure message");
@@ -2526,13 +2544,17 @@ async fn slash_copy_preserves_native_lease_after_terminal_copy_or_failure() {
 
     chat.copy_selection_with("print('ok')\n", "python code", |content| {
         assert_eq!(content, "print('ok')\n");
-        Ok(Some(crate::clipboard_copy::ClipboardLease::test()))
+        Ok(crate::clipboard_copy::CopyOutcome::Copied(Some(
+            crate::clipboard_copy::ClipboardLease::test(),
+        )))
     });
     assert!(chat.clipboard_lease.is_some());
     let rendered = lines_to_single_string(&drain_insert_history(&mut rx)[0]);
     assert!(rendered.contains("Copied python code to clipboard"));
 
-    chat.copy_selection_with("terminal copy", "code", |_| Ok(None));
+    chat.copy_selection_with("terminal copy", "code", |_| {
+        Ok(crate::clipboard_copy::CopyOutcome::Copied(None))
+    });
     assert!(chat.clipboard_lease.is_some());
     let rendered = lines_to_single_string(&drain_insert_history(&mut rx)[0]);
     assert!(rendered.contains("Copied code to clipboard"));
@@ -2544,6 +2566,13 @@ async fn slash_copy_preserves_native_lease_after_terminal_copy_or_failure() {
     assert!(chat.clipboard_lease.is_some());
     let rendered = lines_to_single_string(&drain_insert_history(&mut rx)[0]);
     assert!(rendered.contains("Copy failed: blocked selection"));
+
+    chat.copy_selection_with("print('ok')\n", "python code", |_| {
+        Ok(crate::clipboard_copy::CopyOutcome::Requested)
+    });
+    assert!(chat.clipboard_lease.is_some());
+    let rendered = lines_to_single_string(&drain_insert_history(&mut rx)[0]);
+    assert!(rendered.contains("Copy unconfirmed; /export saves chat"));
 }
 
 #[tokio::test]
@@ -2701,6 +2730,8 @@ async fn slash_new_with_name_requests_named_session() {
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
+
     assert_matches!(
         rx.try_recv(),
         Ok(AppEvent::NewSession {
@@ -2716,6 +2747,8 @@ async fn slash_clear_with_name_requests_named_session() {
         .set_composer_text("/clear   Add User  ".to_string(), Vec::new(), Vec::new());
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
     assert_matches!(
         rx.try_recv(),
@@ -2747,6 +2780,7 @@ async fn slash_clear_after_ctrl_c_keeps_stashed_draft_recallable() {
     chat.bottom_pane
         .set_composer_text("/clear".to_string(), Vec::new(), Vec::new());
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
     assert_matches!(rx.try_recv(), Ok(AppEvent::ClearUi { name: None }));
     chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
@@ -2844,6 +2878,7 @@ async fn slash_mcp_verbose_requests_full_inventory_via_app_server() {
     chat.thread_id = Some(thread_id);
 
     submit_composer_text(&mut chat, "/mcp verbose");
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
     assert!(active_blob(&chat).contains("Loading MCP inventory"));
     assert_matches!(
@@ -2989,6 +3024,7 @@ async fn slash_resume_with_arg_requests_named_session_while_mcp_startup_is_runni
         Vec::new(),
     );
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
     assert_matches!(
         rx.try_recv(),
@@ -3021,6 +3057,7 @@ async fn slash_pets_with_arg_selects_named_pet() {
     chat.bottom_pane
         .set_composer_text("/pets chefito".to_string(), Vec::new(), Vec::new());
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
     assert_matches!(
         rx.try_recv(),
@@ -3038,6 +3075,7 @@ async fn slash_pets_disable_disables_pets_even_on_unsupported_terminal() {
     chat.bottom_pane
         .set_composer_text("/pets disable".to_string(), Vec::new(), Vec::new());
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
     assert_matches!(rx.try_recv(), Ok(AppEvent::PetDisabled));
     assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
@@ -3053,6 +3091,7 @@ async fn slash_pet_hide_disables_pets_even_on_unsupported_terminal() {
     chat.bottom_pane
         .set_composer_text("/pet hide".to_string(), Vec::new(), Vec::new());
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
     assert_matches!(rx.try_recv(), Ok(AppEvent::PetDisabled));
     assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
@@ -3061,14 +3100,20 @@ async fn slash_pet_hide_disables_pets_even_on_unsupported_terminal() {
 
 #[tokio::test]
 #[serial]
-async fn slash_pets_on_unsupported_terminal_warns_without_picker() {
+async fn slash_pets_in_tmux_shows_notice_and_preserves_draft() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     force_tmux_pet_image_unsupported(&mut chat);
+    chat.bottom_pane
+        .set_composer_text("Keep this draft".to_string(), Vec::new(), Vec::new());
 
     chat.dispatch_command(SlashCommand::Pets);
 
-    assert!(!chat.bottom_pane.has_active_view());
-    let cells = drain_insert_history(&mut rx);
+    assert!(chat.bottom_pane.has_active_view());
+    assert_chatwidget_snapshot!(
+        "slash_pets_unavailable_tmux_40",
+        render_bottom_popup(&chat, /*width*/ 40),
+    );
+    let cells = drain_insert_history_transcript(&mut rx);
     let rendered = cells
         .iter()
         .map(|lines| lines_to_single_string(lines))
@@ -3076,11 +3121,15 @@ async fn slash_pets_on_unsupported_terminal_warns_without_picker() {
         .join("\n");
     assert!(rendered.contains("Pets are disabled in tmux."));
     assert!(rendered.contains("outside tmux"));
+
+    chat.handle_key_event(KeyEvent::from(KeyCode::Esc));
+    assert!(!chat.bottom_pane.has_active_view());
+    assert_eq!(chat.bottom_pane.composer_text(), "Keep this draft");
 }
 
 #[tokio::test]
 #[serial]
-async fn slash_pets_with_arg_on_unsupported_terminal_warns_without_selection() {
+async fn slash_pets_with_arg_on_unsupported_terminal_shows_notice_without_selection() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     force_tmux_pet_image_unsupported(&mut chat);
 
@@ -3088,13 +3137,20 @@ async fn slash_pets_with_arg_on_unsupported_terminal_warns_without_selection() {
         .set_composer_text("/pets chefito".to_string(), Vec::new(), Vec::new());
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
-    let cells = drain_insert_history(&mut rx);
+    assert!(chat.bottom_pane.has_active_view());
+    assert!(render_bottom_popup(&chat, /*width*/ 80).contains("Pets are disabled in tmux."));
+    let cells = drain_insert_history_transcript(&mut rx);
     let rendered = cells
         .iter()
         .map(|lines| lines_to_single_string(lines))
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rendered.contains("Pets are disabled in tmux."));
+    assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+    assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
+
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    assert!(!chat.bottom_pane.has_active_view());
     assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
     assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
 }
@@ -3107,8 +3163,12 @@ async fn slash_pets_on_unsupported_terminal_shows_terminal_warning() {
 
     chat.dispatch_command(SlashCommand::Pets);
 
-    assert!(!chat.bottom_pane.has_active_view());
-    let cells = drain_insert_history(&mut rx);
+    assert!(chat.bottom_pane.has_active_view());
+    assert!(
+        render_bottom_popup(&chat, /*width*/ 80)
+            .contains("Pets aren’t available in this terminal.")
+    );
+    let cells = drain_insert_history_transcript(&mut rx);
     let rendered = cells
         .iter()
         .map(|lines| lines_to_single_string(lines))
@@ -3126,8 +3186,9 @@ async fn slash_pets_on_old_iterm2_shows_upgrade_warning() {
 
     chat.dispatch_command(SlashCommand::Pets);
 
-    assert!(!chat.bottom_pane.has_active_view());
-    let cells = drain_insert_history(&mut rx);
+    assert!(chat.bottom_pane.has_active_view());
+    assert!(render_bottom_popup(&chat, /*width*/ 80).contains("Pets require iTerm2 3.6 or newer."));
+    let cells = drain_insert_history_transcript(&mut rx);
     let rendered = cells
         .iter()
         .map(|lines| lines_to_single_string(lines))
@@ -3156,6 +3217,8 @@ async fn slash_fork_with_name_requests_named_fork() {
         .set_composer_text("/fork   Add User  ".to_string(), Vec::new(), Vec::new());
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
     assert_matches!(
         rx.try_recv(),
@@ -3234,6 +3297,10 @@ async fn slash_cd_changes_current_session_after_replay_and_defaults_to_home() {
         .set_composer_text("/cd".to_string(), Vec::new(), Vec::new());
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     for expected in ["/tmp", "~"] {
+        // Only the interactive submission adds a follow event; queued dispatch already owns it.
+        if expected == "~" {
+            assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
+        }
         assert_matches!(
             rx.try_recv(),
             Ok(AppEvent::ChangeWorkingDirectory { thread_id: actual, requested_cwd })
@@ -3684,5 +3751,55 @@ async fn compact_queues_user_messages_snapshot() {
     assert_chatwidget_snapshot!(
         "compact_queues_user_messages_snapshot",
         normalize_snapshot_paths(term.backend().vt100().screen().contents())
+    );
+}
+
+#[tokio::test]
+async fn transcript_copy_feedback_stays_in_the_footer_without_history_or_interrupts() {
+    let (mut chat, mut events, mut operations) =
+        make_chatwidget_manual(/*model_override*/ None).await;
+    let _ = drain_insert_history(&mut events);
+    let result = chat.copy_transcript_selection_with("selected café\nsecond line", |text| {
+        assert_eq!(text, "selected café\nsecond line");
+        Ok(crate::clipboard_copy::CopyOutcome::Copied(Some(
+            crate::clipboard_copy::ClipboardLease::test(),
+        )))
+    });
+    assert_eq!(result, Ok(crate::clipboard_copy::CopyStatus::Confirmed));
+    assert_eq!(drain_insert_history(&mut events).len(), 0);
+    assert!(operations.try_recv().is_err());
+    assert!(chat.clipboard_lease.is_some());
+    insta::assert_snapshot!(
+        "transcript_copy_success",
+        render_bottom_popup(&chat, /*width*/ 80)
+    );
+    let result = chat.copy_transcript_selection_with("selected café", |_text| {
+        Ok(crate::clipboard_copy::CopyOutcome::Requested)
+    });
+    assert_eq!(result, Ok(crate::clipboard_copy::CopyStatus::Unconfirmed));
+    assert_eq!(drain_insert_history(&mut events).len(), 0);
+    assert!(operations.try_recv().is_err());
+    assert!(chat.clipboard_lease.is_some());
+    insta::assert_snapshot!(
+        "transcript_copy_unconfirmed",
+        render_bottom_popup(&chat, /*width*/ 80)
+    );
+    insta::assert_snapshot!(
+        "transcript_copy_unconfirmed_narrow",
+        render_bottom_popup(&chat, /*width*/ 40)
+    );
+    chat.open_warnings(&[Arc::new(history_cell::new_warning_event(
+        "selected café".into(),
+    ))]);
+    let result = chat.copy_transcript_selection_with("selected café", |_text| {
+        Err("clipboard unavailable".to_string())
+    });
+    assert_eq!(result, Err("clipboard unavailable".to_string()));
+    assert_eq!(drain_insert_history(&mut events).len(), 0);
+    assert!(operations.try_recv().is_err());
+    assert!(chat.clipboard_lease.is_some());
+    insta::assert_snapshot!(
+        "transcript_copy_failure",
+        render_bottom_popup(&chat, /*width*/ 80)
     );
 }

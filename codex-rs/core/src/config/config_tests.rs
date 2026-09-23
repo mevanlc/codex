@@ -1257,7 +1257,8 @@ fn config_toml_deserializes_model_availability_nux() {
             notification_settings: TuiNotificationSettings::default(),
             animations: true,
             screen_reader_detection_done: None,
-            whimsy: true,
+            effects: Default::default(),
+            rendering: Default::default(),
             show_tooltips: true,
             fork: ForkTuiOptions::default(),
             show_server_version_notice: true,
@@ -1266,6 +1267,7 @@ fn config_toml_deserializes_model_availability_nux() {
             vim_mode_default: false,
             question_esc_back: true,
             raw_output_mode: false,
+            fullscreen_transcript: false,
             alternate_screen: AltScreenMode::default(),
             status_line: None,
             status_line_use_colors: true,
@@ -1906,7 +1908,6 @@ async fn network_proxy_feature_matrix_preserves_sandbox_network_semantics() -> s
                 }),
                 windows: Some(WindowsToml {
                     sandbox: Some(WindowsSandboxModeToml::Elevated),
-                    sandbox_private_desktop: None,
                 }),
                 features,
                 ..Default::default()
@@ -2061,6 +2062,10 @@ respect_system_proxy = true
             .outbound_proxy_policy(),
         codex_http_client::OutboundProxyPolicy::ReqwestDefault
     );
+    assert!(
+        resolve_bootstrap_http_client_factory(&configured, Some(&disabled))?
+            .allows_system_proxy_fallback()
+    );
 
     let configured = ConfigToml::default();
     let enabled = Sourced::new(
@@ -2079,6 +2084,115 @@ respect_system_proxy = true
             .outbound_proxy_policy(),
         codex_http_client::OutboundProxyPolicy::RespectSystemProxy
     );
+    assert!(
+        !resolve_bootstrap_http_client_factory(&configured, Some(&enabled))?
+            .allows_system_proxy_fallback()
+    );
+    assert!(
+        resolve_bootstrap_http_client_factory(&configured, /*feature_requirements*/ None)?
+            .allows_system_proxy_fallback()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn system_proxy_fallback_config_matches_bootstrap() -> std::io::Result<()> {
+    for (features, expected_fallback, expected_policy) in [
+        (
+            "",
+            true,
+            codex_http_client::OutboundProxyPolicy::ReqwestDefault,
+        ),
+        (
+            "respect_system_proxy = false",
+            true,
+            codex_http_client::OutboundProxyPolicy::ReqwestDefault,
+        ),
+        (
+            "system_proxy_fallback = false",
+            false,
+            codex_http_client::OutboundProxyPolicy::ReqwestDefault,
+        ),
+        (
+            "respect_system_proxy = true",
+            false,
+            codex_http_client::OutboundProxyPolicy::RespectSystemProxy,
+        ),
+        (
+            "respect_system_proxy = true\nsystem_proxy_fallback = false",
+            false,
+            codex_http_client::OutboundProxyPolicy::RespectSystemProxy,
+        ),
+    ] {
+        let codex_home = TempDir::new()?;
+        std::fs::write(
+            codex_home.path().join(CONFIG_TOML_FILE),
+            format!("[features]\n{features}\n"),
+        )?;
+        let config = ConfigBuilder::without_managed_config_for_tests()
+            .codex_home(codex_home.path().to_path_buf())
+            .build()
+            .await?;
+        let bootstrap = ConfigToml {
+            features: Some(toml::from_str(features).expect("valid feature configuration")),
+            ..Default::default()
+        };
+        let factory =
+            resolve_bootstrap_http_client_factory(&bootstrap, /*feature_requirements*/ None)?;
+        assert_eq!(
+            factory.allows_system_proxy_fallback(),
+            expected_fallback,
+            "{features}"
+        );
+        assert_eq!(
+            factory.outbound_proxy_policy(),
+            expected_policy,
+            "{features}"
+        );
+        assert_eq!(config.http_client_factory(), factory, "{features}");
+        assert_eq!(
+            config.auth_route_config().http_client_factory(),
+            &factory,
+            "{features}"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn system_proxy_fallback_honors_feature_requirements() -> std::io::Result<()> {
+    for (configured, required) in [(true, false), (false, true)] {
+        let cfg = ConfigToml {
+            features: Some(
+                toml::from_str(&format!("system_proxy_fallback = {configured}"))
+                    .expect("valid features"),
+            ),
+            ..Default::default()
+        };
+        let requirements = Sourced::new(
+            FeatureRequirementsToml {
+                entries: BTreeMap::from([("system_proxy_fallback".to_string(), required)]),
+            },
+            RequirementSource::Unknown,
+        );
+        let bootstrap = resolve_bootstrap_http_client_factory(&cfg, Some(&requirements))?;
+        assert_eq!(bootstrap.allows_system_proxy_fallback(), required);
+        let codex_home = TempDir::new()?;
+        std::fs::write(
+            codex_home.path().join(CONFIG_TOML_FILE),
+            format!("[features]\nsystem_proxy_fallback = {configured}\n"),
+        )?;
+        let config = ConfigBuilder::without_managed_config_for_tests()
+            .codex_home(codex_home.path().to_path_buf())
+            .cloud_config_bundle(
+                CloudConfigBundleFixture::loader_with_enterprise_requirement(format!(
+                    "[features]\nsystem_proxy_fallback = {required}\n"
+                )),
+            )
+            .build()
+            .await?;
+        assert_eq!(config.http_client_factory(), bootstrap);
+    }
     Ok(())
 }
 
@@ -3553,7 +3667,6 @@ async fn implicit_builtin_workspace_profile_preserves_sandbox_workspace_write_se
             }),
             windows: Some(WindowsToml {
                 sandbox: Some(WindowsSandboxModeToml::Elevated),
-                sandbox_private_desktop: None,
             }),
             ..Default::default()
         },
@@ -3618,7 +3731,6 @@ async fn implicit_builtin_workspace_profile_preserves_add_dir_metadata_carveouts
             )])),
             windows: Some(WindowsToml {
                 sandbox: Some(WindowsSandboxModeToml::Elevated),
-                sandbox_private_desktop: None,
             }),
             ..Default::default()
         },
@@ -4275,7 +4387,8 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             notification_settings: TuiNotificationSettings::default(),
             animations: true,
             screen_reader_detection_done: None,
-            whimsy: true,
+            effects: Default::default(),
+            rendering: Default::default(),
             show_tooltips: true,
             fork: ForkTuiOptions::default(),
             show_server_version_notice: true,
@@ -4284,6 +4397,7 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             vim_mode_default: false,
             question_esc_back: true,
             raw_output_mode: false,
+            fullscreen_transcript: false,
             alternate_screen: AltScreenMode::Auto,
             status_line: None,
             status_line_use_colors: true,
@@ -13030,9 +13144,6 @@ allow_login_shell = true
 
 [feedback]
 enabled = true
-
-[windows]
-sandbox_private_desktop = true
 "#,
     )?;
 
@@ -13048,9 +13159,6 @@ allow_login_shell = false
 
 [feedback]
 enabled = false
-
-[windows]
-sandbox_private_desktop = false
 "#,
         required_sqlite_home.display(),
         required_log_dir.display(),
@@ -13064,7 +13172,6 @@ sandbox_private_desktop = false
     assert!(!config.check_for_update_on_startup);
     assert!(!config.permissions.allow_login_shell);
     assert!(!config.feedback_enabled);
-    assert!(!config.permissions.windows_sandbox_private_desktop);
     assert!(config.startup_warnings.iter().any(|warning| {
         warning.contains("Configured value for `check_for_update_on_startup` is overridden")
     }));

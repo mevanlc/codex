@@ -2,12 +2,12 @@
 source: tui/src/bottom_pane/chat_composer.rs
 expression: terminal.backend()
 ---
+"  Mentions                                                                                          "
+"   All Results   Filesystem   Filesystem (All)   Plugins                                            "
+"  ~/.json                                                                                           "
+"› a-direct.json  ~/                                                                           File  "
+"  enter/tab insert · esc close · ↑/↓ select · ←/→ filter                                            "
 "                                                                                                    "
 "› @~/.json                                                                                          "
 "                                                                                                    "
-"                                                                                                    "
-"> a-direct.json  ~/                                                                           File  "
-"  z-direct.json  ~/                                                                           File  "
-"  nested.json    ~/.config/                                                                   File  "
-"                                                                                                    "
-"  enter insert · esc close · ←/→ modes    [All Results]   Filesystem    Filesystem (All)    Plugins "
+"                                                                                 100% context left  "
