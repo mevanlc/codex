@@ -1480,6 +1480,9 @@ impl ConfigBuilder {
             None => AbsolutePathBuf::current_dir()?,
         };
         harness_overrides.cwd = Some(cwd.to_path_buf());
+        if !loader_overrides.ignore_user_config {
+            codex_config::migrate_user_fork_config(&codex_home).await?;
+        }
         let config_layer_stack = load_config_layers_state(
             LOCAL_FS.as_ref(),
             &codex_home,
@@ -2055,6 +2058,10 @@ pub async fn load_config_toml_with_layer_stack(
     cli_overrides: Vec<(String, TomlValue)>,
     options: impl Into<ConfigLoadOptions>,
 ) -> std::io::Result<ConfigTomlLoadResult> {
+    let options = options.into();
+    if !options.loader_overrides.ignore_user_config {
+        codex_config::migrate_user_fork_config(codex_home).await?;
+    }
     let config_layer_stack = load_config_layers_state(
         LOCAL_FS.as_ref(),
         codex_home,
@@ -2255,6 +2262,7 @@ pub async fn load_global_mcp_servers(
     // There is no cwd/project context for this query, so this will not include
     // MCP servers defined in in-repo .codex/ folders.
     let cwd: Option<AbsolutePathBuf> = None;
+    codex_config::migrate_user_fork_config(codex_home).await?;
     let config_layer_stack = load_config_layers_state(
         LOCAL_FS.as_ref(),
         codex_home,

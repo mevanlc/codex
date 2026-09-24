@@ -63,10 +63,13 @@ so official clients can read that file without encountering fork extensions.
 
 The overlay accepts only `tui.primary_accent`, `tui.chatbox_placeholder_tips`,
 `tui.file_mentions_preserve_at`, `tui.file_mentions_allow_explicit_paths`, and
-`tui.keymap.global.open_external_editor_with_quote`. Move any existing entries
-from `config.toml` or profile/project config into the overlay, retaining their
-table structure. Misplaced settings produce an error; startup does not migrate
-or create files. The examples below belong in the overlay.
+`tui.keymap.global.open_external_editor_with_quote`. On startup, the fork
+automatically moves these entries from the top level of `config.toml` into the
+overlay, preserving existing overlay values when both files set the same key.
+It saves the overlay before removing the original entries, so interrupted
+migrations can be retried safely. With no entries to move, no files are created.
+Profile/project entries still require manual relocation because the overlay is
+global. The examples below belong in the overlay.
 
 Fork-setting saves create the overlay when needed; standard saves still use the
 shared config or selected profile. Command-line `-c` overrides remain available.

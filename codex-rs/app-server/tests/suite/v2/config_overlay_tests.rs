@@ -2,6 +2,67 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn startup_migrates_fork_config_and_reports_overlay_origins() -> Result<()> {
+    let home = TempDir::new()?;
+    let shared = "[tui]\ntheme = 'nord'\nchatbox_placeholder_tips = 'off'\nfile_mentions_preserve_at = true\n";
+    write_config(&home, shared)?;
+    let overlay = AbsolutePathBuf::from_absolute_path(
+        home.path()
+            .canonicalize()?
+            .join(codex_config::CONFIG_OVERLAY_FILE),
+    )?;
+    std::fs::write(&overlay, "[tui]\nchatbox_placeholder_tips = 'on'\n")?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+        .await?;
+    let id = server
+        .send_config_read_request(ConfigReadParams {
+            include_layers: true,
+            cwd: None,
+        })
+        .await?;
+    let read: ConfigReadResponse = server.read_response(id).await?;
+    for key in [
+        "tui.chatbox_placeholder_tips",
+        "tui.file_mentions_preserve_at",
+    ] {
+        assert_eq!(
+            read.origins[key].name,
+            ConfigLayerSource::User {
+                file: overlay.clone(),
+                profile: None,
+            }
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("config.toml"))?,
+        "[tui]\ntheme = 'nord'\n"
+    );
+    assert_eq!(
+        toml::from_str::<toml::Value>(&std::fs::read_to_string(&overlay)?)?,
+        toml::from_str::<toml::Value>(
+            "[tui]\nchatbox_placeholder_tips = 'on'\nfile_mentions_preserve_at = true\n"
+        )?
+    );
+
+    // Config reads also repair entries reintroduced by another client after startup.
+    write_config(&home, shared)?;
+    let id = server
+        .send_config_read_request(ConfigReadParams {
+            include_layers: true,
+            cwd: None,
+        })
+        .await?;
+    let _: ConfigReadResponse = server.read_response(id).await?;
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("config.toml"))?,
+        "[tui]\ntheme = 'nord'\n"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fork_overlay_writes_preserve_shared_config_and_use_separate_versions() -> Result<()> {
     let home = TempDir::new()?;
     let shared = "[tui]\ntheme = 'nord'\n";

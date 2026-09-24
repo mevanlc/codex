@@ -404,6 +404,9 @@ impl ConfigManager {
         &self,
         cwd: Option<AbsolutePathBuf>,
     ) -> std::io::Result<ConfigLayerStack> {
+        if !self.loader_overrides.ignore_user_config {
+            codex_config::migrate_user_fork_config(&self.codex_home).await?;
+        }
         load_config_layers_state(
             LOCAL_FS.as_ref(),
             &self.codex_home,

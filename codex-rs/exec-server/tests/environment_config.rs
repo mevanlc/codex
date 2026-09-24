@@ -16,6 +16,68 @@ use common::exec_server::exec_server;
 use pretty_assertions::assert_eq;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_environment_migrates_its_own_fork_config() -> anyhow::Result<()> {
+    let mut server = exec_server().await?;
+    let codex_home =
+        AbsolutePathBuf::from_absolute_path(std::fs::canonicalize(server.codex_home())?)?;
+    let config_file = codex_home.join(CONFIG_TOML_FILE);
+    let overlay_file = codex_home.join(codex_config::CONFIG_OVERLAY_FILE);
+    tokio::fs::write(&config_file, "[tui]\nchatbox_placeholder_tips = 'off'\n").await?;
+    let environment = Environment::create_for_tests(Some(server.websocket_url().to_string()))?;
+    let response = environment
+        .read_environment_config(EnvironmentConfigReadParams {
+            cwd: PathUri::from_abs_path(&codex_home),
+            config_paths: vec![vec![
+                "tui".to_string(),
+                "chatbox_placeholder_tips".to_string(),
+            ]],
+            requirements_paths: Vec::new(),
+        })
+        .await?;
+    assert_eq!(
+        response.config,
+        EnvironmentConfigLayerStack {
+            layers: vec![
+                EnvironmentConfigLayer {
+                    source: format_config_layer_source(
+                        &ConfigLayerSource::User {
+                            file: config_file.clone(),
+                            profile: None,
+                        },
+                        CONFIG_TOML_FILE
+                    ),
+                    base_dir: PathUri::from_abs_path(&codex_home),
+                    toml: "[tui]\n".to_string(),
+                },
+                EnvironmentConfigLayer {
+                    source: format_config_layer_source(
+                        &ConfigLayerSource::User {
+                            file: overlay_file.clone(),
+                            profile: None,
+                        },
+                        CONFIG_TOML_FILE
+                    ),
+                    base_dir: PathUri::from_abs_path(&codex_home),
+                    toml: toml::to_string(&toml::toml! { [tui]
+                        chatbox_placeholder_tips = "off"
+                    })?,
+                }
+            ],
+            cloud_insertion_index: 0,
+        }
+    );
+    assert_eq!(tokio::fs::read_to_string(&config_file).await?, "[tui]\n");
+    assert_eq!(
+        toml::from_str::<toml::Value>(&tokio::fs::read_to_string(&overlay_file).await?)?,
+        toml::Value::Table(toml::toml! { [tui]
+            chatbox_placeholder_tips = "off"
+        })
+    );
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remote_environment_reads_projected_executor_config() -> anyhow::Result<()> {
     let mut server = exec_server().await?;
     let codex_home =

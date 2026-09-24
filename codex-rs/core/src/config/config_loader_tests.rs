@@ -51,6 +51,9 @@ use std::path::Path;
 use tempfile::tempdir;
 use toml::Value as TomlValue;
 
+#[path = "fork_config_migration_tests.rs"]
+mod fork_config_migration;
+
 fn config_error_from_io(err: &std::io::Error) -> &ConfigError {
     err.get_ref()
         .and_then(|err| err.downcast_ref::<ConfigLoadError>())

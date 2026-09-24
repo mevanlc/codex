@@ -46,6 +46,12 @@ managed layers remain above project and session layers in the final stack.
 Executor-local reads use their own system, base-user, and legacy managed sources;
 they do not include cloud config, selected profiles, or session flags.
 
+Host-local startup and config-read entry points call `migrate_user_fork_config`
+before loading layers. It moves base-user fork properties into the overlay
+(existing overlay values win), using atomic file replacements with the overlay
+saved first and concurrent migrations serialized. The filesystem-abstract loaders themselves
+remain read-only; remote environment reads perform migration on the executor.
+
 Layers with a `disabled_reason` are still surfaced for UI, but are ignored when
 computing the effective config and origins metadata. This is what
 `ConfigLayerStack::effective_config()` implements.

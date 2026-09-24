@@ -41,6 +41,9 @@ pub(crate) async fn read_environment_config(
     let codex_home = find_codex_home().map_err(|error| {
         ReadEnvironmentConfigError::Internal(format!("failed to find Codex home: {error}"))
     })?;
+    codex_config::migrate_user_fork_config(codex_home.as_path())
+        .await
+        .map_err(|error| ReadEnvironmentConfigError::Internal(error.to_string()))?;
     let layers = load_local_config_layers(file_system, codex_home.as_path(), &cwd)
         .await
         .map_err(|error| {
