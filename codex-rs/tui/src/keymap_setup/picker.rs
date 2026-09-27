@@ -222,7 +222,7 @@ fn build_keymap_picker_params_for_action(
         items: keymap_selection_items(
             rows.iter(),
             "No shortcuts available",
-            "No configurable shortcuts are available.",
+            "No configurable shortcuts are available",
         ),
     });
 
@@ -238,7 +238,7 @@ fn build_keymap_picker_params_for_action(
         items: keymap_selection_items(
             common_rows,
             "No common shortcuts",
-            "No common shortcut actions are available.",
+            "No common shortcut actions are available",
         ),
     });
 
@@ -256,7 +256,7 @@ fn build_keymap_picker_params_for_action(
         items: keymap_selection_items(
             custom_rows,
             "No customized shortcuts",
-            "No root-level keymap overrides have been configured.",
+            "No root-level keymap overrides have been configured",
         ),
     });
 
@@ -274,7 +274,7 @@ fn build_keymap_picker_params_for_action(
         items: keymap_selection_items(
             unbound_rows,
             "No unbound shortcuts",
-            "Every configurable action currently has a shortcut.",
+            "Every configurable action currently has a shortcut",
         ),
     });
 
@@ -291,7 +291,7 @@ fn build_keymap_picker_params_for_action(
             items: keymap_selection_items(
                 tab_rows,
                 "No shortcuts in this group",
-                "No configurable actions are available in this group.",
+                "No configurable actions are available in this group",
             ),
         });
     }
@@ -328,11 +328,11 @@ fn keymap_debug_tab() -> SelectionTab {
         items: vec![SelectionItem {
             name: "Inspect keypresses".to_string(),
             description: Some(
-                "Press Enter to start. Then press any key to inspect it; Ctrl+C exits."
+                "Press Enter, then any key to inspect it (Ctrl+C exits)"
                     .to_string(),
             ),
             selected_description: Some(
-                "Open a live inspector that shows the detected key, config key, and matching actions."
+                "Open a live inspector that shows the detected key, config key, and matching actions"
                     .to_string(),
             ),
             actions: vec![Box::new(|tx| {

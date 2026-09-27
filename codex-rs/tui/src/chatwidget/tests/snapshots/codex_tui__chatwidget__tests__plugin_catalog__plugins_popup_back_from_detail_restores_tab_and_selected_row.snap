@@ -1,5 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/plugin_catalog_tests.rs
+assertion_line: 217
 expression: reopened_popup
 ---
   Plugins
@@ -11,7 +12,7 @@ expression: reopened_popup
   Type to search plugins
 
   [-] Alpha      Available · Alpha plugin.
-› [-] Beta       Available   Press Enter to install or view plugin details.
+› [-] Beta       Available   Press Enter to install or view plugin details
 
 
 

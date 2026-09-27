@@ -88,7 +88,10 @@ async fn retract_steer_does_not_remove_input_after_drain_or_from_another_turn() 
             }],
             client_id: Some("client-message-1".to_string()),
             retractable: true,
-            acceptance_order: None,
+            metadata: UserInputMetadata {
+                acceptance_order: Some(0),
+                ..Default::default()
+            },
         }]
     );
     assert_eq!(

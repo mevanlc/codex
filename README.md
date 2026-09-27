@@ -142,7 +142,7 @@ The response status is `notPending` if the input was already consumed, was alrea
 
 ### Reasoning shortcuts reach Max and Ultra
 
-`Alt+.` / `Shift+Up` and `Alt+,` / `Shift+Down` step the active model's reasoning effort. Upstream refuses to raise into Max or Ultra from the keyboard and instead points at `/model → … → More reasoning…`; this fork walks the full list of efforts the model advertises, with Max and Ultra last. Plan mode's Ultra concurrency warning still applies.
+`Alt+.` / `Shift+Up` and `Alt+,` / `Shift+Down` step the active model's reasoning effort. Upstream now allows these shortcuts to reach Max, but still requires `/model → … → More reasoning…` for Ultra. This fork walks the full list of efforts the model advertises, with Max and Ultra last. Plan mode's Ultra concurrency warning still applies.
 
 ### Platform fixes
 
