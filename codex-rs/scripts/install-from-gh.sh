@@ -12,6 +12,7 @@ Installs the current platform's Codex binaries from the latest GitHub artifact
 or the latest GitHub release in mevanlc/codex. Supports both legacy releases
 containing only codex and newer releases that also contain codex-code-mode-host.
 All installed binaries are placed in $HOME/.local/bin.
+Prints the existing version and file mtimes before deciding whether to install.
 
 Options:
   --artifact         Download the latest GitHub Actions artifact
@@ -260,6 +261,17 @@ print(int(Path(sys.argv[1]).stat().st_mtime))
 PY
 }
 
+format_epoch() {
+  "$python_bin" - "$1" <<'PY'
+from datetime import datetime, timezone
+import sys
+
+epoch = int(sys.argv[1])
+timestamp = datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+print(f"{timestamp} (epoch: {epoch})")
+PY
+}
+
 list_available_releases() {
   local asset_name="$1"
   local host_asset_name="$2"
@@ -413,6 +425,24 @@ step "Optional code-mode host asset: $code_mode_host_asset_name"
 step "Target binary: $bin_path"
 step "Target code-mode host: $code_mode_host_bin_path"
 
+if [[ -e "$bin_path" ]]; then
+  if existing_version="$("$bin_path" --version 2>/dev/null)" && [[ -n "$existing_version" ]]; then
+    step "Existing version: $existing_version"
+  else
+    step "Existing version: unavailable (could not run --version)"
+  fi
+  current_epoch="$(file_mtime_epoch "$bin_path")"
+  step "Existing Codex mtime: $(format_epoch "$current_epoch")"
+else
+  step "Existing version: not installed"
+fi
+if [[ -e "$code_mode_host_bin_path" ]]; then
+  code_mode_host_epoch="$(file_mtime_epoch "$code_mode_host_bin_path")"
+  step "Existing code-mode host mtime: $(format_epoch "$code_mode_host_epoch")"
+else
+  step "Existing code-mode host: not installed"
+fi
+
 download_description=""
 download_cmd=()
 source_epoch=""
@@ -509,6 +539,9 @@ PY
     ;;
 esac
 
+step "Requested source: $download_description"
+step "Source timestamp: $(format_epoch "$source_epoch")"
+
 tmp_dir="$(mktemp -d "$tmp_root/codex-gh-install.XXXXXX")"
 download_dir="$tmp_dir/download"
 mkdir -p "$download_dir"
@@ -553,6 +586,8 @@ if [[ -n "$version" ]]; then
   # An explicit version is a deliberate pin, so the "is the installed copy newer?"
   # test would be wrong here: it would refuse every downgrade.
   step "Explicit version requested; skipping mtime currency check"
+elif "$force"; then
+  step "Forced install requested; skipping mtime currency check"
 fi
 
 if ! "$force" && [[ -z "$version" ]] && [[ -e "$bin_path" ]]; then
@@ -574,7 +609,6 @@ if ! "$force" && [[ -z "$version" ]] && [[ -e "$bin_path" ]]; then
 
   if "$installation_is_current"; then
     step "Installed Codex layout is already as new or newer than requested source"
-    step "Source epoch: $source_epoch"
     step "Use --force to install anyway"
     exit 0
   fi
