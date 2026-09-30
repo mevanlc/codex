@@ -65,6 +65,9 @@ use test_case::test_case;
 use tokio::sync::Notify;
 use tokio::sync::oneshot;
 
+#[path = "guardian_root_handoff.rs"]
+pub(super) mod root_handoff;
+
 #[path = "guardian_heartbeat_authorization.rs"]
 mod heartbeat;
 #[path = "guardian_pending_root_delivery.rs"]
@@ -1663,10 +1666,7 @@ async fn run_guardian_subagent_review(
             if matches!(missing_source, MissingCheckpointSource::VerifiedAnswer) {
                 // The phase-bearing commentary original survives only in the backup.
                 checkpoint.guardian_history = Some(codex_history::GuardianHistoryCheckpoint(
-                    original_history
-                        .iter()
-                        .map(|envelope| envelope.item.clone())
-                        .collect(),
+                    original_history.clone(),
                 ));
             }
             checkpoint.replacement_history = Some(replacement_history);
@@ -1686,6 +1686,7 @@ async fn run_guardian_subagent_review(
                 .resume_thread_with_history(
                     test.config.clone(),
                     InitialHistory::Resumed(ResumedHistory {
+                        history_revision: None,
                         conversation_id: root_thread_id,
                         history: Arc::new(saved.items),
                         rollout_path: None,

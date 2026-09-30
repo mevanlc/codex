@@ -605,6 +605,12 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadSetNameResponse,
     },
+    #[experimental("thread/prediction/request")]
+    ThreadPredictionRequest => "thread/prediction/request" {
+        params: v2::ThreadPredictionRequestParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadPredictionRequestResponse,
+    },
     ThreadGoalSet => "thread/goal/set" {
         params: v2::ThreadGoalSetParams,
         serialization: thread_id(params.thread_id),
@@ -1933,6 +1939,8 @@ server_notification_definitions! {
     ThreadNameUpdated => "thread/name/updated" (v2::ThreadNameUpdatedNotification),
     ThreadAttachmentUpdated => "thread/attachment/updated" (v2::ThreadAttachmentUpdatedNotification),
     ThreadGoalUpdated => "thread/goal/updated" (v2::ThreadGoalUpdatedNotification),
+    #[experimental("thread/prediction/updated")]
+    ThreadPredictionUpdated => "thread/prediction/updated" (v2::ThreadPredictionUpdatedNotification),
     ThreadGoalCleared => "thread/goal/cleared" (v2::ThreadGoalClearedNotification),
     #[experimental("thread/queue/changed")]
     ThreadQueueChanged => "thread/queue/changed" (v2::ThreadQueueChangedNotification),
@@ -2520,6 +2528,7 @@ mod tests {
         let thread_goal_set = ClientRequest::ThreadGoalSet {
             request_id: request_id(),
             params: v2::ThreadGoalSetParams {
+                origin: None,
                 thread_id: "goal-thread".to_string(),
                 objective: Some("ship it".to_string()),
                 status: None,
@@ -4438,6 +4447,7 @@ mod tests {
         let set_request = ClientRequest::ThreadGoalSet {
             request_id: RequestId::Integer(1),
             params: v2::ThreadGoalSetParams {
+                origin: None,
                 thread_id: "thr_123".to_string(),
                 objective: Some("ship goal mode".to_string()),
                 status: Some(v2::ThreadGoalStatus::Active),
@@ -4453,6 +4463,7 @@ mod tests {
         let clear_request = ClientRequest::ThreadGoalClear {
             request_id: RequestId::Integer(3),
             params: v2::ThreadGoalClearParams {
+                origin: None,
                 thread_id: "thr_123".to_string(),
             },
         };
