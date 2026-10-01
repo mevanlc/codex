@@ -106,6 +106,8 @@ pub(crate) struct SessionConfiguration {
 
     /// Desired configured inputs inherited by future turns.
     pub(super) step_settings: Arc<StepSettings>,
+    /// Host-supplied extension data inherited by future turns.
+    pub(super) turn_extension_init: ExtensionDataInit,
     /// Ordered environments inherited by future turns.
     pub(super) environments: Vec<TurnEnvironmentSelection>,
     /// Explicit startup overrides used when resolving effective model metadata.
@@ -306,6 +308,7 @@ impl SessionConfiguration {
             thread_source: self.thread_source.clone(),
             originator: self.originator.clone(),
             disabled_plugin_ids: self.disabled_plugin_ids.clone(),
+            turn_extension_init: self.turn_extension_init.clone(),
         }
     }
 
@@ -358,6 +361,7 @@ impl SessionConfiguration {
             collaboration_mode: Some(self.step_settings.collaboration_mode.clone()),
             personality: self.step_settings.personality,
             disabled_plugin_ids: Some(self.disabled_plugin_ids.clone()),
+            turn_extension_init: Some(self.turn_extension_init.clone()),
             ..Default::default()
         }
     }
@@ -398,6 +402,9 @@ impl SessionConfiguration {
         current_environments: &[TurnEnvironmentSelection],
     ) -> ConstraintResult<Self> {
         let mut next_configuration = self.clone();
+        if let Some(turn_extension_init) = &updates.turn_extension_init {
+            next_configuration.turn_extension_init = turn_extension_init.clone();
+        }
         if let Some(disabled_plugin_ids) = &updates.disabled_plugin_ids {
             next_configuration.disabled_plugin_ids = disabled_plugin_ids.clone();
         }
@@ -595,6 +602,8 @@ pub(crate) struct SessionSettingsCommit {
 #[derive(Default, Clone)]
 pub(crate) struct SessionSettingsUpdate {
     pub(crate) step_settings: StepSettingsUpdate,
+    /// Omission preserves the current data; an empty initializer clears it.
+    pub(crate) turn_extension_init: Option<ExtensionDataInit>,
     pub(crate) environments: Option<TurnEnvironmentSelections>,
     pub(crate) runtime_workspace_roots: Option<Vec<AbsolutePathBuf>>,
     pub(crate) profile_workspace_roots: Option<Vec<ProfileWorkspaceRoot>>,
@@ -1303,6 +1312,7 @@ impl Session {
                 session_configuration.session_source.clone(),
             )
             .with_auth_env(auth_env_telemetry.to_otel_metadata())
+            .with_user_id(telemetry_auth.and_then(CodexAuth::get_chatgpt_user_id))
             .with_tool_result_log_config(config.otel.tool_result);
             if let Some(metrics) = thread_extension_data.get::<codex_otel::MetricsClient>() {
                 session_telemetry = session_telemetry.with_metrics(metrics.as_ref().clone());
@@ -1665,6 +1675,7 @@ impl Session {
             let session_extension_data =
                 codex_extension_api::ExtensionData::new(session_id.to_string());
             session_extension_data.insert(analytics_events_client.clone());
+            session_extension_data.insert(session_telemetry.clone());
             let mcp_resource_client = Arc::new(McpResourceClient::new(Arc::clone(&mcp_runtime)));
             let extension_metrics =
                 extension_metrics::from_session_telemetry(session_telemetry.clone());
@@ -1723,6 +1734,7 @@ impl Session {
                 models_manager: Arc::clone(&models_manager),
                 git_root_discovery,
                 tool_approvals: Mutex::new(ApprovalStore::default()),
+                granted_permissions_by_environment_id: Arc::default(),
                 runtime_handle: tokio::runtime::Handle::current(),
                 skills_service,
                 agents_md_manager,
@@ -1964,7 +1976,11 @@ impl Session {
                 Ok(sess)
             }
             Err(err) => {
-                live_thread_init.discard().await;
+                if let Err(error) = live_thread_init.discard().await {
+                    tracing::warn!(
+                        "failed to discard thread persistence for failed session init: {error}"
+                    );
+                }
                 Err(err)
             }
         }

@@ -11663,6 +11663,7 @@ async fn browser_feature_requirements_are_valid() -> std::io::Result<()> {
                 r#"
 [features]
 in_app_browser = false
+browser_annotation_api = false
 browser_use = false
 browser_use_full_cdp_access = false
 "#,
@@ -11672,6 +11673,7 @@ browser_use_full_cdp_access = false
         .await?;
 
     assert!(!config.features.enabled(Feature::InAppBrowser));
+    assert!(!config.features.enabled(Feature::BrowserAnnotationApi));
     assert!(!config.features.enabled(Feature::BrowserUse));
     assert!(!config.features.enabled(Feature::BrowserUseFullCdpAccess));
 
@@ -13219,35 +13221,33 @@ voice = "cedar"
 
 #[tokio::test]
 async fn realtime_audio_loads_from_config_toml() -> std::io::Result<()> {
-    let cfg: ConfigToml = toml::from_str(
-        r#"
-[audio]
-microphone = "USB Mic"
-speaker = "Desk Speakers"
-"#,
-    )
-    .expect("TOML deserialization should succeed");
-
-    let realtime_audio = cfg
-        .audio
-        .as_ref()
-        .expect("realtime audio config should be present");
-    assert_eq!(realtime_audio.microphone.as_deref(), Some("USB Mic"));
-    assert_eq!(realtime_audio.speaker.as_deref(), Some("Desk Speakers"));
-
-    let codex_home = TempDir::new()?;
-    let config = Config::load_from_base_config_with_overrides(
-        cfg,
-        ConfigOverrides::default(),
-        codex_home.abs(),
-    )
-    .await?;
-
-    assert_eq!(config.realtime_audio.microphone.as_deref(), Some("USB Mic"));
-    assert_eq!(
-        config.realtime_audio.speaker.as_deref(),
-        Some("Desk Speakers")
-    );
+    for selection in ["1", "[1, 2]"] {
+        let cfg: ConfigToml = toml::from_str(&format!(
+            "[audio]\nmicrophone = \"USB Mic\"\nmicrophone_channel = {selection}\nspeaker = \"Desk Speakers\"\n"
+        )).expect("TOML deserialization should succeed");
+        let expected_audio = cfg.audio.as_ref().unwrap().clone();
+        let codex_home = TempDir::new()?;
+        let config = Config::load_from_base_config_with_overrides(
+            cfg,
+            ConfigOverrides::default(),
+            codex_home.abs(),
+        )
+        .await?;
+        assert_eq!(
+            config.realtime_audio,
+            codex_config::config_toml::RealtimeAudioConfig {
+                microphone: Some("USB Mic".into()),
+                speaker: Some("Desk Speakers".into()),
+                microphone_channel: expected_audio.microphone_channel,
+            }
+        );
+    }
+    for invalid in ["0", "[1, 0]"] {
+        assert!(
+            toml::from_str::<ConfigToml>(&format!("[audio]\nmicrophone_channel = {invalid}"))
+                .is_err()
+        );
+    }
     Ok(())
 }
 
