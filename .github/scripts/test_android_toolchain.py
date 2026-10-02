@@ -50,7 +50,9 @@ class AndroidToolchainTests(unittest.TestCase):
 
     def make_ndk(self, host):
         toolchain = self.ndk / host
-        runtime = toolchain / "lib/clang/18/lib/linux/libclang_rt.builtins-aarch64-android.a"
+        runtime = (
+            toolchain / "lib/clang/18/lib/linux/libclang_rt.builtins-aarch64-android.a"
+        )
         runtime.parent.mkdir(parents=True)
         runtime.touch()
         (toolchain / "sysroot").mkdir()
@@ -58,22 +60,34 @@ class AndroidToolchainTests(unittest.TestCase):
 
     def configure(self, check=True):
         return subprocess.run(
-            ["bash", str(SCRIPT)], env=self.env, text=True,
-            capture_output=True, check=check,
+            ["bash", str(SCRIPT)],
+            env=self.env,
+            text=True,
+            capture_output=True,
+            check=check,
         )
 
     def exported(self):
-        return dict(line.split("=", 1) for line in Path(self.env["GITHUB_ENV"]).read_text().splitlines())
+        return dict(
+            line.split("=", 1)
+            for line in Path(self.env["GITHUB_ENV"]).read_text().splitlines()
+        )
 
     def test_fallback_pairs_host_headers_with_ndk_runtime(self):
         self.configure()
         exported = self.exported()
-        resource = Path(self.env["RUNNER_TEMP"]) / "android-a1a-toolchain/clang-resource"
-        self.assertEqual((resource / "include").resolve(), self.host_resource / "include")
+        resource = (
+            Path(self.env["RUNNER_TEMP"]) / "android-a1a-toolchain/clang-resource"
+        )
+        self.assertEqual(
+            (resource / "include").resolve(), self.host_resource / "include"
+        )
         self.assertEqual((resource / "lib").resolve(), self.runtime.parents[1])
         self.assertEqual(exported["RUSTFLAGS"], f"-C link-arg={self.runtime}")
         for key in ("CC_aarch64_linux_android", "CXX_aarch64_linux_android"):
-            subprocess.run([exported[key], "source with spaces.c", "-c"], env=self.env, check=True)
+            subprocess.run(
+                [exported[key], "source with spaces.c", "-c"], env=self.env, check=True
+            )
             args = Path(self.env["MOCK_LOG"]).read_text().splitlines()
             self.assertEqual(args[args.index("-resource-dir") + 1], str(resource))
             self.assertIn("source with spaces.c", args)
@@ -85,16 +99,26 @@ class AndroidToolchainTests(unittest.TestCase):
         runtime = self.make_ndk("linux-aarch64")
         native_bin = self.ndk / "linux-aarch64/bin"
         native_bin.mkdir()
-        for name in ("aarch64-linux-android35-clang", "aarch64-linux-android35-clang++", "llvm-ar", "llvm-ranlib"):
+        for name in (
+            "aarch64-linux-android35-clang",
+            "aarch64-linux-android35-clang++",
+            "llvm-ar",
+            "llvm-ranlib",
+        ):
             self.write_tool(native_bin / name, "exit 0\n")
         self.configure()
         exported = self.exported()
-        self.assertEqual(exported["CC_aarch64_linux_android"], str(native_bin / "aarch64-linux-android35-clang"))
+        self.assertEqual(
+            exported["CC_aarch64_linux_android"],
+            str(native_bin / "aarch64-linux-android35-clang"),
+        )
         self.assertEqual(exported["RUSTFLAGS"], f"-C link-arg={runtime}")
-        self.assertFalse((Path(self.env["RUNNER_TEMP"]) / "android-a1a-toolchain").exists())
+        self.assertFalse(
+            (Path(self.env["RUNNER_TEMP"]) / "android-a1a-toolchain").exists()
+        )
 
     def test_mismatched_c_and_cxx_headers_fail_early(self):
-        self.write_tool(self.bin / "clang++", 'echo /different/resource\n')
+        self.write_tool(self.bin / "clang++", "echo /different/resource\n")
         result = self.configure(check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("same resource headers", result.stderr)
