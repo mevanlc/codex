@@ -1,0 +1,142 @@
+name: Android toolchain check
+
+on:
+  push:
+    branches: [dot/fix-android-toolchain]
+  pull_request:
+    paths:
+      - .github/scripts/configure-android-toolchain.sh
+      - .github/scripts/test_android_toolchain.py
+      - .github/workflows/android-release-a1a.yml
+      - .github/workflows/android-toolchain-check.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-dependencies:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: "4"
+      CARGO_INCREMENTAL: "0"
+      AWS_LC_SYS_USE_SYSTEM: "0"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Test toolchain configuration
+        run: python3 -m unittest discover -s .github/scripts -p test_android_toolchain.py
+
+      - name: Select the failing runner's Clang major
+        run: |
+          set -euo pipefail
+          /usr/lib/llvm-21/bin/clang --version
+          echo /usr/lib/llvm-21/bin >> "$GITHUB_PATH"
+
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+        with:
+          targets: aarch64-linux-android
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: ""
+
+      - name: Install the release NDK
+        run: sdkmanager --install "ndk;27.2.12479018"
+
+      - name: Reproduce the mismatched-header failure
+        run: |
+          set -euo pipefail
+          ndk="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64"
+          cat > "$RUNNER_TEMP/neon-probe.c" <<'EOF'
+          #include <arm_neon.h>
+          #include <stdint.h>
+          int main(void) {
+            uint32_t value = 1;
+            uint32x4_t lanes = vdupq_n_u32(value);
+            return (int)vgetq_lane_u32(vaddq_u32(lanes, lanes), 0) - 2;
+          }
+          EOF
+          if clang --target=aarch64-linux-android35 --sysroot="$ndk/sysroot" \
+            -resource-dir "$ndk/lib/clang/18" -c "$RUNNER_TEMP/neon-probe.c" \
+            -o "$RUNNER_TEMP/old-neon.o" > "$RUNNER_TEMP/old-neon.log" 2>&1; then
+            echo "Expected Clang 21 with Clang 18 headers to fail" >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/old-neon.log"
+          grep -E 'incompatible constant|invalid conversion between vector type' "$RUNNER_TEMP/old-neon.log"
+
+      - name: Configure the release toolchain
+        run: bash .github/scripts/configure-android-toolchain.sh
+
+      - name: Compile and link C and C++ probes with NDK builtins
+        run: |
+          set -euo pipefail
+          for compiler in "$CC_aarch64_linux_android" "$CXX_aarch64_linux_android"; do
+            runtime=$("$compiler" -print-libgcc-file-name)
+            test -f "$runtime"
+            case "$(realpath "$runtime")" in
+              "$ANDROID_HOME"/ndk/27.2.12479018/*/libclang_rt.builtins-aarch64-android.a) ;;
+              *) echo "Unexpected Android runtime: $runtime" >&2; exit 1 ;;
+            esac
+            "$compiler" -x c "$RUNNER_TEMP/neon-probe.c" -o "$RUNNER_TEMP/neon-c-probe"
+            "$compiler" -x c++ "$RUNNER_TEMP/neon-probe.c" -o "$RUNNER_TEMP/neon-probe"
+            file "$RUNNER_TEMP/neon-probe"
+          done
+          "$CC_aarch64_linux_android" -E -H "$RUNNER_TEMP/neon-probe.c" \
+            > /dev/null 2> "$RUNNER_TEMP/headers.log"
+          cat "$RUNNER_TEMP/headers.log"
+          if grep -F '/lib/clang/18/include/' "$RUNNER_TEMP/headers.log"; then
+            echo "Clang 18 builtin headers leaked into the host compiler" >&2
+            exit 1
+          fi
+
+      - name: Clean-build the three failing native dependencies
+        run: |
+          set -euo pipefail
+          smoke=$(mktemp -d "$RUNNER_TEMP/android-native.XXXXXX")
+          export SMOKE_DIR="$smoke"
+          python3 - <<'PY'
+          import os
+          import shutil
+          import tomllib
+          from pathlib import Path
+
+          smoke = Path(os.environ["SMOKE_DIR"])
+          lock = Path("codex-rs/Cargo.lock")
+          packages = tomllib.loads(lock.read_text())["package"]
+          names = ("blake3", "zstd-sys", "aws-lc-sys")
+          versions = {}
+          for name in names:
+              matches = [p["version"] for p in packages if p["name"] == name]
+              assert len(matches) == 1, (name, matches)
+              versions[name] = matches[0].split("+")[0]
+          manifest = '[package]\nname = "android-native-smoke"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\n'
+          for name in names:
+              options = ', default-features = false, features = ["legacy", "zdict_builder", "std"]' if name == "zstd-sys" else ""
+              manifest += f'{name} = {{ version = "={versions[name]}"{options} }}\n'
+          (smoke / "Cargo.toml").write_text(manifest)
+          (smoke / "src").mkdir()
+          (smoke / "src/main.rs").write_text('''
+          fn main() {
+              let input = b"android";
+              let mut digest = [0u8; 32];
+              unsafe { aws_lc_sys::SHA256(input.as_ptr(), input.len(), digest.as_mut_ptr()); }
+              println!("{} {} {:?}", blake3::hash(input), unsafe { zstd_sys::ZSTD_versionNumber() }, digest);
+          }
+          ''')
+          shutil.copyfile(lock, smoke / "Cargo.lock")
+          print(manifest)
+          PY
+          # Fresh directory and no compiler wrapper: persistent Cargo/sccache
+          # objects cannot hide a compiler/header incompatibility.
+          unset RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER AWS_LC_SYS_SYSTEM_DIR
+          export CARGO_TARGET_DIR="$smoke/target"
+          test ! -e "$CARGO_TARGET_DIR"
+          cargo metadata --manifest-path "$smoke/Cargo.toml" --format-version 1 > /dev/null
+          cargo build --locked --manifest-path "$smoke/Cargo.toml" \
+            --target aarch64-linux-android --release --verbose
+          file "$CARGO_TARGET_DIR/aarch64-linux-android/release/android-native-smoke"
