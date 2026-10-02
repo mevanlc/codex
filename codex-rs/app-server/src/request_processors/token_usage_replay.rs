@@ -8,6 +8,8 @@
 //! ids do not match the rebuilt thread, replay falls back to the active turn position at
 //! the time the `TokenCount` was persisted so the notification still targets the
 //! corresponding rebuilt turn.
+//! Bounded resume histories can begin mid-turn at a compaction checkpoint; its resume
+//! metadata preserves the turn identity even when the original start event is omitted.
 
 use std::sync::Arc;
 
@@ -20,6 +22,7 @@ use codex_app_server_protocol::TurnStatus;
 use codex_core::CodexThread;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::TurnStartedEvent;
 use codex_rollout::RolloutItem;
 
 use crate::outgoing_message::ConnectionId;
@@ -76,6 +79,24 @@ fn latest_token_usage_turn_id_from_rollout_items(
         .rposition(|item| matches!(item, RolloutItem::EventMsg(EventMsg::TokenCount(_))))?;
     let mut builder = ThreadHistoryBuilder::new();
     for item in &rollout_items[..token_count_index] {
+        if !builder.has_active_turn()
+            && let RolloutItem::Compacted(compacted) = item
+            && let Some(turn_id) = compacted
+                .resume_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.last_started_turn_id.as_ref())
+        {
+            // A bounded resume omits the original start event. Seed only this
+            // attribution builder so subsequent turn boundaries behave normally.
+            builder.handle_event(&EventMsg::TurnStarted(TurnStartedEvent {
+                turn_id: turn_id.clone(),
+                root_turn_id: None,
+                trace_id: None,
+                started_at: None,
+                model_context_window: None,
+                collaboration_mode_kind: Default::default(),
+            }));
+        }
         builder.handle_rollout_item(item);
     }
 

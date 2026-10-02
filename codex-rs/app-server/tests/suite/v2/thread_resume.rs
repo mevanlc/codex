@@ -118,6 +118,7 @@ use codex_protocol::protocol::TurnStartedEvent;
 use codex_protocol::user_input::ByteRange;
 use codex_protocol::user_input::TextElement;
 use codex_rollout::CompactedItem;
+use codex_rollout::CompactionResumeMetadata;
 use codex_rollout::RolloutItem;
 use codex_rollout::RolloutRecorder;
 use codex_rollout::append_rollout_item_to_path;
@@ -3980,6 +3981,15 @@ async fn cold_legacy_resume_restores_explicitly_attributed_usage_without_loading
 
 #[tokio::test]
 async fn cold_paginated_resume_restores_usage_without_loading_turns() -> Result<()> {
+    assert_cold_paginated_resume_restores_usage(/*compact*/ false).await
+}
+
+#[tokio::test]
+async fn cold_paginated_resume_restores_usage_after_mid_turn_compaction() -> Result<()> {
+    assert_cold_paginated_resume_restores_usage(/*compact*/ true).await
+}
+
+async fn assert_cold_paginated_resume_restores_usage(compact: bool) -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     mock_responses_config(&server.uri()).write(codex_home.path())?;
@@ -4005,6 +4015,32 @@ async fn cold_paginated_resume_restores_usage_without_loading_turns() -> Result<
         })),
     )
     .await?;
+    if compact {
+        // Cold resume reads only this checkpoint and the records after it, so the
+        // original TurnStarted above is unavailable to token usage replay.
+        append_rollout_item_to_path(
+            &path,
+            &RolloutItem::Compacted(CompactedItem {
+                message: "compacted during the turn".to_string(),
+                replacement_history: Some(Vec::new()),
+                retained_context: None,
+                guardian_history: None,
+                mcp_resource_origins: None,
+                window_number: Some(1),
+                first_window_id: None,
+                previous_window_id: None,
+                window_id: None,
+                compaction_response_id: None,
+                latest_token_usage_record: None,
+                resume_metadata: Some(CompactionResumeMetadata {
+                    multi_agent_version: None,
+                    last_started_turn_id: Some(canonical_turn_id.to_string()),
+                    previous_turn_settings: None,
+                }),
+            }),
+        )
+        .await?;
+    }
     append_rollout_item_to_path(
         &path,
         &RolloutItem::EventMsg(EventMsg::TokenCount(TokenCountEvent {
@@ -4069,6 +4105,8 @@ async fn cold_paginated_resume_restores_usage_without_loading_turns() -> Result<
     assert_eq!(notification.thread_id, thread.id);
     assert_eq!(notification.turn_id, canonical_turn_id);
     assert_eq!(notification.token_usage.total.total_tokens, 150);
+    assert_eq!(notification.token_usage.last.total_tokens, 90);
+    assert_eq!(notification.token_usage.model_context_window, Some(200_000));
 
     let turns_id = app_server
         .send_thread_turns_list_request(ThreadTurnsListParams {
