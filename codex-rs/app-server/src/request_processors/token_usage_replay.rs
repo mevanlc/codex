@@ -9,7 +9,8 @@
 //! the time the `TokenCount` was persisted so the notification still targets the
 //! corresponding rebuilt turn.
 //! Bounded resume histories can begin mid-turn at a compaction checkpoint; its resume
-//! metadata preserves the turn identity even when the original start event is omitted.
+//! metadata or the following turn context preserves the turn identity even when the
+//! original start event is omitted.
 
 use std::sync::Arc;
 
@@ -79,15 +80,21 @@ fn latest_token_usage_turn_id_from_rollout_items(
         .rposition(|item| matches!(item, RolloutItem::EventMsg(EventMsg::TokenCount(_))))?;
     let mut builder = ThreadHistoryBuilder::new();
     for item in &rollout_items[..token_count_index] {
-        if !builder.has_active_turn()
-            && let RolloutItem::Compacted(compacted) = item
-            && let Some(turn_id) = compacted
+        let turn_id = match item {
+            RolloutItem::Compacted(compacted) if !builder.has_active_turn() => compacted
                 .resume_metadata
                 .as_ref()
-                .and_then(|metadata| metadata.last_started_turn_id.as_ref())
-        {
+                .and_then(|metadata| metadata.last_started_turn_id.as_ref()),
+            RolloutItem::TurnContext(context) if builder.active_turn_id_if_explicit().is_none() => {
+                context.turn_id.as_ref()
+            }
+            _ => None,
+        };
+        if let Some(turn_id) = turn_id {
             // A bounded resume omits the original start event. Seed only this
             // attribution builder so subsequent turn boundaries behave normally.
+            // The checkpoint can lack a turn id after a settings update; the
+            // following baseline still identifies the turn that owns its usage.
             builder.handle_event(&EventMsg::TurnStarted(TurnStartedEvent {
                 turn_id: turn_id.clone(),
                 root_turn_id: None,

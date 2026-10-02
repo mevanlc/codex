@@ -114,6 +114,7 @@ use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TokenUsageInfo;
 use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::protocol::TurnAbortedEvent;
+use codex_protocol::protocol::TurnCompleteEvent;
 use codex_protocol::protocol::TurnStartedEvent;
 use codex_protocol::user_input::ByteRange;
 use codex_protocol::user_input::TextElement;
@@ -3981,15 +3982,28 @@ async fn cold_legacy_resume_restores_explicitly_attributed_usage_without_loading
 
 #[tokio::test]
 async fn cold_paginated_resume_restores_usage_without_loading_turns() -> Result<()> {
-    assert_cold_paginated_resume_restores_usage(/*compact*/ false).await
+    assert_cold_paginated_resume_restores_usage(ResumeUsageAttribution::TurnStarted).await
 }
 
 #[tokio::test]
 async fn cold_paginated_resume_restores_usage_after_mid_turn_compaction() -> Result<()> {
-    assert_cold_paginated_resume_restores_usage(/*compact*/ true).await
+    assert_cold_paginated_resume_restores_usage(ResumeUsageAttribution::CompactionMetadata).await
 }
 
-async fn assert_cold_paginated_resume_restores_usage(compact: bool) -> Result<()> {
+#[tokio::test]
+async fn cold_paginated_resume_restores_usage_from_turn_context_after_compaction() -> Result<()> {
+    assert_cold_paginated_resume_restores_usage(ResumeUsageAttribution::TurnContext).await
+}
+
+enum ResumeUsageAttribution {
+    TurnStarted,
+    CompactionMetadata,
+    TurnContext,
+}
+
+async fn assert_cold_paginated_resume_restores_usage(
+    attribution: ResumeUsageAttribution,
+) -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     mock_responses_config(&server.uri()).write(codex_home.path())?;
@@ -4015,7 +4029,7 @@ async fn assert_cold_paginated_resume_restores_usage(compact: bool) -> Result<()
         })),
     )
     .await?;
-    if compact {
+    if !matches!(attribution, ResumeUsageAttribution::TurnStarted) {
         // Cold resume reads only this checkpoint and the records after it, so the
         // original TurnStarted above is unavailable to token usage replay.
         append_rollout_item_to_path(
@@ -4034,10 +4048,30 @@ async fn assert_cold_paginated_resume_restores_usage(compact: bool) -> Result<()
                 latest_token_usage_record: None,
                 resume_metadata: Some(CompactionResumeMetadata {
                     multi_agent_version: None,
-                    last_started_turn_id: Some(canonical_turn_id.to_string()),
+                    last_started_turn_id: matches!(
+                        attribution,
+                        ResumeUsageAttribution::CompactionMetadata
+                    )
+                    .then(|| canonical_turn_id.to_string()),
                     previous_turn_settings: None,
                 }),
             }),
+        )
+        .await?;
+    }
+    if matches!(attribution, ResumeUsageAttribution::TurnContext) {
+        // Runtime settings updates can clear the checkpoint's last-started id.
+        // Mid-turn compaction still persists the owning id in this baseline.
+        append_rollout_item_to_path(
+            &path,
+            &RolloutItem::TurnContext(serde_json::from_value(json!({
+                "turn_id": canonical_turn_id,
+                "cwd": codex_home.path(),
+                "approval_policy": "never",
+                "sandbox_policy": {"type": "read-only"},
+                "model": "mock-model",
+                "summary": "auto",
+            }))?),
         )
         .await?;
     }
@@ -4078,6 +4112,21 @@ async fn assert_cold_paginated_resume_restores_usage(compact: bool) -> Result<()
         })),
     )
     .await?;
+    if matches!(attribution, ResumeUsageAttribution::TurnContext) {
+        append_rollout_item_to_path(
+            &path,
+            &RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+                turn_id: canonical_turn_id.to_string(),
+                last_agent_message: None,
+                started_at: None,
+                completed_at: None,
+                duration_ms: None,
+                time_to_first_token_ms: None,
+                error: None,
+            })),
+        )
+        .await?;
+    }
     let mut app_server = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .build_initialized()

@@ -18,7 +18,7 @@ This fork maintains a build of Codex CLI that runs natively on Android via [Term
 - **File mention settings** — optionally preserve the `@` prefix and complete explicit paths
 - **Shell follow-ups** — press Tab in `!` mode to start an agent turn after the command finishes
 - **Retractable steer messages** — pull a still-pending steer back into the composer; backed by a new `turn/retract` app-server method
-- **Context usage on resume** — restore the saved context fullness before the next turn, including when a turn crossed a compaction checkpoint
+- **Context usage on resume** — restore the saved context fullness before the next turn, including when a turn crossed a compaction checkpoint with its identity saved only in the following turn context
 - **Unrestricted reasoning shortcuts** — the reasoning hotkeys step all the way into Max and Ultra
 - **Platform fixes** — `SHELL`-based shell detection on Android, vendored OpenSSL, fork-aware update checks
 
