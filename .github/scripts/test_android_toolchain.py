@@ -36,9 +36,9 @@ class AndroidToolchainTests(unittest.TestCase):
                 self.bin / name,
                 'if [ "$1" = -print-resource-dir ]; then\n'
                 '  printf "%s\\n" "$MOCK_RESOURCE"\n'
-                'else\n'
+                "else\n"
                 '  printf "%s\\n" "$@" > "$MOCK_LOG"\n'
-                'fi\n',
+                "fi\n",
             )
         for name in ("llvm-ar", "llvm-ranlib"):
             self.write_tool(self.bin / name, "exit 0\n")
