@@ -678,6 +678,11 @@ client_request_definitions! {
         serialization: None,
         response: v2::ThreadAttachmentListResponse,
     },
+    ThreadAttachmentOwnerList => "thread/attachmentOwner/list" {
+        params: v2::ThreadAttachmentOwnerListParams,
+        serialization: None,
+        response: v2::ThreadAttachmentOwnerListResponse,
+    },
     ThreadAttachmentRemove => "thread/attachment/remove" {
         params: v2::ThreadAttachmentRemoveParams,
         serialization: thread_id(params.thread_id),
@@ -2588,6 +2593,7 @@ mod tests {
         let environment_add = ClientRequest::EnvironmentAdd {
             request_id: request_id(),
             params: v2::EnvironmentAddParams {
+                skills: None,
                 auth_bearer_token: None,
                 environment_id: "remote-a".to_string(),
                 exec_server_url: "ws://127.0.0.1:8765".to_string(),
@@ -3842,6 +3848,7 @@ mod tests {
         let request = ClientRequest::EnvironmentAdd {
             request_id: RequestId::Integer(9),
             params: v2::EnvironmentAddParams {
+                skills: None,
                 auth_bearer_token: Some("private-executor-token".into()),
                 environment_id: "remote-a".to_string(),
                 exec_server_url: "ws://127.0.0.1:8765".to_string(),
@@ -3857,7 +3864,8 @@ mod tests {
                     "environmentId": "remote-a",
                     "execServerUrl": "ws://127.0.0.1:8765",
                     "connectTimeoutMs": 300000,
-                    "authBearerToken": "private-executor-token"
+                    "authBearerToken": "private-executor-token",
+                    "skills": null
                 }
             }),
             serde_json::to_value(&request)?,
@@ -4382,6 +4390,7 @@ mod tests {
         let request = ClientRequest::EnvironmentAdd {
             request_id: RequestId::Integer(1),
             params: v2::EnvironmentAddParams {
+                skills: None,
                 auth_bearer_token: None,
                 environment_id: "remote-a".to_string(),
                 exec_server_url: "ws://127.0.0.1:8765".to_string(),

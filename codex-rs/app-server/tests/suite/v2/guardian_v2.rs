@@ -183,6 +183,7 @@ struct MockResponsesState {
     root_thread_id: Mutex<Option<String>>,
     allow_luna: Notify,
     allow_guardian_review: Notify,
+    gate_each_guardian_review: bool,
     classification_completed: Notify,
     truncation_recorded: Notify,
     context_metric_bounds: Mutex<BTreeMap<(String, String), Option<f64>>>,
@@ -422,7 +423,7 @@ async fn parent_response(
             .expect("Guardian request lock should not be poisoned")
             .push(request.clone());
         let review_number = state.guardian_reviews.fetch_add(1, Ordering::SeqCst);
-        if review_number == 0 {
+        if review_number == 0 || state.gate_each_guardian_review {
             state.allow_guardian_review.notified().await;
         }
         let review_outcome = if state.late_root_restriction && review_number > 0 {
@@ -743,6 +744,7 @@ async fn guardian_v2_routes_scoped_tool_approvals(
         + usize::from(late_root_restriction);
     let responses_state = Arc::new(MockResponsesState {
         luna_score,
+        gate_each_guardian_review: review_continuations && matches!(risk, GuardianRisk::High),
         invalid_classification: matches!(risk, GuardianRisk::InvalidResponse),
         fail_after_classification,
         review_outcome,
@@ -1295,7 +1297,7 @@ async fn guardian_v2_routes_scoped_tool_approvals(
                 .collect::<Vec<_>>();
             assert_eq!(
                 history_texts.first().and_then(|text| text.lines().next()),
-                Some(">>> RETAINED USER INSTRUCTIONS START")
+                Some(">>> TRANSCRIPT START")
             );
             assert!(history_texts.contains(&">>> TRANSCRIPT START\n"));
             assert!(history_texts.iter().any(|text| text.contains(USER_CONTEXT)));
@@ -1319,7 +1321,19 @@ async fn guardian_v2_routes_scoped_tool_approvals(
                 .filter_map(|item| item["text"].as_str())
                 .collect::<Vec<_>>();
             assert_eq!(
-                &action_texts[..2],
+                action_texts.first().and_then(|text| text.lines().next()),
+                Some(">>> RETAINED USER INSTRUCTIONS START")
+            );
+            let action_start = action_texts
+                .iter()
+                .position(|text| *text == "The Codex agent has requested the following action:\n")
+                .expect("planned action follows retained context");
+            assert_eq!(
+                action_texts[action_start - 1],
+                ">>> RETAINED USER INSTRUCTIONS END\n\n"
+            );
+            assert_eq!(
+                &action_texts[action_start..action_start + 2],
                 &[
                     "The Codex agent has requested the following action:\n",
                     ">>> APPROVAL REQUEST START\n",
@@ -1470,6 +1484,11 @@ async fn guardian_v2_routes_scoped_tool_approvals(
         {
             wait_for_guardian_reviews(responses_state.as_ref(), expected_guardian_reviews).await?;
         }
+        if responses_state.gate_each_guardian_review {
+            // Snapshot classifiers can arrive out of order. Keep the next tool blocked until
+            // this tool's classifier request has been captured and checked.
+            responses_state.allow_guardian_review.notify_one();
+        }
         responses_state.allow_luna.notify_one();
         if review_continuations {
             let third_sample = wait_for_luna_request(responses_state.as_ref(), /*index*/ 2).await?;
@@ -1525,6 +1544,9 @@ async fn guardian_v2_routes_scoped_tool_approvals(
                         .is_some_and(|id| id.starts_with("luna-score-message-"))),
                     "snapshot and failed-stream recovery must start with fresh history"
                 );
+            }
+            if responses_state.gate_each_guardian_review {
+                responses_state.allow_guardian_review.notify_one();
             }
             responses_state.allow_luna.notify_one();
         }

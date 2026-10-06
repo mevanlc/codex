@@ -2,6 +2,8 @@
 mod capability_roots;
 #[path = "guardian_environments_tests.rs"]
 mod guardian_environments;
+#[path = "remote_env_required_skills_tests.rs"]
+mod required_skills;
 #[path = "remote_env_spawn_tests.rs"]
 pub(super) mod spawn_tests;
 
@@ -75,6 +77,7 @@ use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::ThreadSettingsOverrides;
+use codex_protocol::protocol::TurnEnvironmentRequest;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::TurnEnvironmentSelections;
 use codex_protocol::protocol::TurnSettingsUpdate;
@@ -1690,7 +1693,7 @@ async fn shared_executor_keeps_ready_capability_roots_scoped_to_each_attachment(
     let second = test
         .thread_manager
         .start_thread(StartThreadOptions {
-            environments: Some(vec![TurnEnvironmentSelection {
+            environments: Some(vec![TurnEnvironmentRequest {
                 config: EnvironmentConfigState::Ready(EnvironmentConfig {
                     allow_login_shell: true,
                     workspace_roots: selection.workspace_roots.clone(),
@@ -1704,7 +1707,7 @@ async fn shared_executor_keeps_ready_capability_roots_scoped_to_each_attachment(
                     network_policy: None,
                     selected_capability_roots: vec![root("startup-root"), root("second-root")],
                 }),
-                ..selection.clone()
+                ..selection.clone().into_request()
             }]),
             thread_extension_init: second_thread_init,
             ..StartThreadOptions::new(test.config.clone())
@@ -1827,23 +1830,6 @@ async fn shared_executor_keeps_ready_capability_roots_scoped_to_each_attachment(
         ]
     );
 
-    let login_shells = requests
-        .iter()
-        .map(|request| {
-            let body = request.body_json();
-            let exec_command = body["tools"]
-                .as_array()
-                .context("tools should be an array")?
-                .iter()
-                .find(|tool| tool["name"] == "exec_command")
-                .context("exec_command should be available")?;
-            Ok(exec_command["parameters"]["properties"]
-                .get("login")
-                .is_some())
-        })
-        .collect::<Result<Vec<_>>>()?;
-    assert_eq!(login_shells, vec![false, true, false, true]);
-
     Ok(())
 }
 
@@ -1910,6 +1896,12 @@ async fn owner_network_policy_rejects_unsupported_environment_authority() -> Res
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_attachment_installs_configuration_before_waiting_turn_resumes() -> Result<()> {
     const WAIT_CALL_ID: &str = "wait-for-owner-configuration";
+    const EXEC_CALL_ID: &str = "exec-before-owner-configuration";
+    const STDIN_CALL_ID: &str = "stdin-without-environment";
+    const LOGIN_CALL_ID: &str = "login-disabled-by-owner-configuration";
+    const UNKNOWN_ENV_CALL_ID: &str = "permissions-unknown-environment";
+    const SELECTED_ENV_CALL_ID: &str = "permissions-selected-environment";
+    const WAIT_MESSAGE: &str = "No usable execution environment is available. Wait for an environment to become available before using this tool.";
 
     let server = start_mock_server().await;
     let mut extensions = ExtensionRegistryBuilder::new();
@@ -1918,7 +1910,24 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
     let mut builder = test_codex()
         .with_extensions(Arc::new(extensions.build()))
         .with_config(|config| {
+            config
+                .features
+                .enable(Feature::StableEnvironmentTools)
+                .expect("enable stable environment tools");
             assert!(config.features.enable(Feature::DeferredExecutor).is_ok());
+            if cfg!(unix) {
+                assert!(config.features.enable(Feature::ShellZshFork).is_ok());
+                // Calls stop at environment/login validation, so these paths are never executed.
+                let executable = std::env::current_exe().expect("current executable");
+                config.zsh_path = Some(executable.clone());
+                config.main_execve_wrapper_exe = Some(executable);
+            }
+            assert!(
+                config
+                    .features
+                    .enable(Feature::RequestPermissionsTool)
+                    .is_ok()
+            );
             config
                 .permissions
                 .set_permission_profile(PermissionProfile::read_only())
@@ -1959,7 +1968,7 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
     };
     let start_pending_thread = || {
         test.thread_manager.start_thread(StartThreadOptions {
-            environments: Some(vec![pending_selection.clone()]),
+            environments: Some(vec![pending_selection.clone().into_request()]),
             ..StartThreadOptions::new(test.config.clone())
         })
     };
@@ -1969,6 +1978,13 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
     let requested_workspace_roots = waiting.thread.config_snapshot().await.workspace_roots;
     let independent = start_pending_thread().await?;
     let failed = start_pending_thread().await?;
+    let empty = test
+        .thread_manager
+        .start_thread(StartThreadOptions {
+            environments: Some(Vec::new()),
+            ..StartThreadOptions::new(test.config.clone())
+        })
+        .await?;
 
     submit_thread_settings(
         &waiting.thread,
@@ -1982,6 +1998,44 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
         &server,
         vec![
             sse(vec![
+                ev_function_call(EXEC_CALL_ID, "exec_command", r#"{"cmd":"pwd"}"#),
+                ev_function_call(STDIN_CALL_ID, "write_stdin", r#"{"session_id":1}"#),
+                ev_function_call(
+                    UNKNOWN_ENV_CALL_ID,
+                    "request_permissions",
+                    r#"{"environment_id":"missing","permissions":{"network":{"enabled":true}}}"#,
+                ),
+                ev_completed("no-environment-exec"),
+            ]),
+            sse(vec![
+                ev_assistant_message("no-environment-message", "waiting for an environment"),
+                ev_completed("no-environment-done"),
+            ]),
+            sse(vec![
+                ev_response_created("pending-configuration-exec"),
+                ev_function_call(
+                    EXEC_CALL_ID,
+                    "exec_command",
+                    &json!({ "cmd": "pwd" }).to_string(),
+                ),
+                ev_function_call(STDIN_CALL_ID, "write_stdin", r#"{"session_id":1}"#),
+                ev_function_call(
+                    UNKNOWN_ENV_CALL_ID,
+                    "request_permissions",
+                    r#"{"environment_id":"missing","permissions":{"network":{"enabled":true}}}"#,
+                ),
+                ev_function_call(
+                    SELECTED_ENV_CALL_ID,
+                    "request_permissions",
+                    &json!({
+                        "environment_id": selection.environment_id,
+                        "permissions": {"network": {"enabled": true}},
+                    })
+                    .to_string(),
+                ),
+                ev_completed("pending-configuration-exec"),
+            ]),
+            sse(vec![
                 ev_response_created("pending-configuration-wait"),
                 ev_function_call(
                     WAIT_CALL_ID,
@@ -1992,12 +2046,78 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
             ]),
             sse(vec![
                 ev_response_created("pending-configuration-ready"),
-                ev_assistant_message("pending-configuration-message", "done"),
+                ev_function_call(
+                    LOGIN_CALL_ID,
+                    "exec_command",
+                    r#"{"cmd":"pwd","login":true}"#,
+                ),
                 ev_completed("pending-configuration-ready"),
+            ]),
+            sse(vec![
+                ev_assistant_message("pending-configuration-message", "done"),
+                ev_completed("pending-configuration-done"),
+            ]),
+            sse(vec![
+                ev_function_call(EXEC_CALL_ID, "exec_command", r#"{"cmd":"pwd"}"#),
+                ev_function_call(STDIN_CALL_ID, "write_stdin", r#"{"session_id":1}"#),
+                ev_function_call(
+                    UNKNOWN_ENV_CALL_ID,
+                    "request_permissions",
+                    r#"{"environment_id":"missing","permissions":{"network":{"enabled":true}}}"#,
+                ),
+                ev_function_call(
+                    SELECTED_ENV_CALL_ID,
+                    "request_permissions",
+                    &json!({
+                        "environment_id": selection.environment_id,
+                        "permissions": {"network": {"enabled": true}},
+                    })
+                    .to_string(),
+                ),
+                ev_completed("failed-environment-exec"),
+            ]),
+            sse(vec![
+                ev_assistant_message("failed-environment-message", "waiting for an environment"),
+                ev_completed("failed-environment-done"),
+            ]),
+            sse(vec![
+                ev_assistant_message("recovered-environment-message", "ready"),
+                ev_completed("recovered-environment-done"),
             ]),
         ],
     )
     .await;
+    empty
+        .thread
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "run a command without an attached environment".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    wait_for_event(&empty.thread, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    let empty_requests = response_mock.requests();
+    let first_tool_names = tool_names(&empty_requests[0].body_json());
+    for tool in [
+        "exec_command",
+        "write_stdin",
+        "apply_patch",
+        "view_image",
+        "request_permissions",
+    ] {
+        assert!(
+            first_tool_names.contains(&tool.to_string()),
+            "missing tool: {tool}"
+        );
+    }
+    for call_id in [EXEC_CALL_ID, STDIN_CALL_ID] {
+        let (output, _) = empty_requests[1]
+            .function_call_output_content_and_success(call_id)
+            .context("tool output should be model visible without an environment")?;
+        assert_eq!(output.as_deref(), Some(WAIT_MESSAGE));
+    }
     waiting
         .thread
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
@@ -2005,10 +2125,19 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
             text_elements: Vec::new(),
         }]))
         .await?;
-    wait_for_response_request_count(&response_mock, /*expected_count*/ 1).await;
-    let first_tool_names = tool_names(&response_mock.requests()[0].body_json());
+    wait_for_response_request_count(&response_mock, /*expected_count*/ 4).await;
+    let pending_requests = response_mock.requests();
+    assert_eq!(
+        tool_names(&pending_requests[2].body_json()),
+        first_tool_names
+    );
     assert!(first_tool_names.contains(&"wait_for_environment".to_string()));
-    assert!(!first_tool_names.contains(&"exec_command".to_string()));
+    for call_id in [EXEC_CALL_ID, STDIN_CALL_ID, SELECTED_ENV_CALL_ID] {
+        let (output, _) = pending_requests[3]
+            .function_call_output_content_and_success(call_id)
+            .context("premature tool output should be model visible")?;
+        assert_eq!(output.as_deref(), Some(WAIT_MESSAGE));
+    }
 
     independent
         .thread
@@ -2086,7 +2215,11 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
         .thread
         .environment_ready(&pending_selection, waiting_config)
         .await?;
-    wait_for_response_request_count(&response_mock, /*expected_count*/ 2).await;
+    wait_for_response_request_count(&response_mock, /*expected_count*/ 6).await;
+    wait_for_event(&waiting.thread, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
     assert_eq!(
         waiting.thread.environment_selections().await,
         vec![ready_selection]
@@ -2096,9 +2229,8 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
         requested_workspace_roots
     );
 
-    let ready_request = response_mock
-        .last_request()
-        .context("waiting turn should resume")?;
+    let ready_requests = response_mock.requests();
+    let ready_request = &ready_requests[4];
     let (wait_output, wait_succeeded) = ready_request
         .function_call_output_content_and_success(WAIT_CALL_ID)
         .context("wait_for_environment output should be model visible")?;
@@ -2108,16 +2240,13 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
         json!({ "environment_id": selection.environment_id, "status": "ready" })
     );
     let body = ready_request.body_json();
-    let exec_command = body["tools"]
-        .as_array()
-        .context("tools should be an array")?
-        .iter()
-        .find(|tool| tool["name"] == "exec_command")
-        .context("exec_command should become available")?;
-    assert!(
-        exec_command["parameters"]["properties"]
-            .get("login")
-            .is_none()
+    assert_eq!(tool_names(&body), first_tool_names);
+    let (login_output, _) = ready_requests[5]
+        .function_call_output_content_and_success(LOGIN_CALL_ID)
+        .context("login policy error should be model visible")?;
+    assert_eq!(
+        login_output.as_deref(),
+        Some("login shell is disabled by config; omit `login` or set it to false.")
     );
     assert_eq!(
         ready_request
@@ -2133,6 +2262,42 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
             .any(|text| text.contains(&owner_workspace_root.inferred_native_path_string())),
         "waiting turn should observe owner-resolved workspace roots"
     );
+
+    failed
+        .thread
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "run a command after environment startup failed".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    wait_for_event(&failed.thread, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    let failed_requests = response_mock.requests();
+    assert_eq!(
+        tool_names(&failed_requests[6].body_json()),
+        first_tool_names
+    );
+    for call_id in [EXEC_CALL_ID, STDIN_CALL_ID, SELECTED_ENV_CALL_ID] {
+        let (output, _) = failed_requests[7]
+            .function_call_output_content_and_success(call_id)
+            .context("tool output should be model visible after startup failed")?;
+        assert_eq!(output.as_deref(), Some(WAIT_MESSAGE));
+    }
+    for request in [
+        &empty_requests[1],
+        &pending_requests[3],
+        &failed_requests[7],
+    ] {
+        let (output, _) = request
+            .function_call_output_content_and_success(UNKNOWN_ENV_CALL_ID)
+            .context("unknown environment error should be model visible")?;
+        assert_eq!(
+            output.as_deref(),
+            Some("unknown turn environment id `missing`")
+        );
+    }
 
     let recovered_selection = TurnEnvironmentSelection {
         config: EnvironmentConfigState::Ready(owner_config(
@@ -2155,6 +2320,43 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
     assert_eq!(
         failed.thread.environment_selections().await,
         vec![recovered_selection]
+    );
+
+    failed
+        .thread
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "continue after environment recovery".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    wait_for_event(&failed.thread, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    let exec_command_parameters = response_mock
+        .requests()
+        .iter()
+        .map(|request| {
+            let body = request.body_json();
+            let exec_command = body["tools"]
+                .as_array()
+                .context("tools should be an array")?
+                .iter()
+                .find(|tool| tool["name"] == "exec_command")
+                .context("exec_command should stay available")?;
+            let parameters = &exec_command["parameters"];
+            parameters["properties"]
+                .get("login")
+                .context("login should be advertised regardless of environment state or policy")?;
+            parameters["properties"].get("shell").context(
+                "shell should be advertised regardless of environment state or shell mode",
+            )?;
+            Ok(parameters.clone())
+        })
+        .collect::<Result<Vec<_>>>()?;
+    assert_eq!(
+        exec_command_parameters,
+        vec![exec_command_parameters[0].clone(); exec_command_parameters.len()]
     );
 
     Ok(())
@@ -2215,7 +2417,7 @@ async fn future_pending_environment_can_finish_without_retargeting_the_active_tu
     let thread = test
         .thread_manager
         .start_thread(StartThreadOptions {
-            environments: Some(vec![active.clone()]),
+            environments: Some(vec![active.clone().into_request()]),
             ..StartThreadOptions::new(test.config.clone())
         })
         .await?
@@ -2329,7 +2531,7 @@ async fn active_environment_update_wakes_the_old_wait_with_the_new_selection() -
     let thread = test
         .thread_manager
         .start_thread(StartThreadOptions {
-            environments: Some(vec![original.clone()]),
+            environments: Some(vec![original.clone().into_request()]),
             ..StartThreadOptions::new(test.config.clone())
         })
         .await?
@@ -2598,7 +2800,7 @@ async fn ready_before_selection_resolves_resumed_thread_capability_root_after_wa
     let resumed = test
         .thread_manager
         .start_thread(StartThreadOptions {
-            environments: Some(vec![selection.clone()]),
+            environments: Some(vec![selection.clone().into_request()]),
             thread_extension_init,
             ..StartThreadOptions::new(test.config.clone())
         })
@@ -2643,13 +2845,17 @@ async fn ready_before_selection_resolves_resumed_thread_capability_root_after_wa
     let first_has_ready_root = first_user_context
         .iter()
         .any(|text| text.contains("<ready_capability_roots>ready-first-root"));
-    if first_tools.contains(&"exec_command".to_string()) {
-        assert!(!first_environment_context.contains("<status>starting</status>"));
+    let first_is_starting = first_environment_context.contains("<status>starting</status>");
+    assert_eq!(
+        first_tools.contains(&"exec_command".to_string()),
+        !first_is_starting,
+        "without stable_environment_tools, commands require a ready transport"
+    );
+    if first_is_starting {
+        assert!(!first_has_ready_root);
+    } else {
         assert!(first_environment_context.contains("<shell>"));
         assert!(first_has_ready_root);
-    } else {
-        assert!(first_environment_context.contains("<status>starting</status>"));
-        assert!(!first_has_ready_root);
     }
 
     let (_, wait_succeeded) = requests[1]
@@ -2745,7 +2951,6 @@ async fn deferred_executor_stays_pending_after_materialization() -> Result<()> {
     let starting_request_body = requests[0].body_json();
     let starting_tools = tool_names(&starting_request_body);
     assert!(starting_tools.contains(&"wait_for_environment".to_string()));
-    assert!(!starting_tools.contains(&"exec_command".to_string()));
     let wait_tool = starting_request_body["tools"]
         .as_array()
         .and_then(|tools| {
@@ -2952,12 +3157,22 @@ async fn deferred_executor_spawn_agent_inherits_ready_step_environments(
     Ok(())
 }
 
+#[test_case("exec_command")]
+#[test_case("mcp_elicitation")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn deferred_executor_guardian_uses_newly_ready_step_environment() -> Result<()> {
+async fn deferred_executor_guardian_uses_newly_ready_step_environment(
+    tool: &'static str,
+) -> Result<()> {
     const WAIT_CALL_ID: &str = "wait-for-guardian-environment";
     const EXEC_CALL_ID: &str = "guardian-ready-environment-command";
     const DENIAL_RATIONALE: &str = "The remote environment policy denies this action.";
 
+    if tool == "mcp_elicitation" {
+        core_test_support::skip_if_wine_exec!(
+            Ok(()),
+            "the MCP fixture requires a host Python interpreter"
+        );
+    }
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let server = start_mock_server().await;
     let completed_response =
@@ -2975,17 +3190,21 @@ async fn deferred_executor_guardian_uses_newly_ready_step_environment() -> Resul
             ),
             completed_response(
                 "resp-guardian-command",
-                ev_function_call(
-                    EXEC_CALL_ID,
-                    "exec_command",
-                    &json!({
-                        "cmd": "printf guardian-should-not-run",
-                        "environment_id": REMOTE_ENVIRONMENT_ID,
-                        "sandbox_permissions": SandboxPermissions::RequireEscalated,
-                        "justification": "Review the newly ready remote environment.",
-                    })
-                    .to_string(),
-                ),
+                if tool == "mcp_elicitation" {
+                    ev_function_call_with_namespace(EXEC_CALL_ID, "mcp__cua_repl", "js", "{}")
+                } else {
+                    ev_function_call(
+                        EXEC_CALL_ID,
+                        "exec_command",
+                        &json!({
+                            "cmd": "printf guardian-should-not-run",
+                            "environment_id": REMOTE_ENVIRONMENT_ID,
+                            "sandbox_permissions": SandboxPermissions::RequireEscalated,
+                            "justification": "Review the newly ready remote environment.",
+                        })
+                        .to_string(),
+                    )
+                },
             ),
             completed_response(
                 "resp-guardian-review",
@@ -3003,11 +3222,21 @@ async fn deferred_executor_guardian_uses_newly_ready_step_environment() -> Resul
     .await;
     let mut builder = test_codex()
         .with_exec_server_url(format!("ws://{}", listener.local_addr()?))
-        .with_config(|config| {
+        .with_config(move |config| {
             config.project_doc_max_bytes = 0;
             config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
             config.approvals_reviewer = ApprovalsReviewer::AutoReview;
             assert!(config.features.enable(Feature::DeferredExecutor).is_ok());
+            if tool == "mcp_elicitation" {
+                config.mcp_servers.set(serde_json::from_value(json!({
+                    "cua_repl": {
+                        "command": if cfg!(windows) { "python" } else { "python3" },
+                        "args": ["-u", "-c", super::guardian_mcp_elicitation::ELICITATION_SERVER,
+                            json!([{"codex_sensitive_action": true}]).to_string(), "forward"],
+                        "default_tools_approval_mode": "approve",
+                    }
+                })).expect("MCP server config")).expect("set MCP fixture");
+            }
         });
     let (attach_tx, attach_rx) = tokio::sync::oneshot::channel();
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -3018,6 +3247,9 @@ async fn deferred_executor_guardian_uses_newly_ready_step_environment() -> Resul
         shutdown_rx,
     ));
     let test = expect_startup(builder.build_with_remote_and_local_env(&server)).await;
+    if tool == "mcp_elicitation" {
+        core_test_support::wait_for_mcp_server(&test.codex, "cua_repl").await?;
+    }
     let remote_cwd = test.cwd.path().join("guardian-remote").abs();
     let local_cwd = test.cwd.path().abs();
     fs::create_dir_all(remote_cwd.as_path())?;
@@ -3103,10 +3335,10 @@ async fn deferred_executor_guardian_uses_newly_ready_step_environment() -> Resul
         "Guardian used the stale local environment's denied-read policy: {guardian_context}"
     );
     let rejection = requests
-        .iter()
-        .find_map(|request| request.function_call_output_text(EXEC_CALL_ID))
-        .context("Guardian denial should be returned to the parent model")?;
-    assert!(rejection.contains(DENIAL_RATIONALE));
+        .last()
+        .context("expected parent continuation after review")?
+        .function_call_output(EXEC_CALL_ID);
+    assert!(rejection.to_string().contains(DENIAL_RATIONALE));
 
     shutdown_tx
         .send(())

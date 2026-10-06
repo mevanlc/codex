@@ -25,6 +25,7 @@ use crate::session::multi_agents::resolve_usage_hints;
 use codex_context_fragments::set_annotated_content;
 use codex_context_fragments::to_annotated_content;
 use codex_extension_api::ExtensionDataInit;
+use codex_features::Feature;
 use codex_history::ResponseItemEnvelope;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::intersect_effective_permission_profiles;
@@ -88,7 +89,10 @@ fn keep_forked_rollout_item(item: &RolloutItem, preserve_context_baselines: bool
         RolloutItem::ResponseItem(envelope) => match &envelope.item {
             ResponseItem::Message { role, phase, .. } => match role.as_str() {
                 "system" | "developer" | "user" => true,
-                "assistant" => *phase == Some(MessagePhase::FinalAnswer),
+                "assistant" => matches!(
+                    phase,
+                    Some(MessagePhase::PartialAnswer | MessagePhase::FinalAnswer)
+                ),
                 _ => false,
             },
             ResponseItem::FunctionCallOutput { call_id: None, .. }
@@ -587,8 +591,21 @@ impl LocalAgentControl {
                     ..Default::default()
                 })
         };
-        // Reserving a slot can evict an idle nested parent. Capture its instructions
-        // alongside its authority so the child does not depend on a later live lookup.
+        let subagent_analytics =
+            if let SessionSource::SubAgent(source @ SubAgentSource::ThreadSpawn { .. }) =
+                &session_source
+                && let Some(parent_thread_id) = parent_thread_id
+                && let Ok(parent) = state.get_thread(parent_thread_id).await
+            {
+                Some((
+                    parent.session.app_server_client_metadata().await,
+                    source.clone(),
+                ))
+            } else {
+                None
+            };
+        // Reserving a slot can evict an idle nested parent. Capture its instructions and
+        // analytics metadata alongside its authority before the live parent can disappear.
         let residency_slot = self
             .reserve_v2_residency_slot(&state, &config, &membership, Some(thread_id))
             .await?;
@@ -614,6 +631,24 @@ impl LocalAgentControl {
                 }
                 self.runtime.registry.clear_evicted_environments(thread_id);
                 residency_slot.commit(reloaded_thread.thread_id);
+                // Register before listeners can forward events from the resumed thread.
+                if let Some((client_metadata, source)) = subagent_analytics {
+                    let thread_config = reloaded_thread.thread.config_snapshot().await;
+                    emit_subagent_session_started(
+                        &reloaded_thread
+                            .thread
+                            .session
+                            .services
+                            .analytics_events_client,
+                        client_metadata,
+                        reloaded_thread.thread.session.session_id(),
+                        reloaded_thread.thread_id,
+                        thread_config.parent_thread_id,
+                        thread_config,
+                        source,
+                        /*resumed_created_at*/ Some(stored_thread.created_at),
+                    );
+                }
                 state.notify_thread_created(reloaded_thread.thread_id);
                 Ok(())
             }
@@ -739,16 +774,25 @@ impl LocalAgentControl {
                 .await?
             }
             (Some(session_source), None, inheritance) => {
-                let history_mode = if let Some(parent_thread_id) = options.parent_thread_id
+                let (history_mode, dynamic_tools) = if let Some(parent_thread_id) =
+                    options.parent_thread_id
                     && let Ok(parent_thread) = state.get_thread(parent_thread_id).await
                 {
-                    matches!(
+                    let history_mode = matches!(
                         parent_thread.config_snapshot().await.history_mode,
                         ThreadHistoryMode::Paginated
                     )
-                    .then_some(ThreadHistoryMode::Paginated)
+                    .then_some(ThreadHistoryMode::Paginated);
+                    let dynamic_tools = if multi_agent_version == MultiAgentVersion::V2
+                        && config.features.enabled(Feature::MultiAgentV2DynamicTools)
+                    {
+                        parent_thread.session.dynamic_tools().await
+                    } else {
+                        Vec::new()
+                    };
+                    (history_mode, dynamic_tools)
                 } else {
-                    None
+                    (None, Vec::new())
                 };
                 let environments = options
                     .environments
@@ -760,6 +804,7 @@ impl LocalAgentControl {
                     self.clone(),
                     session_source,
                     history_mode,
+                    dynamic_tools,
                     options.parent_thread_id,
                     /*forked_from_thread_id*/ None,
                     /*thread_source*/ Some(ThreadSource::Subagent),
@@ -820,6 +865,7 @@ impl LocalAgentControl {
                 parent_thread_id,
                 thread_config,
                 subagent_source.clone(),
+                /*resumed_created_at*/ None,
             );
         }
 
