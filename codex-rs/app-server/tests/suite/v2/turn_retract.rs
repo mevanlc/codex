@@ -17,6 +17,8 @@ use core_test_support::responses;
 use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
 use pretty_assertions::assert_eq;
+use serde_json::json;
+use std::collections::HashMap;
 use tempfile::TempDir;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
@@ -54,6 +56,11 @@ async fn turn_retract_removes_a_pending_steer() -> Result<()> {
     let thread_request_id = app_server
         .send_thread_start_request_with_auto_env(ThreadStartParams {
             model: Some("mock-model".to_string()),
+            // Keep the steer pending behind the response stream until it is retracted.
+            config: Some(HashMap::from([(
+                "features.instant_interrupt".to_string(),
+                json!(false),
+            )])),
             ..Default::default()
         })
         .await?;

@@ -96,6 +96,7 @@ fn latest_token_usage_turn_id_from_rollout_items(
             // The checkpoint can lack a turn id after a settings update; the
             // following baseline still identifies the turn that owns its usage.
             builder.handle_event(&EventMsg::TurnStarted(TurnStartedEvent {
+                turn_attribution: None,
                 turn_id: turn_id.clone(),
                 root_turn_id: None,
                 trace_id: None,

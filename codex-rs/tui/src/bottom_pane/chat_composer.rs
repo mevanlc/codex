@@ -4245,7 +4245,7 @@ impl ChatComposer {
                     description,
                     insert_text: format!("${skill_name}"),
                     search_terms,
-                    path: Some(skill.path.to_string_lossy().into_owned()),
+                    path: Some(skill.path.as_str().to_owned()),
                     category_tag: Some("[Skill]".to_string()),
                     sort_rank: 1,
                 });
@@ -6973,7 +6973,7 @@ mod tests {
             short_description: None,
             interface: None,
             dependencies: None,
-            path: test_path_buf(&format!("/tmp/{name}/SKILL.md")).abs(),
+            path: test_path_buf(&format!("/tmp/{name}/SKILL.md")).abs().into(),
             scope: crate::test_support::skill_scope_user(),
             enabled: true,
             plugin_id: None,
@@ -6999,7 +6999,7 @@ mod tests {
         }
     }
 
-    fn test_plugin_summary(name: &str, description: &str) -> PluginCapabilitySummary {
+    pub(super) fn test_plugin_summary(name: &str, description: &str) -> PluginCapabilitySummary {
         PluginCapabilitySummary {
             config_name: format!("{name}@test"),
             display_name: name.to_string(),
@@ -7625,7 +7625,7 @@ mod tests {
             short_description: None,
             interface: None,
             dependencies: None,
-            path: skill_path.clone(),
+            path: skill_path.clone().into(),
             scope: crate::test_support::skill_scope_user(),
             enabled: true,
             plugin_id: None,
@@ -7670,7 +7670,7 @@ mod tests {
                 default_prompt: None,
             }),
             dependencies: None,
-            path: skill_path.clone(),
+            path: skill_path.clone().into(),
             scope: crate::test_support::skill_scope_repo(),
             enabled: true,
             plugin_id: Some("google-calendar@debug".to_string()),
@@ -8007,7 +8007,9 @@ mod tests {
                         default_prompt: None,
                     }),
                     dependencies: None,
-                    path: test_path_buf("/tmp/repo/google-calendar/SKILL.md").abs(),
+                    path: test_path_buf("/tmp/repo/google-calendar/SKILL.md")
+                        .abs()
+                        .into(),
                     scope: crate::test_support::skill_scope_repo(),
                     enabled: true,
                     plugin_id: None,

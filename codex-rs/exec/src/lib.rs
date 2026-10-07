@@ -1233,6 +1233,8 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                         disabled_plugin_ids: None,
                         thread_id: primary_thread_id_for_span.clone(),
                         turn_trigger: Some("exec".to_string()),
+                        parent_turn_id: None,
+                        root_turn_id: None,
                         client_user_message_id: None,
                         input: items.into_iter().map(Into::into).collect(),
                         tool_output: None,
@@ -1863,6 +1865,7 @@ async fn resolve_resume_thread_id(
                 ClientRequest::ThreadList {
                     request_id: RequestId::Integer(0),
                     params: ThreadListParams {
+                        excluded_thread_ids: None,
                         originators: None,
                         cursor,
                         limit: Some(100),
@@ -1949,6 +1952,7 @@ async fn resolve_resume_thread_id(
             ClientRequest::ThreadList {
                 request_id: RequestId::Integer(0),
                 params: ThreadListParams {
+                    excluded_thread_ids: None,
                     originators: None,
                     cursor,
                     limit: Some(100),

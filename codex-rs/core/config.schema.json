@@ -822,6 +822,9 @@
             "code_mode_prewarm": {
               "type": "boolean"
             },
+            "code_mode_tool_description_first": {
+              "type": "boolean"
+            },
             "code_mode_tool_search": {
               "type": "boolean"
             },
@@ -1973,6 +1976,14 @@
         },
         "transcript": {
           "$ref": "#/definitions/GuardianV2TranscriptConfigToml"
+        },
+        "transcript_mode": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/TranscriptFormat"
+            }
+          ],
+          "description": "Transcript encoding for synchronous Guardian review and asynchronous scoring. Defaults to line."
         }
       },
       "type": "object"
@@ -4503,6 +4514,25 @@
       },
       "type": "object"
     },
+    "TranscriptFormat": {
+      "description": "Transcript encoding shared by rendering, provenance instructions and budget recovery.",
+      "oneOf": [
+        {
+          "description": "Numbered entries with a role prefix and unescaped text.",
+          "enum": [
+            "line"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Host-owned metadata with message text escaped as a JSON string.",
+          "enum": [
+            "json"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "TrustLevel": {
       "description": "Represents the trust level for a project directory. This determines the approval policy and sandbox mode applied.",
       "enum": [
@@ -4595,7 +4625,8 @@
               "resume": null,
               "search": null,
               "stop": null,
-              "toggle_grouping": null
+              "toggle_grouping": null,
+              "toggle_pin": null
             },
             "approval": {
               "approve": null,
@@ -5020,6 +5051,14 @@
             }
           ],
           "description": "Toggle grouping tasks by status or project."
+        },
+        "toggle_pin": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Pin or unpin the selected task in the shared sidebar section."
         }
       },
       "type": "object"
@@ -5549,7 +5588,8 @@
             "resume": null,
             "search": null,
             "stop": null,
-            "toggle_grouping": null
+            "toggle_grouping": null,
+            "toggle_pin": null
           }
         },
         "approval": {
@@ -6708,6 +6748,10 @@
     "WindowsToml": {
       "additionalProperties": false,
       "properties": {
+        "allow_mxc": {
+          "description": "False blocks both explicit MXC configuration and automatic selection.",
+          "type": "boolean"
+        },
         "sandbox": {
           "$ref": "#/definitions/WindowsSandboxModeToml"
         }
@@ -6999,6 +7043,9 @@
           "type": "boolean"
         },
         "code_mode_prewarm": {
+          "type": "boolean"
+        },
+        "code_mode_tool_description_first": {
           "type": "boolean"
         },
         "code_mode_tool_search": {

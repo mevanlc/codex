@@ -44,6 +44,7 @@ use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_approval_presets::ApprovalPreset;
+use codex_utils_path_uri::PathUri;
 use strum_macros::IntoStaticStr;
 use uuid::Uuid;
 
@@ -276,6 +277,7 @@ pub(crate) struct AgentsOverviewThreadRefresh {
     pub(crate) last_messages: std::collections::HashMap<ThreadId, String>,
     pub(crate) recent_seed_complete: bool,
     pub(crate) discovery: Option<crate::app::agents_overview_discovery::AgentsOverviewDiscovery>,
+    pub(crate) pinned_thread_ids: Option<Option<Vec<ThreadId>>>,
 }
 
 #[derive(Debug, Default)]
@@ -335,6 +337,18 @@ pub(crate) enum AppEvent {
     RenameAgentsOverviewThread {
         thread_id: ThreadId,
         name: String,
+    },
+    /// Move a task into or out of the shared pinned section.
+    ToggleAgentsOverviewPin {
+        thread_id: ThreadId,
+        pinned: bool,
+    },
+    /// Finish moving a task into or out of the shared pinned section.
+    AgentsOverviewPinToggled {
+        request_id: Uuid,
+        thread_id: ThreadId,
+        pinned: bool,
+        result: Result<(), String>,
     },
     /// Generate an editable title suggestion for the active rename prompt.
     SuggestThreadName {
@@ -428,7 +442,10 @@ pub(crate) enum AppEvent {
         server_name: String,
         request_id: AppServerRequestId,
         attempt_id: Uuid,
-        result: Result<codex_app_server_protocol::UserVerificationProof, String>,
+        result: Result<
+            codex_app_server_protocol::UserVerificationProof,
+            crate::app_command::UserVerificationFailure,
+        >,
     },
 
     /// Interrupt, fork, and retry a safety-buffered turn with the server-selected model.
@@ -1466,7 +1483,7 @@ pub(crate) enum AppEvent {
 
     /// Enable or disable a skill by path.
     SetSkillEnabled {
-        path: AbsolutePathBuf,
+        path: PathUri,
         enabled: bool,
     },
 

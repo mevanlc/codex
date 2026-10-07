@@ -67,6 +67,7 @@ impl App {
                     | AppEvent::FinishPromptRevert { .. }
                     | AppEvent::ManagedWorktreeCreated(_)
                     | AppEvent::AgentsOverviewWorktreeCreated(_)
+                    | AppEvent::AgentsOverviewPinToggled { .. }
                     | AppEvent::AppendMessageHistoryEntry { .. }
                     | AppEvent::BeginInitialHistoryReplayBuffer
                     | AppEvent::BeginThreadSwitchHistoryReplayBuffer
@@ -2836,6 +2837,19 @@ impl App {
                     }
                 }
             }
+            AppEvent::ToggleAgentsOverviewPin { thread_id, pinned } => {
+                self.toggle_agents_overview_pin(app_server, thread_id, pinned);
+            }
+            AppEvent::AgentsOverviewPinToggled {
+                request_id,
+                thread_id,
+                pinned,
+                result,
+            } => {
+                self.complete_agents_overview_pin(
+                    app_server, request_id, thread_id, pinned, result,
+                );
+            }
             AppEvent::SuggestThreadName {
                 thread_id,
                 request_id,
@@ -2982,7 +2996,7 @@ impl App {
                         self.chat_widget.update_skill_enabled(path, enabled);
                     }
                     Err(err) => {
-                        let path_display = path.display();
+                        let path_display = path.inferred_native_path_string();
                         self.chat_widget.add_error_message(format!(
                             "Failed to update skill config for {path_display}: {err}"
                         ));
