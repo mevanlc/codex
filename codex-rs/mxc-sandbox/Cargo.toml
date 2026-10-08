@@ -21,12 +21,12 @@ codex-protocol = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
 codex-utils-path-uri = { workspace = true }
 codex-windows-sandbox = { workspace = true }
-mxc-sdk = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
+mxc-sdk = { workspace = true }
 # 1.2.4 imports OneCore_apiset, which the GNU Windows toolchain does not ship.
 tracelogging = "=1.2.3"
 windows-sys = { workspace = true, features = [
@@ -38,5 +38,7 @@ windows-sys = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+# Keep portable policy tests available without compiling MXC in non-Windows builds.
+mxc-sdk = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }
