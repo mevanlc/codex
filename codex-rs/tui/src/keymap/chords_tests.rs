@@ -114,6 +114,46 @@ fn quoted_external_editor_shortcut_can_be_overridden_or_unbound() {
 }
 
 #[test]
+fn quoted_external_editor_leader_shortcut_tracks_configured_prefix() {
+    for (leader, prefix) in [
+        (None, key_hint::ctrl(KeyCode::Char('x'))),
+        (Some("ctrl-q"), key_hint::ctrl(KeyCode::Char('q'))),
+    ] {
+        let mut config = TuiKeymap::default();
+        config.global.leader = leader.map(binding);
+        config.global.open_external_editor_with_quote = Some(binding("leader g"));
+        let runtime = RuntimeKeymap::from_config(&config).expect("valid quoted editor leader");
+        let contexts = KeymapContextSet::new(KeymapContext::Global).with(KeymapContext::Chat);
+        let mut matcher = KeyChordMatcher::default();
+
+        assert_eq!(
+            runtime
+                .primary_hint(KeymapContext::Global, "open_external_editor_with_quote")
+                .expect("quoted editor leader hint")
+                .display_label(),
+            format!("{} g", prefix.display_label())
+        );
+        assert_eq!(
+            matcher.advance(key_event(prefix), &runtime.chords, contexts),
+            KeyChordMatch::Pending(prefix)
+        );
+        let KeyChordMatch::Completed(dispatch) = matcher.advance(
+            KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            &runtime.chords,
+            contexts,
+        ) else {
+            panic!("quoted editor leader completes")
+        };
+        assert!(
+            runtime
+                .app
+                .open_external_editor_with_quote
+                .is_pressed(dispatch)
+        );
+    }
+}
+
+#[test]
 fn configured_single_binding_can_shadow_the_default_quoted_editor_shortcut() {
     let mut config = TuiKeymap::default();
     config.global.copy = Some(binding("alt-g"));

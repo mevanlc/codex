@@ -248,7 +248,8 @@
 //! Submission flushes expired characters and buffers before classifying Enter, independent of
 //! UI flush ticks. `disable_paste_burst` bypasses detection; setting it flushes and clears in-flight state.
 //! Mouse edits flush pending typing; selection and copy behavior lives in [`mouse`]. Confirmed
-//! copies clear the selection while preserving the draft and cursor.
+//! copies clear the selection while preserving the draft and cursor. Footer text uses a separate
+//! read-only selection owner over its final rendered cells.
 //!
 //! See `codex-rs/tui/src/bottom_pane/paste_burst.rs` for the detailed state machine.
 //!
@@ -266,6 +267,9 @@
 //!   from UI ticks to integrate a pending burst via [`ChatComposer::apply_paste`] or insert a
 //!   held single character. Explicit terminal paste events use [`ChatComposer::handle_paste`] to
 //!   classify input first; buffered keys have already been classified.
+//! - Startup recovery previews held keys with the live Vim Replace policy without consuming them.
+//!   Buffered pastes remain literal in recovery so large-paste and image classification stays with
+//!   the live paste path.
 //!
 //! # Input Disabled Mode
 //!
@@ -508,6 +512,7 @@ fn parent_owned_command_is_allowed(command: SlashCommand, args: &str) -> bool {
                 | SlashCommand::MultiAgents
                 | SlashCommand::Vim
                 | SlashCommand::Keymap
+                | SlashCommand::Config
                 | SlashCommand::ElevateSandbox
                 | SlashCommand::Experimental
                 | SlashCommand::Memories
@@ -767,6 +772,7 @@ impl ChatComposer {
                 external_editor_key: default_keymap
                     .primary_hint(KeymapContext::Global, "open_external_editor"),
                 warning_notice_area: std::cell::Cell::default(),
+                selection_revision: std::cell::Cell::default(),
                 show_warnings_key: default_keymap
                     .primary_hint(KeymapContext::Global, "open_warnings"),
                 show_transcript_key: default_keymap
@@ -4919,6 +4925,16 @@ impl ChatComposer {
         self.footer.warning_notice_area.set(warning_area);
         if let Some((warning_area, line)) = warning_notice {
             line.render(warning_area, buf);
+        }
+        if let Some(selection) = options.rendered_selection
+            && !self.popup_active()
+            && options.footer.is_none_or(|footer| !footer.is_interactive)
+        {
+            let revision = (options.warning_count, self.footer_props().is_task_running);
+            let changed = self.footer.selection_revision.replace(revision) != revision;
+            let mut selection = selection.borrow_mut();
+            selection.register(status.intersection(buf.area), changed);
+            selection.register(footer_rect.intersection(buf.area), changed);
         }
         let style = user_message_style();
         Block::default().style(style).render(composer_rect, buf);
