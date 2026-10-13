@@ -353,6 +353,23 @@
       ],
       "type": "string"
     },
+    "AsyncCompactionConfigToml": {
+      "additionalProperties": false,
+      "description": "Background compaction settings. A threshold alone does not enable the feature.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "model_async_compact_threshold_percent": {
+          "description": "Percentage of the model's full context window that starts background compaction. Defaults to 65; valid values are 1–100, including when disabled.",
+          "format": "uint8",
+          "maximum": 100.0,
+          "minimum": 1.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "AuthCredentialsStoreMode": {
       "description": "Determine where Codex should store CLI auth credentials.",
       "oneOf": [
@@ -773,6 +790,9 @@
                   "type": "object"
                 }
               ]
+            },
+            "async_compaction": {
+              "$ref": "#/definitions/FeatureToml_for_AsyncCompactionConfigToml"
             },
             "auth_elicitation": {
               "type": "boolean"
@@ -1587,6 +1607,16 @@
         }
       },
       "type": "object"
+    },
+    "FeatureToml_for_AsyncCompactionConfigToml": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/AsyncCompactionConfigToml"
+        }
+      ]
     },
     "FeatureToml_for_CodeModeConfigToml": {
       "anyOf": [
@@ -2922,6 +2952,10 @@
         },
         "disable_direct_message": {
           "description": "Disable the model's direct-message tools; spawning and automatic child results remain available.",
+          "type": "boolean"
+        },
+        "disable_native_tools": {
+          "description": "Hide native multi-agent tools while retaining the V2 runtime for host-provided tools.",
           "type": "boolean"
         },
         "enabled": {
@@ -7084,6 +7118,9 @@
               "type": "object"
             }
           ]
+        },
+        "async_compaction": {
+          "$ref": "#/definitions/FeatureToml_for_AsyncCompactionConfigToml"
         },
         "auth_elicitation": {
           "type": "boolean"

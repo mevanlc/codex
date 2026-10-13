@@ -177,6 +177,7 @@ pub(crate) use list_selection_view::SearchMode;
 pub(crate) use list_selection_view::SelectionDescriptionLayout;
 pub(crate) use list_selection_view::SelectionRowDisplay;
 pub(crate) use list_selection_view::SelectionToggle;
+pub(crate) use list_selection_view::SelectionToggleState;
 pub(crate) use list_selection_view::SelectionViewParams;
 pub(crate) use list_selection_view::SideContentWidth;
 pub(crate) use list_selection_view::popup_content_width;
@@ -257,6 +258,7 @@ pub(crate) enum CancellationEvent {
 use crate::bottom_pane::prompt_args::parse_slash_name;
 pub(crate) use chat_composer::ChatComposer;
 pub(crate) use chat_composer::ChatComposerConfig;
+pub(crate) use chat_composer::ClipboardPasteTarget;
 pub(crate) use chat_composer::ComposerDraftSnapshot;
 pub(crate) use chat_composer::InputResult;
 pub(crate) use chat_composer::QueuedInputAction;
@@ -425,6 +427,15 @@ impl BottomPane {
     /// Callers use this to keep composer affordances aligned with model capabilities.
     pub fn set_image_paste_enabled(&mut self, enabled: bool) {
         self.composer.set_image_paste_enabled(enabled);
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_motion_preferences(&mut self, tui: &codex_config::types::Tui) {
+        self.animations_enabled = tui.animations;
+        self.effects = tui.effects;
+        if let Some(status) = self.status.as_mut() {
+            status.set_motion_preferences(tui);
+        }
         self.request_redraw();
     }
 
@@ -1211,6 +1222,7 @@ impl BottomPane {
         self.composer.current_text()
     }
 
+    #[cfg(test)]
     pub(crate) fn composer_cursor(&self) -> usize {
         self.composer.current_cursor()
     }
@@ -1629,6 +1641,30 @@ impl BottomPane {
             .and_then(|view| view.selected_index())
     }
 
+    pub(crate) fn selection_toggle_states_for_active_view(
+        &self,
+        view_id: &'static str,
+    ) -> Option<Vec<Option<SelectionToggleState>>> {
+        self.view_stack
+            .last()
+            .filter(|view| view.view_id() == Some(view_id))
+            .map(|view| view.selection_toggle_states())
+    }
+
+    pub(crate) fn complete_selection_toggle_for_active_view(
+        &mut self,
+        view_id: &'static str,
+        index: usize,
+    ) {
+        if let Some(view) = self
+            .view_stack
+            .last_mut()
+            .filter(|view| view.view_id() == Some(view_id))
+        {
+            view.complete_selection_toggle(index);
+        }
+    }
+
     pub(crate) fn selected_index_for_present_view(&self, view_id: &'static str) -> Option<usize> {
         self.view_stack
             .iter()
@@ -1889,8 +1925,14 @@ impl BottomPane {
         self.composer.copy_selection(event, copy)
     }
 
-    pub(crate) fn can_paste_on_right_click(&self) -> bool {
-        self.no_modal_or_popup_active() && self.composer.can_paste_on_right_click()
+    pub(crate) fn clipboard_paste_target(
+        &self,
+        shortcut: Option<KeyCode>,
+    ) -> Option<ClipboardPasteTarget> {
+        if self.has_active_view() || (shortcut.is_none() && !self.no_modal_or_popup_active()) {
+            return None;
+        }
+        self.composer.clipboard_paste_target(shortcut)
     }
 
     pub(crate) fn prepare_composer_mouse(&mut self, event: crossterm::event::MouseEvent) -> bool {
@@ -2204,6 +2246,11 @@ impl BottomPane {
             flushed |= questions.flush_paste_burst_if_due();
         }
         flushed
+    }
+
+    /// Commit accepted typing before snapshotting the target of an asynchronous paste.
+    pub(crate) fn prepare_composer_clipboard_paste(&mut self) {
+        self.composer.flush_pending_paste_burst();
     }
 
     pub(crate) fn is_in_paste_burst(&self) -> bool {

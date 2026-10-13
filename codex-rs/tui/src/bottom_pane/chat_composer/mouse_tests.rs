@@ -203,9 +203,14 @@ fn right_click_copy_uses_the_refreshed_editor_bounds() {
     assert_eq!(composer.draft.textarea.mouse_selection_range(), selection);
     let key = TuiEvent::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
     composer.copy_selection(&key, |_| Ok(CopyStatus::Pending(2)));
+    let paste_target = composer.clipboard_paste_target(Some(KeyCode::Insert));
     assert_eq!(
         composer.finish_copy(&(2, Ok(CopyStatus::Confirmed)), /*current*/ true),
         Some(5)
     );
     assert_eq!(composer.draft.textarea.mouse_selection_range(), None);
+    assert_ne!(
+        composer.clipboard_paste_target(Some(KeyCode::Insert)),
+        paste_target
+    );
 }

@@ -3528,8 +3528,12 @@ async fn recompute_token_usage_updates_model_context_window() {
     assert_eq!(actual.model_context_window, Some(128_000));
 }
 
+#[test_case(crate::session::TokenUsageContext::Sampling; "sampling")]
+#[test_case(crate::session::TokenUsageContext::SpendingOnly; "spending_only")]
 #[tokio::test]
-async fn record_token_usage_info_notifies_extension_contributors() {
+async fn record_token_usage_info_notifies_extension_contributors(
+    context: crate::session::TokenUsageContext,
+) {
     struct SessionTokenUsageMarker;
     struct ThreadTokenUsageMarker;
 
@@ -3611,6 +3615,7 @@ async fn record_token_usage_info_notifies_extension_contributors() {
             &turn_context,
             &turn_context.initial_settings,
             Some(&first_usage),
+            crate::session::TokenUsageContext::Sampling,
         )
         .await
         .expect("first usage should be recorded");
@@ -3619,12 +3624,21 @@ async fn record_token_usage_info_notifies_extension_contributors() {
             &turn_context,
             &turn_context.initial_settings,
             Some(&second_usage),
+            context,
         )
         .await
         .expect("second usage should be recorded");
 
     let mut expected_total_usage = first_usage.clone();
     expected_total_usage.add_assign(&second_usage);
+    let expected_session_info = TokenUsageInfo {
+        total_token_usage: expected_total_usage.clone(),
+        last_token_usage: match context {
+            crate::session::TokenUsageContext::Sampling => second_usage.clone(),
+            crate::session::TokenUsageContext::SpendingOnly => first_usage.clone(),
+        },
+        model_context_window: turn_context.model_context_window(),
+    };
     let expected = vec![
         RecordedTokenUsage {
             session_level_id: session.session_id().to_string(),
@@ -3657,6 +3671,10 @@ async fn record_token_usage_info_notifies_extension_contributors() {
         .drain(..)
         .collect::<Vec<_>>();
     assert_eq!(expected, actual);
+    assert_eq!(
+        session.token_usage_info().await,
+        Some(expected_session_info)
+    );
 }
 
 #[tokio::test]
@@ -12036,6 +12054,8 @@ async fn remote_compaction_v2_retains_only_the_selected_step(first_attempt: Firs
         ),
         CompactionReason::ModelDownshift,
         CompactionPhase::PreTurn,
+        /*candidate*/ None,
+        crate::compact_remote_v2::CompactionFallback::Foreground,
     )
     .await
     .expect("compaction succeeds");

@@ -3252,7 +3252,7 @@ impl App {
                         self.local_settings.tui.status_line = Some(ids.clone());
                         self.local_settings.tui.status_line_use_colors = use_theme_colors;
                         self.chat_widget.setup_status_line(items, use_theme_colors);
-                        self.chat_widget.refresh_config_panel(Some("Saved".into()));
+                        self.chat_widget.refresh_config_panel(/*notice*/ None);
                     }
                     Err(err) => {
                         let error = format_config_error(&err);
@@ -3294,7 +3294,7 @@ impl App {
                     Ok(()) => {
                         self.local_settings.tui.terminal_title = Some(ids.clone());
                         self.chat_widget.setup_terminal_title(items);
-                        self.chat_widget.refresh_config_panel(Some("Saved".into()));
+                        self.chat_widget.refresh_config_panel(/*notice*/ None);
                     }
                     Err(err) => {
                         tracing::error!(error = %err, "failed to persist terminal title items; keeping previous selection");
@@ -3363,7 +3363,7 @@ impl App {
                             crate::render::highlight::set_syntax_theme(theme);
                         }
                         self.sync_tui_theme_selection(name);
-                        self.chat_widget.refresh_config_panel(Some("Saved".into()));
+                        self.chat_widget.refresh_config_panel(/*notice*/ None);
                         self.refresh_status_line();
                         tui.frame_requester().schedule_frame();
                     }
