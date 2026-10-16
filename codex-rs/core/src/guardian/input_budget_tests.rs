@@ -57,6 +57,7 @@ async fn finalization_exports_loss_totals_only_for_accepted_input(window: i64) {
         metadata: Default::default(),
         content: context.clone().into_user_inputs().unwrap(),
         client_id: None,
+        retractable: false,
     }];
     session
         .services

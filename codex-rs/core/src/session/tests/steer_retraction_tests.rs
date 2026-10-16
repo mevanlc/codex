@@ -1,6 +1,7 @@
 //! Fork-only pending-steer retraction coverage, using the upstream session fixtures.
 
 use super::*;
+use codex_protocol::turn_input::ResponsesApiClientMetadataUpdate;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
@@ -104,6 +105,23 @@ async fn retract_steer_does_not_remove_input_after_drain_or_from_another_turn() 
 
 #[tokio::test]
 async fn retract_steer_rejects_steers_with_side_effects() {
+    let metadata =
+        std::collections::HashMap::from([("source".to_string(), "side-effect-test".to_string())]);
+    for update in [
+        ResponsesApiClientMetadataUpdate {
+            replacement: Some(metadata.clone()),
+            patch: None,
+        },
+        ResponsesApiClientMetadataUpdate {
+            replacement: None,
+            patch: Some(metadata),
+        },
+    ] {
+        assert_steer_with_metadata_not_retractable(update).await;
+    }
+}
+
+async fn assert_steer_with_metadata_not_retractable(update: ResponsesApiClientMetadataUpdate) {
     let (sess, tc, _rx) = make_session_and_context_with_rx().await;
     sess.spawn_task(
         Arc::clone(&tc),
@@ -122,10 +140,7 @@ async fn retract_steer_rejects_steers_with_side_effects() {
         }],
         client_id: Some("client-message-1".to_string()),
     });
-    request.responsesapi_client_metadata = Some(std::collections::HashMap::from([(
-        "source".to_string(),
-        "side-effect-test".to_string(),
-    )]));
+    request.responsesapi_client_metadata = update;
     crate::session::turn_input::handle(
         &sess,
         request,
