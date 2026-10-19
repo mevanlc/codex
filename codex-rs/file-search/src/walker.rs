@@ -1,6 +1,7 @@
 use super::IndexedEntry;
 use super::MatchType;
 use super::SessionInner;
+use super::UnicodeEntry;
 use super::WorkSignal;
 use super::get_file_path;
 use ignore::DirEntry;
@@ -135,23 +136,29 @@ pub(super) fn worker(
                     Err(_) => return WalkState::Continue,
                 };
                 let path = entry.path();
-                let Some(full_path) = path.to_str() else {
+                if path.to_str().is_none() {
                     return WalkState::Continue;
-                };
-                if let Some((_, relative_path)) = get_file_path(path, &search_directories) {
+                }
+                if let Some((root_idx, relative_path)) = get_file_path(path, &search_directories) {
                     let match_type = match entry.file_type() {
                         Some(file_type) if file_type.is_dir() => MatchType::Directory,
                         _ => MatchType::File,
                     };
-                    injector.push(
-                        IndexedEntry {
-                            full_path: Arc::from(full_path),
+                    let column = Utf32String::from(relative_path);
+                    let indexed_entry = match &column {
+                        Utf32String::Ascii(_) => IndexedEntry::Ascii {
+                            root_idx,
                             match_type,
                         },
-                        |_, cols| {
-                            cols[0] = Utf32String::from(relative_path);
-                        },
-                    );
+                        Utf32String::Unicode(_) => IndexedEntry::Unicode(Box::new(UnicodeEntry {
+                            root_idx,
+                            relative_path: Box::from(relative_path),
+                            match_type,
+                        })),
+                    };
+                    injector.push(indexed_entry, |_, cols| {
+                        cols[0] = column;
+                    });
                 }
                 n += 1;
                 if n >= CHECK_INTERVAL {

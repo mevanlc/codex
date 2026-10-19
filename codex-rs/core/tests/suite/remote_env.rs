@@ -63,6 +63,7 @@ use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::PermissionProfileSnapshot;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::SandboxPermissions;
+use codex_protocol::models::input_text;
 use codex_protocol::permissions::FileSystemAccessMode;
 use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSandboxEntry;
@@ -188,14 +189,21 @@ impl ContextContributor for ReadyCapabilityRootsTestExtension {
         &'a self,
         input: WorldStateContributionInput<'a>,
     ) -> ExtensionFuture<'a, Vec<WorldStateSectionContribution>> {
+        let roots = input
+            .step_store
+            .get::<Vec<codex_exec_server::ResolvedSelectedCapabilityRoot>>()
+            .expect("captured capability roots should be present in step state");
+        let selected_roots = roots
+            .iter()
+            .map(|root| root.selected_root().clone())
+            .collect::<Vec<_>>();
         if let Some(observed_roots) = &self.observed_roots {
             observed_roots
                 .lock()
                 .expect("observed capability roots should not be poisoned")
-                .push(input.ready_selected_capability_roots.to_vec());
+                .push(selected_roots.clone());
         }
-        let root_ids = input
-            .ready_selected_capability_roots
+        let root_ids = selected_roots
             .iter()
             .map(|root| root.id.clone())
             .collect::<Vec<_>>();
@@ -209,7 +217,7 @@ impl ContextContributor for ReadyCapabilityRootsTestExtension {
                         Some(RenderedWorldStateFragment::new(
                             "user",
                             ("<ready_capability_roots>", "</ready_capability_roots>"),
-                            body.clone(),
+                            input_text(body.clone()),
                         )),
                     )
                 },

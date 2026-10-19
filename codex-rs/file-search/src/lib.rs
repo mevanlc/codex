@@ -8,6 +8,7 @@ use ignore::overrides::OverrideBuilder;
 use nucleo::Config;
 use nucleo::Matcher;
 use nucleo::Nucleo;
+use nucleo::Utf32String;
 use nucleo::pattern::CaseMatching;
 use nucleo::pattern::Normalization;
 use serde::Serialize;
@@ -70,9 +71,19 @@ pub enum MatchType {
     Directory,
 }
 
-/// Carries the entry type observed by the walker so matched paths are not restatted.
-struct IndexedEntry {
-    full_path: Arc<str>,
+/// Carries the selected root and entry type without duplicating ASCII matcher paths.
+enum IndexedEntry {
+    Ascii {
+        root_idx: usize,
+        match_type: MatchType,
+    },
+    Unicode(Box<UnicodeEntry>),
+}
+
+// Unicode matcher columns retain only one codepoint per grapheme.
+struct UnicodeEntry {
+    root_idx: usize,
+    relative_path: Box<str>,
     match_type: MatchType,
 }
 
@@ -378,11 +389,11 @@ struct RankedMatch<'a> {
     match_: nucleo::Match,
     root_idx: usize,
     relative_path: &'a str,
+    match_type: MatchType,
 }
 
 fn ranked_snapshot_matches<'a>(
     snapshot: &'a nucleo::Snapshot<IndexedEntry>,
-    search_directories: &[PathBuf],
     limit: usize,
 ) -> Vec<RankedMatch<'a>> {
     let mut ranked = Vec::with_capacity(limit);
@@ -400,13 +411,27 @@ fn ranked_snapshot_matches<'a>(
             .iter()
             .filter_map(|match_| {
                 let item = snapshot.get_item(match_.idx)?;
-                let full_path = item.data.full_path.as_ref();
-                let (root_idx, relative_path) =
-                    get_file_path(Path::new(full_path), search_directories)?;
+                let (root_idx, relative_path, match_type) = match item.data {
+                    IndexedEntry::Ascii {
+                        root_idx,
+                        match_type,
+                    } => {
+                        let Utf32String::Ascii(path) = &item.matcher_columns[0] else {
+                            return None;
+                        };
+                        (*root_idx, path.as_ref(), *match_type)
+                    }
+                    IndexedEntry::Unicode(entry) => (
+                        entry.root_idx,
+                        entry.relative_path.as_ref(),
+                        entry.match_type,
+                    ),
+                };
                 Some(RankedMatch {
                     match_: *match_,
                     root_idx,
                     relative_path,
+                    match_type,
                 })
             })
             .collect::<Vec<_>>();

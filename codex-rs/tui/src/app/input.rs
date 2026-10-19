@@ -450,6 +450,7 @@ impl App {
                 && let Some(thread_id) = self.current_displayed_thread_id()
             {
                 let target = SessionTarget {
+                    backend_id: app_server.backend_id(),
                     path: self
                         .primary_session_configured
                         .as_ref()

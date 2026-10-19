@@ -27,7 +27,12 @@ pub(super) struct Reconnected {
     thread: Option<AppServerStartedThread>,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "retain logical ownership across connection replacement"
+)]
 pub(super) async fn reconnect(
+    backend_id: crate::backend_id::BackendId,
     target: AppServerTarget,
     config: Config,
     local_settings: crate::local_settings::LocalSettings,
@@ -55,7 +60,7 @@ pub(super) async fn reconnect(
         let attempt = async {
             tokio::time::sleep(Duration::from_secs(delay)).await;
             let client = crate::app_server_connection::connect(&target).await?;
-            let mut session = AppServerSession::new(client, mode)
+            let mut session = AppServerSession::new(backend_id, client, mode)
                 .with_local_codex_home(&config.codex_home)
                 .with_remote_cwd_override(remote_cwd.clone())
                 .with_thread_tool_transport(task_tools.clone());
@@ -384,7 +389,6 @@ impl App {
         for (_, cancellation) in self.pending_thread_titles.drain() {
             cancellation.cancel();
         }
-        self.sync_thread_title_progress();
         self.agents_overview.dispatched_requests.clear();
         self.agents_overview.request_id = None;
         self.agents_overview.refresh_show_more = false;

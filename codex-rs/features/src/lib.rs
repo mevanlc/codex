@@ -117,11 +117,15 @@ pub enum Feature {
 
     /// Automatically start the shared local daemon for eligible interactive launches.
     DaemonAutoStart,
+    /// Enable negotiated zstd compression for app-server WebSocket and UDS connections.
+    AppServerWebSocketCompression,
 
     // Experimental
     /// Advertise enabled environment-backed tools and their shell parameters before the
     /// executor is ready. Actual execution still requires a usable environment and its policy.
     StableEnvironmentTools,
+    /// Copy files between explicitly selected execution environments.
+    MultiEnvCopyFile,
     /// Send per-content-entry classifications in internal Responses metadata.
     ContentItemKinds,
     /// Record model-attempted tool calls in internal Responses metadata.
@@ -233,6 +237,8 @@ pub enum Feature {
     /// Keep sampling through reasoning and commentary boundaries when agent mail arrives.
     /// Pending mail is delivered at the next normal input boundary instead.
     DeferMailboxPreemption,
+    /// Allow agent messages to wake idle root sessions after a completed turn.
+    WakeOnAgentMessages,
     /// Preempt responses and yield foreground code-mode observations on new user input.
     InstantInterrupt,
     /// Enable shared discussion tools for an agent tree.
@@ -249,6 +255,8 @@ pub enum Feature {
     EnableMcpApps,
     /// Enable MCP protocol version 2026-07-28 support.
     Mcp20260728,
+    /// Honor ordinary MCP server tool-list notifications within a turn.
+    McpToolListChanged,
     /// Enable MCP protocol version 2026-07-28 for the host-owned Codex Apps server.
     CodexAppsMcp20260728,
     /// Let RMCP coordinate OAuth refresh through the configured credential store.
@@ -1034,6 +1042,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: true,
     },
     FeatureSpec {
+        id: Feature::AppServerWebSocketCompression,
+        key: "app_server_websocket_compression",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
         id: Feature::TranscriptV2,
         key: "transcript_v2",
         stage: Stage::Deprecated,
@@ -1057,6 +1071,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         key: "view_image",
         stage: Stage::Stable,
         default_enabled: true,
+    },
+    FeatureSpec {
+        id: Feature::MultiEnvCopyFile,
+        key: "multi_env_copy_file",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::SleepTool,
@@ -1505,6 +1525,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
+        id: Feature::WakeOnAgentMessages,
+        key: "wake_on_agent_messages",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
         id: Feature::AgentMessageBoard,
         key: "agent_message_board",
         stage: Stage::UnderDevelopment,
@@ -1543,6 +1569,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::Mcp20260728,
         key: "mcp_2026_07_28",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::McpToolListChanged,
+        key: "mcp_tool_list_changed",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
     },
@@ -1591,8 +1623,8 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::IncrementalTools,
         key: "incremental_tools",
-        stage: Stage::UnderDevelopment,
-        default_enabled: false,
+        stage: Stage::Stable,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::NonPrefixedMcpToolNames,

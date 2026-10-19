@@ -253,7 +253,10 @@ impl Classification {
                 truncations.extend(rendered.truncations);
                 codex_guardian_context::PreviousReview {
                     id: review.delivery_id.clone(),
-                    fragment: GuardianReviewEvidenceFragment::new(rendered.body).render(),
+                    fragment: GuardianReviewEvidenceFragment::new(rendered.body)
+                        .render()
+                        .into_text()
+                        .unwrap_or_default(),
                 }
             })
             .collect::<Vec<_>>();
@@ -412,7 +415,7 @@ impl Classification {
                     tokio::select! {
                         biased;
                         () = pending_score.expired() => Err(LunaSamplerError::Superseded),
-                        result = score => result.unwrap_or(Err(LunaSamplerError::Superseded)),
+                        result = score => result.unwrap_or(Err(LunaSamplerError::Superseded)).map(super::sampler::SampledScore::accept),
                     }
                 }
             };

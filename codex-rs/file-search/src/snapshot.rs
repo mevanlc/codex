@@ -24,7 +24,7 @@ pub(super) fn for_query(
         return None;
     }
     let limit = inner.limit.min(snapshot.matched_item_count() as usize);
-    let matches = ranked_snapshot_matches(snapshot, &inner.search_directories, limit)
+    let matches = ranked_snapshot_matches(snapshot, limit)
         .into_iter()
         .filter_map(|ranked_match| {
             let item = snapshot.get_item(ranked_match.match_.idx)?;
@@ -41,7 +41,7 @@ pub(super) fn for_query(
             Some(FileMatch {
                 score: ranked_match.match_.score,
                 path: PathBuf::from(ranked_match.relative_path),
-                match_type: item.data.match_type,
+                match_type: ranked_match.match_type,
                 root: inner.search_directories[ranked_match.root_idx].clone(),
                 indices,
             })

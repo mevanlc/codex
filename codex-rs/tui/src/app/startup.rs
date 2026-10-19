@@ -270,6 +270,11 @@ impl App {
         tui.prepare_owned_screen(config.tui_fullscreen_transcript)?;
         let mut local_settings = crate::local_settings::LocalSettings::for_tui(&config, tui);
         let startup_started_at = Instant::now();
+        if let SessionSelection::Resume(target) | SessionSelection::Fork(target) =
+            &session_selection
+        {
+            target.ensure_backend(app_server.backend_id())?;
+        }
         let (app_event_tx, mut app_event_rx) = unbounded_channel();
         let app_event_tx = AppEventSender::new(app_event_tx);
         if let Some(message) = project_config_warning(&config) {
@@ -1243,6 +1248,7 @@ See the Codex keymap documentation for supported actions and examples."
                 }
                 if app.reconnect.offline && !app.reconnect.failed && reconnect.is_none() {
                     reconnect = Some(Box::pin(reconnect::reconnect(
+                        app_server.backend_id(),
                         app.app_server_target.clone(),
                         app.config.clone(),
                         app.local_settings.clone(),
@@ -1377,7 +1383,7 @@ See the Codex keymap documentation for supported actions and examples."
                     app_server_event = app_server.next_event(), if listen_for_app_server_events && !app.reconnect.offline
                         && (matches!(app.app_server_target, AppServerTarget::Embedded) || !has_pending_app_events) => {
                         match app_server_event {
-                            Some(event) => app.handle_app_server_event(&app_server, event).await,
+                            Some(event) => app.handle_backend_event(&app_server, event).await,
                             None => {
                                 listen_for_app_server_events = false;
                                 app.begin_reconnect();
@@ -1449,7 +1455,6 @@ See the Codex keymap documentation for supported actions and examples."
                         }
                     } => {
                         app.chat_widget.refresh_goal_status_indicator_for_time_tick();
-                        app.chat_widget.refresh_thread_title_progress_for_time_tick();
                         app.chat_widget.refresh_terminal_title();
                         AppRunControl::Continue
                     }

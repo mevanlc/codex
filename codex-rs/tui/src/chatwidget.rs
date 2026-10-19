@@ -397,7 +397,6 @@ mod steer_retraction;
 use self::status_surface_commands::StatusSurfaceOverrides;
 mod streaming;
 use self::status_surfaces::CachedProjectRootName;
-mod thread_title_status;
 mod thread_usage;
 pub(crate) use self::thread_usage::ThreadUsageOutcome;
 mod tool_lifecycle;

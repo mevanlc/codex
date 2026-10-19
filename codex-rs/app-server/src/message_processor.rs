@@ -329,6 +329,7 @@ impl MessageProcessor {
         let extension_event_sink =
             app_server_extension_event_sink(outgoing.clone(), thread_state_manager.clone());
         let mut queue_service = None;
+        let sample_responses = Arc::new(crate::thread_sample::SampleResponseRegistry::default());
         let thread_manager = Arc::new_cyclic(|thread_manager| {
             queue_service = queue_store.map(|queue| {
                 Arc::new(QueuedItemService::new(
@@ -344,20 +345,24 @@ impl MessageProcessor {
                 codex_core::CodexAppsToolsCache::default(),
                 session_source,
                 environment_manager,
-                thread_extensions(ThreadExtensionDependencies {
-                    event_sink: Arc::clone(&extension_event_sink),
-                    auth_manager: auth_manager.clone(),
-                    state_db: state_db.clone(),
-                    analytics_events_client: analytics_events_client.clone(),
-                    thread_manager: thread_manager.clone(),
-                    goal_service: Arc::clone(&goal_service),
-                    environment_manager: Arc::clone(&environment_manager_for_extensions),
-                    executor_skill_provider: Arc::clone(&executor_skill_provider),
-                    git_attribution_base_url: config.chatgpt_base_url.clone(),
-                    http_client_factory: config.http_client_factory(),
-                    queue_service: queue_service.clone(),
-                    turn_start_admission: Some(Arc::clone(&turn_start_admission)),
-                }),
+                thread_extensions(
+                    config.as_ref(),
+                    ThreadExtensionDependencies {
+                        sample_responses: Arc::clone(&sample_responses),
+                        event_sink: Arc::clone(&extension_event_sink),
+                        auth_manager: auth_manager.clone(),
+                        state_db: state_db.clone(),
+                        analytics_events_client: analytics_events_client.clone(),
+                        thread_manager: thread_manager.clone(),
+                        goal_service: Arc::clone(&goal_service),
+                        environment_manager: Arc::clone(&environment_manager_for_extensions),
+                        executor_skill_provider: Arc::clone(&executor_skill_provider),
+                        git_attribution_base_url: config.chatgpt_base_url.clone(),
+                        http_client_factory: config.http_client_factory(),
+                        queue_service: queue_service.clone(),
+                        turn_start_admission: Some(Arc::clone(&turn_start_admission)),
+                    },
+                ),
                 Arc::new(CodexHomeUserInstructionsProvider::new(
                     config.codex_home.clone(),
                 )),
@@ -531,6 +536,7 @@ impl MessageProcessor {
             Arc::clone(&skills_watcher),
             turn_cost_worker.as_ref().map(TurnCostWorker::handle),
             config_warnings,
+            sample_responses,
         );
         let turn_processor = TurnRequestProcessor::new(
             auth_manager,
@@ -1001,7 +1007,8 @@ impl MessageProcessor {
             | ClientRequest::TurnSettingsUpdate { .. }
             | ClientRequest::ThreadDelete { .. }
             | ClientRequest::ThreadArchive { .. } => (Some(self.turn_admission.admit()?), false),
-            ClientRequest::TurnStart { .. }
+            ClientRequest::ThreadSample { .. }
+            | ClientRequest::TurnStart { .. }
             | ClientRequest::TurnSteer { .. }
             | ClientRequest::ReviewStart { .. }
             | ClientRequest::ThreadCompactStart { .. }
@@ -1331,6 +1338,11 @@ impl MessageProcessor {
                     )
                     .await
             }
+            ClientRequest::ThreadSample { params, .. } => self
+                .thread_processor
+                .thread_sample(params, Arc::clone(&session.rpc_gate), request_context)
+                .await
+                .map(|response| Some(response.into())),
             ClientRequest::ThreadArchive { params, .. } => {
                 self.thread_processor
                     .thread_archive(request_id.clone(), params)
