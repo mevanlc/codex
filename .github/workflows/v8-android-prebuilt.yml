@@ -39,7 +39,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends python3 pkg-config
 
       - name: Install Android NDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: ""
 
       - name: Install NDK 27
         run: sdkmanager --install "ndk;27.2.12479018"
@@ -327,7 +329,10 @@ jobs:
 
       - name: Show tail on failure
         if: failure()
-        run: tail -200 /tmp/v8-build.log
+        run: |
+          if [ -f /tmp/v8-build.log ]; then
+            tail -200 /tmp/v8-build.log
+          fi
 
   release:
     needs: build
