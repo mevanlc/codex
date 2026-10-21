@@ -99,6 +99,7 @@ async fn turn_retract_removes_a_pending_steer() -> Result<()> {
                 text_elements: Vec::new(),
             }],
             responsesapi_client_metadata: None,
+            responsesapi_client_metadata_patch: None,
             additional_context: None,
             expected_turn_id: turn.id.clone(),
         })

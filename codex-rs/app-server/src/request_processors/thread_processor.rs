@@ -5523,6 +5523,11 @@ impl ThreadRequestProcessor {
         };
         let ephemeral_token_usage_turn_id = (ephemeral && include_turns)
             .then(|| restored_token_usage_turn_id(&history_items, ephemeral_turns.as_slice()));
+        // Metadata-only forks still need saved usage before their first turn. Attribute it
+        // from the model context already loaded for the fork, without hydrating the transcript.
+        let metadata_token_usage_turn_id = (!include_turns)
+            .then(|| restored_token_usage_turn_id(&history_items, /*turns*/ &[]))
+            .filter(|turn_id| !turn_id.is_empty());
         let token_usage_history_items = paginated_source.then(|| Arc::clone(&history_items));
         let inherited_project_id = source_thread.project_id.clone();
         let reserved_thread_id = if options.config.ephemeral {
@@ -5759,9 +5764,7 @@ impl ThreadRequestProcessor {
         self.outgoing
             .send_response_with_thread_originator(request_id, response, thread_originator)
             .await;
-        // `excludeTurns` is the cheap fork path, so skip restored usage replay
-        // instead of rebuilding history only to attribute a historical update.
-        if let Some(token_usage_turn_id) = token_usage_turn_id {
+        if let Some(token_usage_turn_id) = token_usage_turn_id.or(metadata_token_usage_turn_id) {
             // Mirror the resume contract for forks: the new thread is usable as soon
             // as the response arrives, so restored usage must follow immediately.
             send_thread_token_usage_update_to_connection(

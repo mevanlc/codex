@@ -1318,8 +1318,18 @@ async fn thread_fork_can_cut_before_unfinished_stored_turn() -> Result<()> {
     Ok(())
 }
 
+#[test_case(ThreadHistoryMode::Legacy, false, false; "legacy_full_history")]
+#[test_case(ThreadHistoryMode::Legacy, true, false; "legacy_metadata_only")]
+#[test_case(ThreadHistoryMode::Paginated, false, false; "paginated_full_history")]
+#[test_case(ThreadHistoryMode::Paginated, true, false; "paginated_metadata_only")]
+#[test_case(ThreadHistoryMode::Legacy, true, true; "legacy_ephemeral")]
+#[test_case(ThreadHistoryMode::Paginated, true, true; "paginated_ephemeral")]
 #[tokio::test]
-async fn thread_fork_emits_restored_token_usage_before_next_turn() -> Result<()> {
+async fn thread_fork_emits_restored_token_usage_before_next_turn(
+    history_mode: ThreadHistoryMode,
+    exclude_turns: bool,
+    ephemeral: bool,
+) -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
@@ -1331,6 +1341,39 @@ async fn thread_fork_emits_restored_token_usage_before_next_turn() -> Result<()>
         "Saved user message",
         Some("mock_provider"),
     )?;
+    let source_path = rollout_path(codex_home.path(), "2025-01-05T12-00-00", &conversation_id);
+    let mut records = std::fs::read_to_string(&source_path)?
+        .lines()
+        .map(serde_json::from_str::<Value>)
+        .collect::<serde_json::Result<Vec<_>>>()?;
+    records[0]["payload"]["history_mode"] = serde_json::to_value(history_mode)?;
+    records.insert(
+        1,
+        json!({
+            "timestamp": "2025-01-05T12:00:00Z",
+            "type": "event_msg",
+            "payload": EventMsg::TurnStarted(TurnStartedEvent {
+                turn_attribution: None,
+                turn_id: "source-turn".to_string(),
+                root_turn_id: None,
+                trace_id: None,
+                started_at: None,
+                model_context_window: Some(200_000),
+                collaboration_mode_kind: Default::default(),
+            }),
+        }),
+    );
+    for (ordinal, record) in records.iter_mut().enumerate() {
+        if history_mode == ThreadHistoryMode::Paginated {
+            record["ordinal"] = json!(ordinal);
+        }
+    }
+    let contents = records
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&source_path, format!("{contents}\n"))?;
 
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
@@ -1342,6 +1385,8 @@ async fn thread_fork_emits_restored_token_usage_before_next_turn() -> Result<()>
         .send_thread_fork_request(ThreadForkParams {
             thread_id: conversation_id,
             thread_source: Some(ThreadSource::User),
+            exclude_turns,
+            ephemeral,
             ..Default::default()
         })
         .await?;
@@ -1359,7 +1404,12 @@ async fn thread_fork_emits_restored_token_usage_before_next_turn() -> Result<()>
     };
 
     assert_eq!(notification.thread_id, thread.id);
-    assert_eq!(notification.turn_id, thread.turns[0].id);
+    assert_eq!(notification.turn_id, "source-turn");
+    if exclude_turns {
+        assert!(thread.turns.is_empty());
+    } else {
+        assert_eq!(notification.turn_id, thread.turns[0].id);
+    }
     assert_eq!(notification.token_usage.total.total_tokens, 150);
     assert_eq!(notification.token_usage.total.input_tokens, 120);
     assert_eq!(notification.token_usage.total.cached_input_tokens, 20);
@@ -1372,7 +1422,7 @@ async fn thread_fork_emits_restored_token_usage_before_next_turn() -> Result<()>
 }
 
 #[tokio::test]
-async fn thread_fork_can_exclude_turns_and_skip_restored_token_usage() -> Result<()> {
+async fn thread_fork_without_explicit_turn_ids_skips_metadata_only_usage() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
@@ -1412,7 +1462,7 @@ async fn thread_fork_can_exclude_turns_and_skip_restored_token_usage() -> Result
     .await;
     assert!(
         note.is_err(),
-        "excludeTurns=true should not replay token usage"
+        "metadata-only forks need an explicit turn id to attribute saved usage"
     );
 
     Ok(())
