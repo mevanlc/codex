@@ -1019,13 +1019,14 @@ async fn writer_state_retries_write_error_before_reporting_flush_success() -> st
     let rollout_path = home.path().join("rollout.jsonl");
     File::create(&rollout_path)?;
     let read_only_file = std::fs::OpenOptions::new().read(true).open(&rollout_path)?;
-    let handle_metadata = read_only_file.metadata()?;
     let mut state = RolloutWriterState {
-        writer: Some(JsonlWriter {
-            file: tokio::fs::File::from_std(read_only_file),
-            path: rollout_path.clone(),
-            handle_metadata,
-        }),
+        writer: Some(
+            JsonlWriter::new(
+                tokio::fs::File::from_std(read_only_file),
+                rollout_path.clone(),
+            )
+            .await?,
+        ),
         deferred_creation: false,
         pending_items: Vec::new(),
         meta: None,
@@ -1053,7 +1054,7 @@ async fn writer_state_retries_write_error_before_reporting_flush_success() -> st
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test]
 async fn recorder_reopens_replaced_rollout_before_appending() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
@@ -1093,7 +1094,7 @@ async fn recorder_reopens_replaced_rollout_before_appending() -> std::io::Result
     recorder.shutdown().await
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[tokio::test]
 async fn recorder_does_not_recreate_disappeared_rollout() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");

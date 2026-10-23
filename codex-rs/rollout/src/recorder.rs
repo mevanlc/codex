@@ -995,13 +995,8 @@ impl RolloutRecorder {
             RolloutRecorderParams::Resume { path } => {
                 let (path, file, ordinal_state) =
                     open_rollout_for_append(path.as_path(), writer_lock.clone()).await?;
-                let handle_metadata = file.metadata().await?;
                 RolloutWriterState {
-                    writer: Some(JsonlWriter {
-                        file,
-                        path: path.clone(),
-                        handle_metadata,
-                    }),
+                    writer: Some(JsonlWriter::new(file, path.clone()).await?),
                     deferred_creation: false,
                     pending_items: Vec::new(),
                     meta: None,
@@ -1901,12 +1896,9 @@ impl RolloutWriterState {
         }
 
         let file = open_log_file(self.rollout_path.as_path(), self.deferred_creation)?;
-        let handle_metadata = file.metadata()?;
-        self.writer = Some(JsonlWriter {
-            file: tokio::fs::File::from_std(file),
-            path: self.rollout_path.clone(),
-            handle_metadata,
-        });
+        self.writer = Some(
+            JsonlWriter::new(tokio::fs::File::from_std(file), self.rollout_path.clone()).await?,
+        );
         self.deferred_creation = false;
         Ok(())
     }
@@ -2047,12 +2039,7 @@ pub async fn append_rollout_item_to_path(
     let (rollout_path, file, ordinal_state) =
         open_rollout_for_append(rollout_path, /*writer_lock*/ None).await?;
     let ordinal = ordinal_state.current()?;
-    let handle_metadata = file.metadata().await?;
-    let mut writer = JsonlWriter {
-        file,
-        path: rollout_path,
-        handle_metadata,
-    };
+    let mut writer = JsonlWriter::new(file, rollout_path).await?;
     writer.write_rollout_item(item, ordinal).await
 }
 
@@ -2100,7 +2087,10 @@ fn ensure_rollout_is_newline_terminated(file: &mut File) -> std::io::Result<()> 
 struct JsonlWriter {
     file: tokio::fs::File,
     path: PathBuf,
+    #[cfg(not(windows))]
     handle_metadata: fs::Metadata,
+    #[cfg(windows)]
+    handle_identity: same_file::Handle,
 }
 
 #[derive(serde::Serialize)]
@@ -2113,6 +2103,45 @@ struct RolloutLineRef<'a> {
 }
 
 impl JsonlWriter {
+    async fn new(file: tokio::fs::File, path: PathBuf) -> std::io::Result<Self> {
+        #[cfg(not(windows))]
+        let handle_metadata = file.metadata().await?;
+        #[cfg(windows)]
+        let handle_identity = {
+            // Derive identity from the writer handle, since the path may already
+            // have been replaced. Keep the cloned handle open while comparing IDs.
+            let cloned_file = file.try_clone().await?.into_std().await;
+            tokio::task::spawn_blocking(move || same_file::Handle::from_file(cloned_file))
+                .await
+                .map_err(IoError::other)??
+        };
+        Ok(Self {
+            file,
+            path,
+            #[cfg(not(windows))]
+            handle_metadata,
+            #[cfg(windows)]
+            handle_identity,
+        })
+    }
+
+    async fn path_matches_handle(&self) -> std::io::Result<bool> {
+        #[cfg(windows)]
+        {
+            let path = self.path.clone();
+            let path_identity =
+                tokio::task::spawn_blocking(move || same_file::Handle::from_path(path))
+                    .await
+                    .map_err(IoError::other)??;
+            Ok(self.handle_identity == path_identity)
+        }
+        #[cfg(not(windows))]
+        {
+            let path_metadata = tokio::fs::metadata(&self.path).await?;
+            Ok(metadata_is_same_file(&self.handle_metadata, &path_metadata))
+        }
+    }
+
     async fn write_rollout_item(
         &mut self,
         rollout_item: &RolloutItem,
@@ -2137,8 +2166,7 @@ impl JsonlWriter {
         json.push('\n');
         // Replacing a live rollout path can leave this append handle attached to an
         // unlinked inode, where writes succeed but disappear from the session history.
-        let path_metadata = tokio::fs::metadata(&self.path).await?;
-        if !metadata_is_same_file(&self.handle_metadata, &path_metadata) {
+        if !self.path_matches_handle().await? {
             return Err(IoError::other(format!(
                 "rollout path {} no longer refers to the open writer handle",
                 self.path.display()
@@ -2150,22 +2178,12 @@ impl JsonlWriter {
     }
 }
 
+#[cfg(not(windows))]
 fn metadata_is_same_file(left: &fs::Metadata, right: &fs::Metadata) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         (left.dev(), left.ino()) == (right.dev(), right.ino())
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        let left_id = left.volume_serial_number().zip(left.file_index());
-        let right_id = right.volume_serial_number().zip(right.file_index());
-        match (left_id, right_id) {
-            (Some(left_id), Some(right_id)) => left_id == right_id,
-            // Keep writing on filesystems that do not report stable file IDs.
-            _ => true,
-        }
     }
     #[cfg(not(any(unix, windows)))]
     {
