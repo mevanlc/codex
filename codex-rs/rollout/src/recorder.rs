@@ -995,8 +995,13 @@ impl RolloutRecorder {
             RolloutRecorderParams::Resume { path } => {
                 let (path, file, ordinal_state) =
                     open_rollout_for_append(path.as_path(), writer_lock.clone()).await?;
+                let handle_metadata = file.metadata().await?;
                 RolloutWriterState {
-                    writer: Some(JsonlWriter { file }),
+                    writer: Some(JsonlWriter {
+                        file,
+                        path: path.clone(),
+                        handle_metadata,
+                    }),
                     deferred_creation: false,
                     pending_items: Vec::new(),
                     meta: None,
@@ -1761,7 +1766,7 @@ fn precompute_new_rollout_path(
     Ok((path, timestamp))
 }
 
-fn open_log_file(path: &Path) -> std::io::Result<File> {
+fn open_log_file(path: &Path, create: bool) -> std::io::Result<File> {
     let refresh_modified_time = !compression::plain_rollout_path(path).try_exists()?;
     let path = compression::materialize_rollout_for_append_blocking(path)?;
     let Some(parent) = path.parent() else {
@@ -1770,11 +1775,13 @@ fn open_log_file(path: &Path) -> std::io::Result<File> {
             path.display()
         )));
     };
-    fs::create_dir_all(parent)?;
+    if create {
+        fs::create_dir_all(parent)?;
+    }
     let mut file = std::fs::OpenOptions::new()
         .read(true)
         .append(true)
-        .create(true)
+        .create(create)
         .open(path)?;
     if refresh_modified_time {
         refresh_rollout_modified_time(&file)?;
@@ -1893,9 +1900,12 @@ impl RolloutWriterState {
             return Ok(());
         }
 
-        let file = open_log_file(self.rollout_path.as_path())?;
+        let file = open_log_file(self.rollout_path.as_path(), self.deferred_creation)?;
+        let handle_metadata = file.metadata()?;
         self.writer = Some(JsonlWriter {
             file: tokio::fs::File::from_std(file),
+            path: self.rollout_path.clone(),
+            handle_metadata,
         });
         self.deferred_creation = false;
         Ok(())
@@ -2034,10 +2044,15 @@ pub async fn append_rollout_item_to_path(
     rollout_path: &Path,
     item: &RolloutItem,
 ) -> std::io::Result<()> {
-    let (_rollout_path, file, ordinal_state) =
+    let (rollout_path, file, ordinal_state) =
         open_rollout_for_append(rollout_path, /*writer_lock*/ None).await?;
     let ordinal = ordinal_state.current()?;
-    let mut writer = JsonlWriter { file };
+    let handle_metadata = file.metadata().await?;
+    let mut writer = JsonlWriter {
+        file,
+        path: rollout_path,
+        handle_metadata,
+    };
     writer.write_rollout_item(item, ordinal).await
 }
 
@@ -2084,6 +2099,8 @@ fn ensure_rollout_is_newline_terminated(file: &mut File) -> std::io::Result<()> 
 
 struct JsonlWriter {
     file: tokio::fs::File,
+    path: PathBuf,
+    handle_metadata: fs::Metadata,
 }
 
 #[derive(serde::Serialize)]
@@ -2118,9 +2135,42 @@ impl JsonlWriter {
     async fn write_line(&mut self, item: &impl serde::Serialize) -> std::io::Result<()> {
         let mut json = serde_json::to_string(item)?;
         json.push('\n');
+        // Replacing a live rollout path can leave this append handle attached to an
+        // unlinked inode, where writes succeed but disappear from the session history.
+        let path_metadata = tokio::fs::metadata(&self.path).await?;
+        if !metadata_is_same_file(&self.handle_metadata, &path_metadata) {
+            return Err(IoError::other(format!(
+                "rollout path {} no longer refers to the open writer handle",
+                self.path.display()
+            )));
+        }
         self.file.write_all(json.as_bytes()).await?;
         self.file.flush().await?;
         Ok(())
+    }
+}
+
+fn metadata_is_same_file(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (left.dev(), left.ino()) == (right.dev(), right.ino())
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        let left_id = left.volume_serial_number().zip(left.file_index());
+        let right_id = right.volume_serial_number().zip(right.file_index());
+        match (left_id, right_id) {
+            (Some(left_id), Some(right_id)) => left_id == right_id,
+            // Keep writing on filesystems that do not report stable file IDs.
+            _ => true,
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (left, right);
+        true
     }
 }
 

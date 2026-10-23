@@ -148,8 +148,8 @@ fn append_repair_terminates_nonempty_rollout_tail() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
     let rollout_path = home.path().join("rollout.jsonl");
     fs::write(&rollout_path, b"{\"type\":\"event_msg\"}")?;
-    drop(open_log_file(&rollout_path)?);
-    drop(open_log_file(&rollout_path)?);
+    drop(open_log_file(&rollout_path, false)?);
+    drop(open_log_file(&rollout_path, false)?);
 
     assert_eq!(fs::read(&rollout_path)?, b"{\"type\":\"event_msg\"}\n");
     Ok(())
@@ -166,7 +166,7 @@ async fn opening_existing_rollout_preserves_modified_time() -> std::io::Result<(
         .open(&rollout_path)?
         .set_times(std::fs::FileTimes::new().set_modified(modified))?;
 
-    drop(open_log_file(&rollout_path)?);
+    drop(open_log_file(&rollout_path, false)?);
     assert_eq!(fs::metadata(&rollout_path)?.modified()?, modified);
 
     drop(open_rollout_for_append(&rollout_path, /*writer_lock*/ None).await?);
@@ -190,7 +190,7 @@ fn open_log_file_materializes_rollout_when_acl_denies_timestamp_changes() -> any
         .output()?;
     assert!(acl.status.success(), "{acl:?}");
 
-    let mut file = open_log_file(&rollout_path)?;
+    let mut file = open_log_file(&rollout_path, false)?;
     file.write_all(b"appended\n")?;
     drop(file);
 
@@ -1019,9 +1019,12 @@ async fn writer_state_retries_write_error_before_reporting_flush_success() -> st
     let rollout_path = home.path().join("rollout.jsonl");
     File::create(&rollout_path)?;
     let read_only_file = std::fs::OpenOptions::new().read(true).open(&rollout_path)?;
+    let handle_metadata = read_only_file.metadata()?;
     let mut state = RolloutWriterState {
         writer: Some(JsonlWriter {
             file: tokio::fs::File::from_std(read_only_file),
+            path: rollout_path.clone(),
+            handle_metadata,
         }),
         deferred_creation: false,
         pending_items: Vec::new(),
@@ -1048,6 +1051,81 @@ async fn writer_state_retries_write_error_before_reporting_flush_success() -> st
         "flush should retry after reopening and write buffered items"
     );
     Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn recorder_reopens_replaced_rollout_before_appending() -> std::io::Result<()> {
+    let home = TempDir::new().expect("temp dir");
+    let config = test_config(home.path());
+    let rollout_path = home.path().join("rollout.jsonl");
+    write_paginated_rollout(&rollout_path, ThreadId::new(), &[1])?;
+
+    let recorder =
+        RolloutRecorder::new(&config, RolloutRecorderParams::resume(rollout_path.clone())).await?;
+    let replacement_path = home.path().join("replacement.jsonl");
+    fs::copy(&rollout_path, &replacement_path)?;
+    fs::rename(replacement_path, &rollout_path)?;
+
+    recorder
+        .record_canonical_items(&[agent_message_item("after-replacement")])
+        .await?;
+    recorder.flush().await?;
+
+    let lines = read_rollout_lines(&rollout_path)?;
+    assert_eq!(
+        lines.iter().map(|line| line.ordinal).collect::<Vec<_>>(),
+        vec![Some(0), Some(1), Some(2)]
+    );
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| {
+                matches!(
+                    &line.item,
+                    RolloutItem::EventMsg(EventMsg::AgentMessage(event))
+                        if event.message == "after-replacement"
+                )
+            })
+            .count(),
+        1
+    );
+    recorder.shutdown().await
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn recorder_does_not_recreate_disappeared_rollout() -> std::io::Result<()> {
+    let home = TempDir::new().expect("temp dir");
+    let config = test_config(home.path());
+    let rollout_path = home.path().join("rollout.jsonl");
+    write_paginated_rollout(&rollout_path, ThreadId::new(), &[1])?;
+
+    let recorder =
+        RolloutRecorder::new(&config, RolloutRecorderParams::resume(rollout_path.clone())).await?;
+    let moved_path = home.path().join("moved.jsonl");
+    fs::rename(&rollout_path, &moved_path)?;
+
+    recorder
+        .record_canonical_items(&[agent_message_item("after-restore")])
+        .await?;
+    recorder
+        .flush()
+        .await
+        .expect_err("missing rollout should fail");
+    assert!(
+        !rollout_path.exists(),
+        "retry must not create an empty rollout"
+    );
+
+    fs::rename(moved_path, &rollout_path)?;
+    recorder.flush().await?;
+    let lines = read_rollout_lines(&rollout_path)?;
+    assert_eq!(
+        lines.iter().map(|line| line.ordinal).collect::<Vec<_>>(),
+        vec![Some(0), Some(1), Some(2)]
+    );
+    recorder.shutdown().await
 }
 
 #[tokio::test]
