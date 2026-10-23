@@ -57,6 +57,99 @@ fn runtime_servers(config: &Config) -> HashMap<String, McpServerConfig> {
     )
 }
 
+#[tokio::test]
+async fn no_mcp_disables_configured_servers_and_survives_runtime_refresh() {
+    let (home, base) = base_config().await;
+    let config_path = home.path().join(CONFIG_TOML_FILE);
+    let user_config = r#"
+[features]
+apps = true
+[orchestrator.mcp]
+enabled = true
+[mcp_servers.stdio]
+command = "unused-mcp-command"
+required = true
+[mcp_servers.http]
+url = "https://mcp.example/mcp"
+enabled = true
+"#;
+    std::fs::write(&config_path, user_config).unwrap();
+    let config = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(home.path().to_path_buf())
+        .fallback_cwd(Some(base.cwd.to_path_buf()))
+        .loader_overrides(codex_config::LoaderOverrides {
+            disable_all_mcp_servers: true,
+            ..codex_config::LoaderOverrides::without_managed_config_for_tests()
+        })
+        .cli_overrides(vec![
+            (
+                "mcp_servers.http.enabled".into(),
+                toml::Value::Boolean(true),
+            ),
+            (
+                "orchestrator.mcp.enabled".into(),
+                toml::Value::Boolean(true),
+            ),
+        ])
+        .build()
+        .await
+        .unwrap();
+
+    assert!(config.disable_all_mcp_servers);
+    assert!(!config.orchestrator_mcp_enabled);
+    assert_eq!(config.mcp_servers.get().len(), 2);
+    assert!(
+        config
+            .mcp_servers
+            .get()
+            .values()
+            .all(|server| !server.enabled)
+    );
+    let mcp = config.to_mcp_config_with_loaded_plugins(&PluginLoadOutcome::default(), []);
+    assert!(!mcp.apps_enabled);
+    assert!(!mcp.skill_mcp_dependency_install_enabled);
+    assert_eq!(std::fs::read_to_string(&config_path).unwrap(), user_config);
+
+    let incoming = layered_config(
+        &base,
+        &format!("{user_config}\n[mcp_servers.new]\ncommand = 'another-mcp'\n"),
+        "",
+        "",
+        "",
+    )
+    .await;
+    assert!(incoming.orchestrator_mcp_enabled);
+    assert!(
+        incoming
+            .mcp_servers
+            .get()
+            .values()
+            .all(|server| server.enabled)
+    );
+    for scope in [
+        RuntimeConfigRefresh::User,
+        RuntimeConfigRefresh::Mcp,
+        RuntimeConfigRefresh::UserFiles,
+    ] {
+        let refreshed = config.resolve_runtime_refresh(&incoming, scope).unwrap();
+        assert!(refreshed.disable_all_mcp_servers);
+        assert!(!refreshed.orchestrator_mcp_enabled);
+        assert_eq!(refreshed.mcp_servers.get().len(), 3);
+        assert!(
+            refreshed
+                .mcp_servers
+                .get()
+                .values()
+                .all(|server| !server.enabled)
+        );
+        assert!(
+            runtime_servers(&refreshed)
+                .values()
+                .all(|server| !server.enabled)
+        );
+    }
+}
+
 #[test_case::test_case(RuntimeConfigRefresh::User; "user refresh")]
 #[test_case::test_case(RuntimeConfigRefresh::Mcp; "MCP refresh")]
 #[tokio::test]

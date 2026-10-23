@@ -111,6 +111,11 @@ impl Config {
                 .filter(|(_, server)| is_enterprise(server))
                 .map(|(name, server)| (name.clone(), server.clone())),
         );
+        if self.disable_all_mcp_servers {
+            for server in servers.values_mut() {
+                server.enabled = false;
+            }
+        }
         let mut config = self.clone();
         if !matches!(scope, RuntimeConfigRefresh::UserFiles) {
             config.runtime_feature_defaults = incoming.runtime_feature_defaults.clone();

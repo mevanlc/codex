@@ -85,6 +85,7 @@ async fn status_snapshot_only_downgrades_oauth_authentication_failures() {
 
 pub(crate) fn test_mcp_config(codex_home: PathBuf) -> McpConfig {
     McpConfig {
+        disable_all_servers: false,
         chatgpt_base_url: "https://chatgpt.com".to_string(),
         apps_mcp_product_sku: None,
         requires_read_only_mcp_tools: false,
@@ -134,6 +135,71 @@ pub(crate) fn test_elicitation_config(
         .server_permission_profiles
         .insert(server_name.to_string(), permission_profile);
     Arc::new(config)
+}
+
+#[test]
+fn no_mcp_disables_all_registration_sources_and_later_additions() {
+    let mut config = test_mcp_config(PathBuf::new());
+    config.apps_enabled = true;
+    let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
+    let server: McpServerConfig = serde_json::from_value(serde_json::json!({
+        "command": "unused-mcp-command", "required": true
+    }))
+    .unwrap();
+    let plugin = McpPluginAttribution::new("plugin@test".into(), "Plugin".into());
+    let mut catalog = ResolvedMcpCatalog::builder();
+    for registration in [
+        McpServerRegistration::from_config("configured".into(), server.clone()),
+        McpServerRegistration::from_executor_config("executor".into(), server.clone()),
+        McpServerRegistration::from_plugin(
+            "plugin".into(),
+            plugin.clone(),
+            /*plugin_order*/ 0,
+            server.clone(),
+        ),
+        McpServerRegistration::from_selected_plugin(
+            "selected".into(),
+            plugin,
+            /*selection_order*/ 0,
+            codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID,
+            server.clone(),
+        ),
+        McpServerRegistration::from_extension(
+            "extension".into(),
+            "extension",
+            /*contribution_order*/ 0,
+            server.clone(),
+        ),
+        McpServerRegistration::from_compatibility("compat".into(), "compat", server.clone()),
+        McpServerRegistration::from_hosted_apps(
+            "apps",
+            /*contribution_order*/ 0,
+            server.clone(),
+        ),
+    ] {
+        catalog.register(registration);
+    }
+    config.mcp_server_catalog = catalog.build();
+    let original_servers = configured_mcp_servers(&config);
+    assert_eq!(original_servers.len(), 7);
+    assert!(original_servers.values().all(|server| server.enabled));
+
+    config.disable_all_servers = true;
+    assert!(
+        configured_mcp_servers(&config)
+            .values()
+            .all(|server| !server.enabled)
+    );
+    let effective = effective_mcp_servers_from_configured(original_servers, &config, Some(&auth));
+    assert_eq!(effective.len(), 7);
+    assert!(effective.values().all(|server| !server.enabled()));
+
+    let mut updated_catalog = config.mcp_server_catalog.to_builder();
+    updated_catalog.register(McpServerRegistration::from_config("new".into(), server));
+    config.mcp_server_catalog = updated_catalog.build();
+    let effective = effective_mcp_servers(&config, Some(&auth));
+    assert_eq!(effective.len(), 8);
+    assert!(effective.values().all(|server| !server.enabled()));
 }
 
 #[test]

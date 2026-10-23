@@ -60,6 +60,55 @@ fn list_shows_empty_state() -> Result<()> {
 }
 
 #[test]
+fn no_mcp_list_disables_every_configured_server_for_one_invocation() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let config_path = codex_home.path().join("config.toml");
+    let user_config = r#"
+[mcp_servers.stdio]
+command = "unused-mcp-command"
+required = true
+[mcp_servers.http]
+url = "https://mcp.example/mcp"
+"#;
+    std::fs::write(&config_path, user_config)?;
+
+    let list = |flag: bool| -> Result<JsonValue> {
+        let mut cmd = codex_command(codex_home.path())?;
+        if flag {
+            cmd.arg("--x-no-mcp");
+        }
+        let output = cmd.args(["mcp", "list", "--json"]).output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "codex mcp list failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&output.stdout)?)
+    };
+
+    let enabled = list(false)?;
+    assert_eq!(enabled.as_array().map(Vec::len), Some(2));
+    assert!(
+        enabled
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry["enabled"].as_bool() == Some(true))
+    );
+    let disabled = list(true)?;
+    assert_eq!(disabled.as_array().map(Vec::len), Some(2));
+    assert!(
+        disabled
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry["enabled"].as_bool() == Some(false))
+    );
+    assert_eq!(std::fs::read_to_string(config_path)?, user_config);
+    Ok(())
+}
+
+#[test]
 fn api_key_auth_exposes_api_curated_plugin_mcp_servers() -> Result<()> {
     let codex_home = TempDir::new()?;
     std::fs::write(

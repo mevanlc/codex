@@ -923,6 +923,9 @@ pub struct Config {
     /// Definition for MCP servers that Codex can reach out to for tool calls.
     pub mcp_servers: Constrained<HashMap<String, McpServerConfig>>,
 
+    /// Invocation-only override applied to every resolved MCP catalog.
+    pub disable_all_mcp_servers: bool,
+
     /// Trusted IdP shared by all permitted EMA MCP registrations.
     pub mcp_enterprise_managed_auth: Option<McpEnterpriseManagedAuthConfig>,
 
@@ -1564,9 +1567,16 @@ impl ConfigBuilder {
             Some(codex_home) => AbsolutePathBuf::from_absolute_path(codex_home)?,
             None => find_codex_home()?,
         };
-        let cli_overrides = cli_overrides.unwrap_or_default();
+        let mut cli_overrides = cli_overrides.unwrap_or_default();
         let mut harness_overrides = harness_overrides.unwrap_or_default();
         let loader_overrides = loader_overrides.unwrap_or_default();
+        let disable_all_mcp_servers = loader_overrides.disable_all_mcp_servers;
+        if disable_all_mcp_servers {
+            cli_overrides.push((
+                "orchestrator.mcp.enabled".to_string(),
+                toml::Value::Boolean(false),
+            ));
+        }
         let cwd_override = harness_overrides.cwd.as_deref().or(fallback_cwd.as_deref());
         let cwd = match cwd_override {
             Some(path) => AbsolutePathBuf::relative_to_current_dir(path)?,
@@ -1591,15 +1601,22 @@ impl ConfigBuilder {
                 .unwrap_or(&codex_config::NoopThreadConfigLoader),
         )
         .await?;
-        let config_toml = config_toml_from_layers(&config_layer_stack).await?;
-        Config::load_config_with_layer_stack(
+        let mut config_toml = config_toml_from_layers(&config_layer_stack).await?;
+        if disable_all_mcp_servers {
+            for server in config_toml.mcp_servers.values_mut() {
+                server.enabled = false;
+            }
+        }
+        let mut config = Config::load_config_with_layer_stack(
             LOCAL_FS.as_ref(),
             config_toml,
             harness_overrides,
             codex_home,
             config_layer_stack,
         )
-        .await
+        .await?;
+        config.disable_all_mcp_servers = disable_all_mcp_servers;
+        Ok(config)
     }
 
     #[cfg(test)]
@@ -1880,6 +1897,7 @@ impl Config {
         }
 
         McpConfig {
+            disable_all_servers: self.disable_all_mcp_servers,
             chatgpt_base_url: self.chatgpt_base_url.clone(),
             apps_mcp_product_sku: self.apps_mcp_product_sku.clone(),
             requires_read_only_mcp_tools: false,
@@ -1899,9 +1917,8 @@ impl Config {
             mcp_oauth_callback_port: self.mcp_oauth_callback_port,
             mcp_oauth_callback_url: self.mcp_oauth_callback_url.clone(),
             optional_mcp_startup_grace: self.mcp_optional_startup_grace,
-            skill_mcp_dependency_install_enabled: self
-                .features
-                .enabled(Feature::SkillMcpDependencyInstall),
+            skill_mcp_dependency_install_enabled: !self.disable_all_mcp_servers
+                && self.features.enabled(Feature::SkillMcpDependencyInstall),
             approval_policy: self.permissions.approval_policy.clone(),
             permission_profile: self.permissions.permission_profile().clone(),
             config_layer_stack: self.config_layer_stack.clone(),
@@ -1913,7 +1930,7 @@ impl Config {
             codex_self_exe: self.codex_self_exe.clone(),
             codex_linux_sandbox_exe: self.codex_linux_sandbox_exe.clone(),
             use_legacy_landlock: self.features.use_legacy_landlock(),
-            apps_enabled: self.features.enabled(Feature::Apps),
+            apps_enabled: !self.disable_all_mcp_servers && self.features.enabled(Feature::Apps),
             prefix_mcp_tool_names: self.prefix_mcp_tool_names(),
             non_prefixed_mcp_tool_servers: if self
                 .features
@@ -4485,6 +4502,7 @@ impl Config {
             skill_max_context_tokens,
             cloud_skill_enabled,
             orchestrator_mcp_enabled,
+            disable_all_mcp_servers: false,
             include_environment_context,
             include_environment_context_time,
             // The config.toml omits "_mode" because it's a config file. However, "_mode"

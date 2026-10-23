@@ -2,8 +2,23 @@
 
 use super::*;
 use crate::legacy_core::config::ConfigBuilder;
+use clap::Parser;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
+
+#[test]
+fn no_mcp_flag_excludes_the_shared_daemon() {
+    let cli = Cli::try_parse_from(["codex", "--x-no-mcp"]).expect("parse");
+    let loader_overrides = LoaderOverrides {
+        disable_all_mcp_servers: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        daemon_startup::exclusion(&cli, &[], &loader_overrides, false, None),
+        Some("--x-no-mcp")
+    );
+    assert!(!loader_overrides_are_default(&loader_overrides));
+}
 
 #[test]
 fn audited_overrides_allow_daemon_without_allowing_arbitrary_config() {

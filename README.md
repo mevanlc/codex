@@ -17,6 +17,7 @@ This fork maintains a build of Codex CLI that runs natively on Android via [Term
 - **`[tui].chatbox_placeholder_tips`** — turn off the rotating composer tips
 - **File mention settings** — optionally preserve the `@` prefix and complete explicit paths
 - **Shell follow-ups** — press Tab in `!` mode to start an agent turn after the command finishes
+- **`--x-no-mcp`** — disable every MCP server and orchestrator MCP access for one invocation
 - **Retractable steer messages** — pull a still-pending steer back into the composer; backed by a new `turn/retract` app-server method
 - **Context usage on resume and fork** — restore the saved context fullness before the next turn, including paginated forks and turns that crossed a compaction checkpoint with their identity saved only in the following turn context
 - **Unrestricted reasoning shortcuts** — the reasoning hotkeys step all the way into Max and Ultra
@@ -123,6 +124,21 @@ The unified mention picker offers `Filesystem` for the ordinary file-search scop
 ### Shell command follow-ups
 
 While composing a `!` shell command, press Tab to toggle an automatic follow-up on or off. With the follow-up on, Enter runs the command as usual, then starts an agent turn after the command exits. The agent receives the command result and is instructed to investigate and fix failures, or explain a successful result and relevant next steps. The toggle applies only to the current shell command and requires no configuration.
+
+### Disable all MCPs for an invocation
+
+```shell
+codex --x-no-mcp
+codex exec --x-no-mcp 'Explain this project'
+codex resume --last --x-no-mcp
+```
+
+`--x-no-mcp` sets every registered MCP server's effective `enabled` value to
+`false` and forces `orchestrator.mcp.enabled = false`. This includes servers from
+config, plugins, extensions, and selected execution environments, including
+registrations added during config reloads. It leaves saved configuration untouched.
+Interactive launches use an embedded backend; the flag cannot be combined with
+`--remote` or `codex agents`.
 
 ### Retracting a pending steer
 

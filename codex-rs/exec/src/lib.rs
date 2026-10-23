@@ -309,6 +309,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         auto_review: _,
         dangerously_bypass_approvals_and_sandbox,
         bypass_hook_trust,
+        x_no_mcp,
         cwd,
         mut add_dir,
         worktree,
@@ -386,6 +387,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         user_config_profile: config_profile_v2,
         ignore_user_config,
         ignore_user_and_project_exec_policy_rules: ignore_rules,
+        disable_all_mcp_servers: x_no_mcp,
         ..Default::default()
     };
     if worktree

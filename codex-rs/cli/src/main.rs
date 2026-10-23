@@ -1200,8 +1200,9 @@ async fn cli_main(
             )?;
             // Propagate any root-level config overrides (e.g. `-c key=value`).
             prepend_config_flags(&mut mcp_cli.config_overrides, root_config_overrides.clone());
-            let loader_overrides =
+            let mut loader_overrides =
                 loader_overrides_for_profile(interactive.config_profile_v2.as_ref())?;
+            loader_overrides.disable_all_mcp_servers = interactive.x_no_mcp;
             mcp_cli.run(loader_overrides).await?;
         }
         Some(Subcommand::Plugin(plugin_cli)) => {
@@ -2466,6 +2467,11 @@ async fn run_interactive_tui(
     remote_auth_token_env: Option<String>,
     arg0_paths: Arg0DispatchPaths,
 ) -> std::io::Result<AppExitInfo> {
+    if interactive.x_no_mcp && (remote.is_some() || interactive.agents_overview) {
+        return Ok(AppExitInfo::fatal(
+            "--x-no-mcp requires a local embedded session and cannot be used with --remote or codex agents.",
+        ));
+    }
     if interactive.no_daemon {
         if interactive.agents_overview {
             return Ok(AppExitInfo::fatal(
@@ -4050,6 +4056,33 @@ enabled = true
             ] {
                 assert!(finalize(&args).no_daemon);
             }
+        }
+    }
+
+    #[test]
+    fn no_mcp_flag_reaches_interactive_exec_resume_and_fork() {
+        let cli = MultitoolCli::try_parse_from(["codex", "--x-no-mcp"]).expect("parse");
+        assert!(cli.interactive.x_no_mcp);
+
+        for (command, finalize) in [
+            ("resume", finalize_resume_from_args as fn(&[&str]) -> TuiCli),
+            ("fork", finalize_fork_from_args as fn(&[&str]) -> TuiCli),
+        ] {
+            for args in [
+                ["codex", "--x-no-mcp", command, "--last"],
+                ["codex", command, "--last", "--x-no-mcp"],
+            ] {
+                assert!(finalize(&args).x_no_mcp);
+            }
+        }
+        for args in [
+            vec!["codex", "--x-no-mcp", "exec", "hello"],
+            vec!["codex", "exec", "--x-no-mcp", "hello"],
+            vec!["codex", "exec", "resume", "--last", "--x-no-mcp"],
+            vec!["codex", "exec", "fork", "session", "--x-no-mcp"],
+            vec!["codex", "exec", "review", "--uncommitted", "--x-no-mcp"],
+        ] {
+            assert!(finalize_exec_from_args(&args).x_no_mcp);
         }
     }
 

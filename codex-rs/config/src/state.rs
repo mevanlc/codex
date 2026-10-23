@@ -55,6 +55,8 @@ pub struct LoaderOverrides {
     /// Skip project-root discovery and all project configuration layers.
     pub ignore_project_config: bool,
     pub ignore_user_and_project_exec_policy_rules: bool,
+    /// Invocation-only override that disables every MCP registration.
+    pub disable_all_mcp_servers: bool,
     //TODO(gt): Add a macos_ prefix to this field and remove the target_os check.
     #[cfg(target_os = "macos")]
     pub managed_preferences_base64: Option<String>,
@@ -79,6 +81,7 @@ impl LoaderOverrides {
             ignore_user_config: false,
             ignore_project_config: false,
             ignore_user_and_project_exec_policy_rules: false,
+            disable_all_mcp_servers: false,
             #[cfg(target_os = "macos")]
             managed_preferences_base64: Some(String::new()),
             macos_managed_config_requirements_base64: Some(String::new()),

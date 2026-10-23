@@ -13,6 +13,11 @@ pub(super) async fn run_main_inner(
     loader_overrides: LoaderOverrides,
     mut explicit_remote_endpoint: Option<RemoteAppServerEndpoint>,
 ) -> std::io::Result<AppExitInfo> {
+    if cli.x_no_mcp && (explicit_remote_endpoint.is_some() || cli.agents_overview) {
+        return Err(std::io::Error::other(
+            "--x-no-mcp requires a local embedded session and cannot be used with --remote or codex agents.",
+        ));
+    }
     if cli.no_daemon && explicit_remote_endpoint.is_some() {
         return Err(std::io::Error::other(
             "--no-daemon cannot be used with --remote.",
@@ -134,6 +139,7 @@ pub(super) async fn run_main_inner(
     }
 
     let mut launch_loader_overrides = loader_overrides.clone();
+    launch_loader_overrides.disable_all_mcp_servers |= cli.x_no_mcp;
     if let Some(profile_v2) = cli.config_profile_v2.as_ref() {
         let user_config_path = resolve_profile_v2_config_path(&codex_home, profile_v2);
         launch_loader_overrides.user_config_path = Some(user_config_path);

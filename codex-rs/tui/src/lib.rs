@@ -1125,6 +1125,7 @@ fn loader_overrides_are_default(loader_overrides: &LoaderOverrides) -> bool {
         && !loader_overrides.ignore_managed_requirements
         && !loader_overrides.ignore_user_config
         && !loader_overrides.ignore_user_and_project_exec_policy_rules
+        && !loader_overrides.disable_all_mcp_servers
         && loader_overrides
             .macos_managed_config_requirements_base64
             .is_none();

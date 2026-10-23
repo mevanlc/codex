@@ -122,6 +122,8 @@ pub struct McpPermissionPromptAutoApproveContext {
 /// runtime entry points such as [`effective_mcp_servers`].
 #[derive(Debug, Clone)]
 pub struct McpConfig {
+    /// Invocation-only override applied after all server registrations resolve.
+    pub disable_all_servers: bool,
     /// Base URL for ChatGPT-hosted app MCP servers, copied from the root config.
     pub chatgpt_base_url: String,
     /// Optional product SKU forwarded to the host-owned apps MCP server.
@@ -354,7 +356,13 @@ pub fn host_owned_codex_apps_enabled(config: &McpConfig, auth: Option<&CodexAuth
 }
 
 pub fn configured_mcp_servers(config: &McpConfig) -> HashMap<String, McpServerConfig> {
-    config.mcp_server_catalog.configured_servers()
+    let mut servers = config.mcp_server_catalog.configured_servers();
+    if config.disable_all_servers {
+        for server in servers.values_mut() {
+            server.enabled = false;
+        }
+    }
+    servers
 }
 
 pub fn effective_mcp_servers(
@@ -413,6 +421,7 @@ pub fn effective_mcp_servers_from_configured(
     let mut servers = configured_servers
         .into_iter()
         .map(|(name, mut server)| {
+            server.enabled &= !config.disable_all_servers;
             #[expect(
                 clippy::expect_used,
                 reason = "materialized servers must have catalog registrations"

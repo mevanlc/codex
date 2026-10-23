@@ -71,6 +71,8 @@ pub(super) fn exclusion(
 ) -> Option<&'static str> {
     if cli.no_daemon {
         Some("--no-daemon")
+    } else if cli.x_no_mcp {
+        Some("--x-no-mcp")
     } else if cli.oss {
         Some("--oss")
     } else if workload_identity_selected {

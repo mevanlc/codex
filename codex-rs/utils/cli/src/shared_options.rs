@@ -63,6 +63,10 @@ pub struct SharedCliOptions {
     #[arg(long = "dangerously-bypass-hook-trust", default_value_t = false)]
     pub bypass_hook_trust: bool,
 
+    /// Disable all MCP servers and orchestrator MCP access for this invocation.
+    #[arg(long = "x-no-mcp", default_value_t = false)]
+    pub x_no_mcp: bool,
+
     /// Tell the agent to use the specified directory as its working root.
     #[clap(long = "cd", short = 'C', value_name = "DIR")]
     pub cwd: Option<PathBuf>,
@@ -106,6 +110,7 @@ impl SharedCliOptions {
             auto_review,
             dangerously_bypass_approvals_and_sandbox,
             bypass_hook_trust,
+            x_no_mcp,
             cwd,
             worktree,
             add_dir,
@@ -120,6 +125,7 @@ impl SharedCliOptions {
             auto_review: root_auto_review,
             dangerously_bypass_approvals_and_sandbox: root_dangerously_bypass_approvals_and_sandbox,
             bypass_hook_trust: root_bypass_hook_trust,
+            x_no_mcp: root_x_no_mcp,
             cwd: root_cwd,
             worktree: root_worktree,
             add_dir: root_add_dir,
@@ -146,6 +152,7 @@ impl SharedCliOptions {
         if !*bypass_hook_trust {
             *bypass_hook_trust = *root_bypass_hook_trust;
         }
+        *x_no_mcp |= *root_x_no_mcp;
         if cwd.is_none() {
             cwd.clone_from(root_cwd);
         }
@@ -176,6 +183,7 @@ impl SharedCliOptions {
             auto_review,
             dangerously_bypass_approvals_and_sandbox,
             bypass_hook_trust,
+            x_no_mcp,
             cwd,
             worktree,
             add_dir,
@@ -202,6 +210,7 @@ impl SharedCliOptions {
         if bypass_hook_trust {
             self.bypass_hook_trust = true;
         }
+        self.x_no_mcp |= x_no_mcp;
         if let Some(cwd) = cwd {
             self.cwd = Some(cwd);
         }
