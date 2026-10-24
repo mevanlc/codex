@@ -46,13 +46,22 @@ Grab the archive for your platform from [Releases](https://github.com/mevanlc/co
 
 Each desktop archive contains a complete Codex package, including `codex`, `codex-code-mode-host`, ripgrep, and the platform-specific sandbox helpers where applicable.
 
-The Android/Termux build remains two zstd-compressed binaries. Install both into the same directory on `PATH`, since the code-mode runtime resolves its host beside `codex`:
+The Android/Termux archive, `codex-aarch64-linux-android.tar.zst`, contains
+`bin/codex` and `bin/codex-code-mode-host`. Extract it into `~/.local` to install
+both binaries into the same directory on `PATH`, since the code-mode runtime
+resolves its host beside `codex`:
 
 ```shell
-zstd -d codex-aarch64-linux-android.zst -o codex
-zstd -d codex-code-mode-host-aarch64-linux-android.zst -o codex-code-mode-host
-chmod +x codex codex-code-mode-host
+mkdir -p "$HOME/.local/bin"
+zstd -d -c codex-aarch64-linux-android.tar.zst | tar -xf - -C "$HOME/.local"
 ```
+
+Android/Termux uses the embedded app server by default; the shared background
+daemon requires a complete package and does not support the Android target yet.
+If an installed release fails with `this CLI has no complete local package`, run
+`codex features disable daemon_auto_start` once to save the embedded-server
+preference, or use `codex --no-daemon` for a single launch. The same flag works
+with `resume` and `fork`.
 
 Or [build from source](#building).
 

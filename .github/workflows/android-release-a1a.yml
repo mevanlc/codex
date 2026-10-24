@@ -436,7 +436,7 @@ jobs:
       - name: Verify host dependencies
         run: |
           set -euo pipefail
-          for tool in clang clang++ curl file gzip java ld.lld llvm-ar llvm-ranlib pkg-config unzip zstd; do
+          for tool in clang clang++ curl file gzip install java ld.lld llvm-ar llvm-ranlib pkg-config tar unzip zstd; do
             command -v "$tool"
           done
 
@@ -538,14 +538,19 @@ jobs:
           echo "Post-build V8-related files under $CARGO_TARGET_DIR:"
           find "$CARGO_TARGET_DIR" -maxdepth 10 \( -path "*/build/v8-*/out/*" -o -name "librusty_v8*.a" -o -name "*.sum" \) -print 2>/dev/null | sort
 
-      - name: Compress binaries
+      - name: Archive Android binaries
         run: |
-          zstd -19 "$CARGO_TARGET_DIR/aarch64-linux-android/release/codex" \
-            -o codex-aarch64-linux-android.zst
-          zstd -19 "$CARGO_TARGET_DIR/aarch64-linux-android/release/codex-code-mode-host" \
-            -o codex-code-mode-host-aarch64-linux-android.zst
+          set -euo pipefail
+          package_dir="dist/codex-aarch64-linux-android"
+          mkdir -p "$package_dir/bin"
+          install -m 755 "$CARGO_TARGET_DIR/aarch64-linux-android/release/codex" \
+            "$package_dir/bin/codex"
+          install -m 755 "$CARGO_TARGET_DIR/aarch64-linux-android/release/codex-code-mode-host" \
+            "$package_dir/bin/codex-code-mode-host"
+          tar -cf - -C "$package_dir" bin/codex bin/codex-code-mode-host | \
+            zstd -19 -o codex-aarch64-linux-android.tar.zst
 
-      - name: Publish Android/Termux artifacts
+      - name: Publish Android/Termux archive
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ needs.metadata.outputs.tag }}
@@ -555,9 +560,7 @@ jobs:
           make_latest: true
           fail_on_unmatched_files: true
           overwrite_files: true
-          files: |
-            codex-rs/codex-aarch64-linux-android.zst
-            codex-rs/codex-code-mode-host-aarch64-linux-android.zst
+          files: codex-rs/codex-aarch64-linux-android.tar.zst
           body: |
             Codex CLI fork release with Android/Termux support.
 

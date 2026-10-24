@@ -203,13 +203,13 @@ detect_release_asset_name() {
   fi
 
   case "$1" in
-    codex-*-apple-darwin|codex-*-unknown-linux-musl)
+    codex-*-apple-darwin|codex-*-unknown-linux-musl|codex-*-linux-android)
       printf '%s.tar.zst\n' "$1"
       ;;
     codex-*-pc-windows-msvc)
       printf '%s.zip\n' "$1"
       ;;
-    *-apple-darwin|*-unknown-linux-musl)
+    *-apple-darwin|*-unknown-linux-musl|*-linux-android)
       printf 'codex-%s.tar.zst\n' "$1"
       ;;
     *-pc-windows-msvc)
