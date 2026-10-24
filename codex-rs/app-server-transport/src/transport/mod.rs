@@ -60,6 +60,7 @@ const DAEMON_RECOVERY_FILE_NAME: &str = "loaded-threads.json";
 
 pub fn daemon_recovery_file_path(codex_home: &Path) -> PathBuf {
     codex_home
+        .join("mevanlc")
         .join("app-server-daemon")
         .join(DAEMON_RECOVERY_FILE_NAME)
 }
@@ -67,6 +68,7 @@ pub fn daemon_recovery_file_path(codex_home: &Path) -> PathBuf {
 pub fn app_server_control_socket_path(codex_home: &Path) -> std::io::Result<AbsolutePathBuf> {
     AbsolutePathBuf::from_absolute_path(
         codex_home
+            .join("mevanlc")
             .join(APP_SERVER_CONTROL_SOCKET_DIR_NAME)
             .join(APP_SERVER_CONTROL_SOCKET_FILE_NAME),
     )
@@ -75,6 +77,7 @@ pub fn app_server_control_socket_path(codex_home: &Path) -> std::io::Result<Abso
 pub fn app_server_startup_lock_path(codex_home: &Path) -> std::io::Result<AbsolutePathBuf> {
     AbsolutePathBuf::from_absolute_path(
         codex_home
+            .join("mevanlc")
             .join(APP_SERVER_CONTROL_SOCKET_DIR_NAME)
             .join(APP_SERVER_STARTUP_LOCK_FILE_NAME),
     )
@@ -597,6 +600,30 @@ mod tests {
                 },
                 "emittedAtMs": 1_234,
             })
+        );
+    }
+}
+
+#[cfg(test)]
+mod fork_paths_tests {
+    #[test]
+    fn defaults_do_not_share_upstream_sockets_or_recovery() {
+        let home = std::env::temp_dir().join("fork-codex-home");
+        assert_eq!(
+            super::daemon_recovery_file_path(&home),
+            home.join("mevanlc/app-server-daemon/loaded-threads.json")
+        );
+        assert_eq!(
+            super::app_server_control_socket_path(&home)
+                .unwrap()
+                .as_path(),
+            home.join("mevanlc/app-server-control/app-server-control.sock")
+        );
+        assert_eq!(
+            super::app_server_startup_lock_path(&home)
+                .unwrap()
+                .as_path(),
+            home.join("mevanlc/app-server-control/app-server-startup.lock")
         );
     }
 }

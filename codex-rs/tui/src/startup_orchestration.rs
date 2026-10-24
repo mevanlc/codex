@@ -327,6 +327,17 @@ pub(super) async fn run_main_inner(
         mut screen,
         local_settings,
     } = presentation;
+    let daemon_enabled = crate::legacy_core::config::resolve_bootstrap_features(
+        &bootstrap_config.config_toml,
+        bootstrap_config
+            .config_layer_stack
+            .requirements()
+            .feature_requirements
+            .as_ref(),
+    )?
+    .enabled(Feature::DaemonAutoStart);
+    let reuse_implicit_local_daemon =
+        reuse_implicit_local_daemon && (daemon_enabled || cli.agents_overview);
     screen.use_alt_screen = determine_alt_screen_mode(
         cli.no_alt_screen,
         local_settings.tui.alternate_screen,

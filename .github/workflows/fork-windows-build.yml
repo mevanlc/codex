@@ -71,14 +71,14 @@ jobs:
             --target "${{ matrix.target }}" `
             --variant codex `
             --cargo-profile release `
-            --package-dir "dist/codex-windows-${{ matrix.arch }}" `
-            --archive-output "dist/codex-windows-${{ matrix.arch }}.zip" `
+            --package-dir "dist/codex-${{ matrix.target }}" `
+            --archive-output "dist/codex-${{ matrix.target }}.zip" `
             --force
 
       - name: Smoke test package
         shell: pwsh
         run: |
-          $packageDir = "dist/codex-windows-${{ matrix.arch }}"
+          $packageDir = "dist/codex-${{ matrix.target }}"
           $requiredFiles = @(
             "codex-package.json",
             "bin/codex.exe",
@@ -100,10 +100,24 @@ jobs:
             throw "codex.exe --version failed with exit code $LASTEXITCODE"
           }
 
+      - name: Test native package installation
+        shell: pwsh
+        run: |
+          if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) {
+            cargo nextest run --manifest-path codex-rs/Cargo.toml -p codex-utils-home-dir --lib
+          } else {
+            cargo test --manifest-path codex-rs/Cargo.toml -p codex-utils-home-dir --lib
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Package path tests failed" }
+          $env:CODEX_TEST_NATIVE_PACKAGE = (Resolve-Path "dist/codex-${{ matrix.target }}.zip").Path
+          $env:CODEX_TEST_BASH = "$env:ProgramFiles/Git/bin/bash.exe"
+          python -m unittest discover -s codex-rs/scripts -p test_install_from_gh.py -k NativePackageInstallTest -v
+          if ($LASTEXITCODE -ne 0) { throw "Package installer tests failed" }
+
       - name: Upload Windows package
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: codex-windows-${{ matrix.arch }}
-          path: dist/codex-windows-${{ matrix.arch }}.zip
+          name: codex-${{ matrix.target }}
+          path: dist/codex-${{ matrix.target }}.zip
           if-no-files-found: error
           retention-days: 14

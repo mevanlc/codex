@@ -9,12 +9,26 @@ use std::os::unix::fs::DirBuilderExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 
+// Termux cannot write /tmp. Keep this independent of environment variables and
+// short enough for a 64-character socket hash within sockaddr_un.sun_path.
+#[cfg(any(test, target_os = "android"))]
+const ANDROID_SOCKET_DIRECTORY: &str = "/data/data/com.termux/files/mc-daemon";
+
 /// Returns the fixed executor-local directory that every sandbox must hide.
 pub fn shared_daemon_socket_directory() -> io::Result<PathBuf> {
-    // Resolve the system alias /tmp -> /private/tmp on macOS.
-    let temporary_root = fs::canonicalize("/tmp")?;
-    let uid = unsafe { libc::geteuid() };
-    Ok(temporary_root.join(format!("codex-daemon-{uid}")))
+    #[cfg(target_os = "android")]
+    {
+        // Android gives each app a private data directory, so no UID suffix is
+        // needed. prepare_shared_daemon_socket_directory still verifies ownership.
+        Ok(PathBuf::from(ANDROID_SOCKET_DIRECTORY))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        // Resolve the system alias /tmp -> /private/tmp on macOS.
+        let temporary_root = fs::canonicalize("/tmp")?;
+        let uid = unsafe { libc::geteuid() };
+        Ok(temporary_root.join(format!("codex-daemon-{uid}")))
+    }
 }
 
 /// Creates the reserved directory, rejecting symlinks and unsafe existing owners or modes.
@@ -36,4 +50,16 @@ pub fn prepare_shared_daemon_socket_directory() -> io::Result<PathBuf> {
         ));
     }
     Ok(directory)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn android_daemon_socket_address_fits_the_platform_limit() {
+        let socket = PathBuf::from(ANDROID_SOCKET_DIRECTORY).join("f".repeat(64));
+        std::os::unix::net::SocketAddr::from_pathname(socket)
+            .expect("Termux socket root and full SHA-256 name must fit sockaddr_un");
+    }
 }

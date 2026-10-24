@@ -101,3 +101,53 @@ async fn first_frame_respects_screen_and_status_line_overrides() -> anyhow::Resu
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn daemon_mode_uses_merged_config_and_flag_overrides() -> anyhow::Result<()> {
+    let home = tempfile::tempdir()?;
+    let cli = Cli::try_parse_from(["codex"])?;
+    for (configured, override_value, expected) in [
+        (None, None, false),
+        (Some(false), None, false),
+        (Some(true), None, true),
+        (Some(true), Some(false), false),
+        (Some(false), Some(true), true),
+    ] {
+        std::fs::write(
+            home.path().join("config.toml"),
+            configured.map_or(String::new(), |value| {
+                format!("[features]\ndaemon_auto_start = {value}\n")
+            }),
+        )?;
+        let overrides = override_value
+            .map(|value| {
+                vec![(
+                    "features.daemon_auto_start".into(),
+                    toml::Value::Boolean(value),
+                )]
+            })
+            .unwrap_or_default();
+        let presentation = load(
+            &cli,
+            home.path(),
+            LoaderOverrides {
+                ignore_project_config: true,
+                ..LoaderOverrides::without_managed_config_for_tests()
+            },
+            overrides,
+            None,
+        )
+        .await?;
+        let features = crate::legacy_core::config::resolve_bootstrap_features(
+            &presentation.bootstrap_config.config_toml,
+            presentation
+                .bootstrap_config
+                .config_layer_stack
+                .requirements()
+                .feature_requirements
+                .as_ref(),
+        )?;
+        assert_eq!(features.enabled(crate::Feature::DaemonAutoStart), expected);
+    }
+    Ok(())
+}

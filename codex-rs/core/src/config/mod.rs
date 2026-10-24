@@ -3155,6 +3155,16 @@ pub fn resolve_bootstrap_http_client_factory(
     cfg: &ConfigToml,
     feature_requirements: Option<&Sourced<FeatureRequirementsToml>>,
 ) -> std::io::Result<HttpClientFactory> {
+    let features = resolve_bootstrap_features(cfg, feature_requirements)?;
+    resolve_bootstrap_http_client_factory_with_features(features)
+}
+
+/// Resolve mode switches before probing a daemon, using the same merged config
+/// and managed requirements as final configuration loading.
+pub fn resolve_bootstrap_features(
+    cfg: &ConfigToml,
+    feature_requirements: Option<&Sourced<FeatureRequirementsToml>>,
+) -> std::io::Result<ManagedFeatures> {
     let configured_features = Features::from_sources(
         FeatureConfigSource {
             features: cfg.features.as_ref(),
@@ -3163,8 +3173,12 @@ pub fn resolve_bootstrap_http_client_factory(
         FeatureConfigSource::default(),
         FeatureOverrides::default(),
     );
-    let features =
-        ManagedFeatures::from_configured(configured_features, feature_requirements.cloned())?;
+    ManagedFeatures::from_configured(configured_features, feature_requirements.cloned())
+}
+
+fn resolve_bootstrap_http_client_factory_with_features(
+    features: ManagedFeatures,
+) -> std::io::Result<HttpClientFactory> {
     let outbound_proxy_policy = if features.enabled(Feature::RespectSystemProxy) {
         OutboundProxyPolicy::RespectSystemProxy
     } else {

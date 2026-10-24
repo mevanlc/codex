@@ -19,6 +19,7 @@ pub enum BackendKind {
 
 #[derive(Debug, Clone)]
 pub(crate) struct BackendPaths {
+    pub(crate) codex_home: PathBuf,
     pub(crate) codex_bin: PathBuf,
     pub(crate) pid_file: PathBuf,
     pub(crate) update_pid_file: PathBuf,
@@ -32,6 +33,7 @@ pub(crate) fn pid_backend(paths: BackendPaths) -> PidBackend {
         paths.pid_file,
         paths.remote_control_enabled,
     );
+    backend.codex_home = Some(paths.codex_home);
     backend.feature_overrides = paths.feature_overrides;
     backend
 }

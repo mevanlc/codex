@@ -14,7 +14,7 @@ use codex_http_client::ClientRouteClass;
 use codex_http_client::RouteAwareClientPool;
 use codex_install_context::InstallContext;
 use codex_install_context::InstallMethod;
-use codex_install_context::is_newer_version;
+use codex_install_context::fork;
 use http::Method;
 use serde::Deserialize;
 #[cfg(target_os = "macos")]
@@ -27,15 +27,13 @@ use super::DoctorIssue;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use super::desktop::platform::InstalledApp;
 use super::doctor_install_context;
-use super::doctor_managed_by_npm;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use super::network;
 
-const MAX_VERSION_RESPONSE_BYTES: usize = 1024 * 1024;
+// A release-list page includes every platform asset and can exceed 1 MiB.
+const MAX_VERSION_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
-const VERSION_FILE_NAME: &str = "version.json";
-const GITHUB_LATEST_RELEASE_URL: &str = "https://api.github.com/repos/openai/codex/releases/latest";
-const HOMEBREW_CASK_API_URL: &str = "https://formulae.brew.sh/api/cask/codex.json";
+const VERSION_FILE_NAME: &str = fork::VERSION_CACHE;
 #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
 const DESKTOP_UPDATE_URL: &str = "https://persistent.oaistatic.com/codex-app-prod/appcast-x64.xml";
 #[cfg(all(target_os = "macos", not(target_arch = "x86_64")))]
@@ -67,19 +65,24 @@ pub(super) async fn updates_check(config: &Config) -> DoctorCheck {
     let mut status = CheckStatus::Ok;
     let summary = "update configuration is locally consistent".to_string();
 
-    if doctor_managed_by_npm(current_exe.as_deref()) {
-        details
-            .push("npm update target: not inspected (PATH helpers are not executed)".to_string());
-    }
     let client = RouteAwareClientPool::new_without_request_logging(
         config.http_client_factory(),
         ClientRouteClass::Other,
     );
 
-    match fetch_latest_version(&client, &install_context).await {
-        Ok(latest_version) => {
+    match fetch_latest_version(&client).await {
+        Ok((latest_version, published)) => {
             details.push(format!("latest version: {latest_version}"));
-            if is_newer_version(&latest_version, env!("CARGO_PKG_VERSION")) == Some(true) {
+            let installed = install_context
+                .package_layout
+                .as_ref()
+                .and_then(|layout| fork::installed_publication_epoch(layout.package_dir.as_path()));
+            if fork::release_is_newer(
+                &latest_version,
+                Some(published),
+                env!("CARGO_PKG_VERSION"),
+                installed,
+            ) {
                 details.push("latest version status: newer version is available".to_string());
             } else {
                 details.push("latest version status: current version is not older".to_string());
@@ -390,55 +393,43 @@ fn push_cached_version_details(details: &mut Vec<String>, version_file: &Path) {
 
 fn update_action_label(context: &InstallContext) -> &'static str {
     match &context.method {
-        InstallMethod::Npm => "npm install -g @openai/codex",
-        InstallMethod::Bun => "bun install -g @openai/codex",
-        InstallMethod::VitePlus => "vp install -g @openai/codex",
-        InstallMethod::Pnpm => "pnpm add -g @openai/codex",
-        InstallMethod::Brew => "brew upgrade --cask codex",
-        InstallMethod::Standalone { .. } => "standalone installer",
-        InstallMethod::Other => "manual or unknown",
+        InstallMethod::Other if context.package_layout.is_none() => "manual or unknown",
+        _ => "mevanlc/codex package installer",
     }
 }
 
-async fn fetch_latest_version(
-    client: &RouteAwareClientPool,
-    context: &InstallContext,
-) -> Result<String, String> {
-    match &context.method {
-        InstallMethod::Brew => fetch_homebrew_cask_version(client).await,
-        InstallMethod::Npm
-        | InstallMethod::Bun
-        | InstallMethod::VitePlus
-        | InstallMethod::Pnpm
-        | InstallMethod::Standalone { .. }
-        | InstallMethod::Other => fetch_latest_github_release_version(client).await,
-    }
-}
-
-async fn fetch_latest_github_release_version(
-    client: &RouteAwareClientPool,
-) -> Result<String, String> {
-    #[derive(Deserialize)]
-    struct ReleaseInfo {
-        tag_name: String,
-    }
-
-    let info = http_get_json::<ReleaseInfo>(client, GITHUB_LATEST_RELEASE_URL).await?;
-    info.tag_name
-        .strip_prefix("rust-v")
-        .map(str::to_string)
-        .ok_or_else(|| format!("failed to parse latest tag {}", info.tag_name))
-}
-
-async fn fetch_homebrew_cask_version(client: &RouteAwareClientPool) -> Result<String, String> {
-    #[derive(Deserialize)]
-    struct HomebrewCaskInfo {
-        version: String,
-    }
-
-    http_get_json::<HomebrewCaskInfo>(client, HOMEBREW_CASK_API_URL)
-        .await
-        .map(|info| info.version)
+async fn fetch_latest_version(client: &RouteAwareClientPool) -> Result<(String, i64), String> {
+    let asset = fork::release_asset_name().ok_or("unsupported fork platform")?;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let mut releases = Vec::new();
+        for page in 1..=1000 {
+            let batch = http_get_json::<Vec<fork::Release>>(
+                client,
+                &format!("{}?per_page=100&page={page}", fork::RELEASES_URL),
+            )
+            .await?;
+            let done = batch.len() < 100;
+            releases.extend(batch);
+            if done {
+                let release = fork::newest_release(&releases, &asset)
+                    .ok_or_else(|| format!("no fork release carries {asset}"))?;
+                let version = release
+                    .tag_name
+                    .strip_prefix("fork-v")
+                    .ok_or("invalid fork tag")?
+                    .to_string();
+                let published = chrono::DateTime::parse_from_rfc3339(
+                    release.published_at.as_deref().unwrap_or_default(),
+                )
+                .map_err(|e| e.to_string())?
+                .timestamp();
+                return Ok((version, published));
+            }
+        }
+        Err("fork release pagination exceeded limit".to_string())
+    })
+    .await
+    .map_err(|_| "fork release probe timed out".to_string())?
 }
 
 async fn http_get_json<T>(client: &RouteAwareClientPool, url: &str) -> Result<T, String>
@@ -670,14 +661,14 @@ mod tests {
                 method: InstallMethod::Npm,
                 package_layout: None,
             }),
-            "npm install -g @openai/codex"
+            "mevanlc/codex package installer"
         );
         assert_eq!(
             update_action_label(&InstallContext {
                 method: InstallMethod::Pnpm,
                 package_layout: None,
             }),
-            "pnpm add -g @openai/codex"
+            "mevanlc/codex package installer"
         );
         assert_eq!(
             update_action_label(&InstallContext {

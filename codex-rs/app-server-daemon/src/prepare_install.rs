@@ -92,13 +92,12 @@ async fn prepare_from_package(
     running_exe: &Path,
     confirm: impl FnOnce(&InstallRequest) -> Result<bool>,
 ) -> Result<bool> {
-    let home = daemon
+    let state = daemon
         .settings_file
         .parent()
-        .and_then(Path::parent)
-        .context("daemon settings path has no Codex home")?;
-    let previous_root = managed_install::package_root(home);
-    let root = home.join("packages/app-server-daemon");
+        .context("daemon state directory")?;
+    let previous_root = daemon.package_root.clone();
+    let root = daemon.package_root.clone();
     anyhow::ensure!(
         daemon.managed_codex_bin.starts_with(&previous_root),
         "daemon package location changed; retry the command"
@@ -112,7 +111,7 @@ async fn prepare_from_package(
         }
         if !matches!(root.join("current").symlink_metadata(), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
             || ["daemon.pid", "daemon.stderr.log", "daemon-updater.pid", "daemon-updater.stderr.log"]
-                .iter().any(|name| !matches!(home.join("app-server-daemon").join(name).symlink_metadata(), Err(error) if error.kind() == std::io::ErrorKind::NotFound))
+                .iter().any(|name| !matches!(state.join(name).symlink_metadata(), Err(error) if error.kind() == std::io::ErrorKind::NotFound))
         {
             daemon.ensure_managed_codex_bin()?;
             return Ok(true);
@@ -125,7 +124,7 @@ async fn prepare_from_package(
     }
     std::fs::create_dir_all(&root)?;
     anyhow::ensure!(
-        managed_install::package_root(home) == previous_root,
+        daemon.package_root == previous_root,
         "daemon package location changed; retry the command"
     );
     let backend = daemon.running_backend_instance(settings).await?;
@@ -133,7 +132,7 @@ async fn prepare_from_package(
         backend.is_some() || crate::client::probe(&daemon.socket_path).await.is_err(),
         "app server is running but is not managed by codex app-server daemon"
     );
-    let selected = managed_install::managed_codex_bin(home);
+    let selected = managed_install::managed_codex_bin(&root);
     let previous_release = previous_root.join("current").canonicalize().ok();
     if mode == InstallMode::Missing {
         if selected.is_file() {
@@ -146,11 +145,11 @@ async fn prepare_from_package(
         );
     }
     let source = source.context(
-        "this CLI has no complete local package; install a packaged Codex CLI or use the standalone installer",
+        "this CLI has no complete local package; install a complete package from mevanlc/codex",
     )?;
     anyhow::ensure!(
         !root.canonicalize()?.starts_with(source.canonicalize()?),
-        "CODEX_HOME must be outside the source CLI package"
+        "the daemon installation must be outside the source CLI package"
     );
     let manifest_bytes = std::fs::read(source.join("codex-package.json"))?;
     let manifest: CodexPackageManifest = serde_json::from_slice(&manifest_bytes)?;
@@ -167,7 +166,10 @@ async fn prepare_from_package(
         && metadata["layoutVersion"] == 1
         && source_entrypoint == format!("codex-{target}.exe");
     anyhow::ensure!(
-        metadata["target"] == target && (source_entrypoint == entrypoint || winget),
+        metadata["layoutVersion"] == 1
+            && metadata["variant"] == "codex"
+            && metadata["target"] == target
+            && (source_entrypoint == entrypoint || winget),
         "the CLI package does not match this platform or executable"
     );
     validate_package(source, source_entrypoint)?;
@@ -210,10 +212,10 @@ async fn prepare_from_package(
     let settings = current_settings.as_ref().unwrap_or(settings);
     let _install_lock = acquire_install_lock(&root).await?;
     anyhow::ensure!(
-        managed_install::package_root(home) == previous_root,
+        daemon.package_root == previous_root,
         "daemon package location changed; retry the command"
     );
-    if mode == InstallMode::Missing && managed_install::managed_codex_bin(home).is_file() {
+    if mode == InstallMode::Missing && managed_install::managed_codex_bin(&root).is_file() {
         return Ok(true);
     }
     anyhow::ensure!(
@@ -226,7 +228,6 @@ async fn prepare_from_package(
         "daemon running state changed while awaiting confirmation; retry the command"
     );
     let backend = current_backend;
-    let stable = stable_version(&version).is_some();
     let releases = root.join("releases");
     std::fs::create_dir_all(&releases)?;
     let stage = tempfile::Builder::new()
@@ -293,14 +294,10 @@ async fn prepare_from_package(
     let binary_version =
         managed_install::managed_codex_version(&stage.path().join(entrypoint)).await?;
     anyhow::ensure!(
-        !stable || version == binary_version,
+        source.join("CodexCLI.app").is_dir() || version == binary_version,
         "the CLI package version does not match its executable"
     );
-    let name = if stable && mode == InstallMode::Missing {
-        format!("{version}-{target}")
-    } else {
-        format!("local-{digest}-{target}")
-    };
+    let name = format!("{version}-{target}-{digest}");
     let release = releases.join(&name);
     if release.try_exists()? {
         anyhow::ensure!(
@@ -319,18 +316,20 @@ async fn prepare_from_package(
         std::fs::rename(stage.path(), &release)?;
     }
     let release = release.canonicalize()?;
-    let standalone = home.join("packages/standalone");
     let canonical_source = source.canonicalize()?;
+    let cli_root = canonical_source.parent().and_then(Path::parent);
     let follows_latest = mode == InstallMode::Missing
-        && stable
-        && (standalone.join("current").canonicalize().ok().as_deref()
-            != Some(canonical_source.as_path())
-            || std::fs::read_to_string(standalone.join("auto-update-version"))
-                .ok()
-                .as_deref()
-                == canonical_source.file_name().and_then(|name| name.to_str()));
+        && cli_root.is_some_and(|root| {
+            root.file_name().is_some_and(|name| name == "cli")
+                && root.join("current").canonicalize().ok().as_deref()
+                    == Some(canonical_source.as_path())
+                && std::fs::read_to_string(root.join("auto-update-version"))
+                    .ok()
+                    .as_deref()
+                    == canonical_source.file_name().and_then(|name| name.to_str())
+        });
     anyhow::ensure!(
-        managed_install::package_root(home) == previous_root
+        daemon.package_root == previous_root
             && (backend.is_some() || crate::client::probe(&daemon.socket_path).await.is_err()),
         "daemon package location or socket ownership changed while preparing its package; retry the command"
     );
@@ -346,7 +345,7 @@ async fn prepare_from_package(
                 .stop()
                 .await?;
             anyhow::ensure!(
-                managed_install::package_root(home) == previous_root
+                daemon.package_root == previous_root
                     && previous_root.join("current").canonicalize().ok() == previous_release,
                 "daemon selection changed while preparing its package; retry the command"
             );
@@ -397,11 +396,6 @@ async fn prepare_from_package(
         }
         #[cfg(windows)]
         windows::select_release(&root, &release)?;
-        if let Err(error) =
-            crate::release_pruning::record_selection(&root, previous_release.as_deref())
-        {
-            tracing::warn!(%error, "could not record daemon selection for pruning");
-        }
     }
     if backend.is_some() {
         let selected = Daemon {
@@ -416,9 +410,6 @@ async fn prepare_from_package(
             "daemon package selected but could not start; retry with `codex app-server daemon start`",
         )?;
         selected.wait_until_ready().await?;
-    }
-    if let Err(error) = crate::release_pruning::prune(daemon, &root, settings).await {
-        tracing::debug!(%error, "skipped daemon release pruning");
     }
     Ok(true)
 }
@@ -496,14 +487,6 @@ fn package_tree(
     Ok(hasher.finalize().to_hex().to_string())
 }
 
-fn stable_version(value: &str) -> Option<semver::Version> {
-    let version = semver::Version::parse(value).ok()?;
-    (version.pre.is_empty()
-        && version.build.is_empty()
-        && (version.major, version.minor, version.patch) != (0, 0, 0))
-        .then_some(version)
-}
-
 fn validate_package(root: &Path, entrypoint: &str) -> Result<()> {
     let code_mode_host = Path::new(entrypoint).with_file_name(if cfg!(windows) {
         "codex-code-mode-host.exe"
@@ -550,6 +533,7 @@ fn validate_package(root: &Path, entrypoint: &str) -> Result<()> {
 
 fn platform_target() -> Result<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("android", "aarch64") => Ok("aarch64-linux-android"),
         ("macos", "aarch64") => Ok("aarch64-apple-darwin"),
         ("macos", "x86_64") => Ok("x86_64-apple-darwin"),
         ("linux", "aarch64") if cfg!(target_env = "gnu") => Ok("aarch64-unknown-linux-gnu"),

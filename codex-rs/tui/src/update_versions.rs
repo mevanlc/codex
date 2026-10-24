@@ -1,17 +1,10 @@
 #[cfg(any(not(debug_assertions), test))]
-use codex_install_context::is_newer_version;
-#[cfg(any(not(debug_assertions), test))]
 use semver::Version;
-
-#[cfg(any(not(debug_assertions), test))]
-pub(crate) fn is_newer(latest: &str, current: &str) -> Option<bool> {
-    is_newer_version(latest, current)
-}
 
 #[cfg(any(not(debug_assertions), test))]
 pub(crate) fn extract_version_from_latest_tag(latest_tag_name: &str) -> anyhow::Result<String> {
     latest_tag_name
-        .strip_prefix("rust-v")
+        .strip_prefix("fork-v")
         .map(str::to_owned)
         .ok_or_else(|| anyhow::anyhow!("Failed to parse latest tag name '{latest_tag_name}'"))
 }
@@ -37,6 +30,21 @@ pub(crate) fn server_version_notice_kind(
     let server = semver::Version::parse(server).ok()?;
     let client_release = (client.major, client.minor, client.patch);
     let server_release = (server.major, server.minor, server.patch);
+    // The server only advertises a version, not its release publication time.
+    // Hash suffixes identify fork snapshots and cannot establish which is older.
+    let snapshot = |version: &semver::Version| {
+        version
+            .pre
+            .as_str()
+            .rsplit('-')
+            .next()
+            .is_some_and(|suffix| {
+                suffix.len() >= 7 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+    };
+    if client_release == server_release && (snapshot(&client) || snapshot(&server)) {
+        return (client != server).then_some(ServerVersionNoticeKind::Different);
+    }
     let client_is_local = client_release == (0, 0, 0) || !client.build.is_empty();
     if client_is_local || (!client.pre.is_empty() && client_release != server_release) {
         return (client != server).then_some(ServerVersionNoticeKind::Different);
@@ -58,7 +66,7 @@ mod tests {
     #[test]
     fn extracts_version_from_latest_tag() {
         assert_eq!(
-            extract_version_from_latest_tag("rust-v1.5.0").expect("failed to parse version"),
+            extract_version_from_latest_tag("fork-v1.5.0").expect("failed to parse version"),
             "1.5.0"
         );
     }
@@ -69,39 +77,25 @@ mod tests {
     }
 
     #[test]
-    fn prerelease_version_is_not_considered_newer() {
-        assert_eq!(is_newer("0.11.0-beta.1", "0.11.0"), Some(false));
-        assert_eq!(is_newer("1.0.0-rc.1", "1.0.0"), Some(false));
-    }
-
-    #[test]
-    fn plain_semver_comparisons_work() {
-        assert_eq!(is_newer("0.11.1", "0.11.0"), Some(true));
-        assert_eq!(is_newer("0.11.0", "0.11.1"), Some(false));
-        assert_eq!(is_newer("1.0.0", "0.9.9"), Some(true));
-        assert_eq!(is_newer("0.9.9", "1.0.0"), Some(false));
-    }
-
-    #[test]
     fn source_build_version_is_not_checked() {
         assert!(is_source_build_version("0.0.0"));
         assert!(!is_source_build_version("0.1.0"));
     }
 
     #[test]
-    fn whitespace_is_ignored() {
-        assert_eq!(parse_version(" 1.2.3 \n"), Some(Version::new(1, 2, 3)));
-        assert_eq!(is_newer(" 1.2.3 ", "1.2.2"), Some(true));
-    }
-
-    #[test]
-    fn prerelease_versions_with_git_hashes_are_supported() {
-        assert_eq!(is_newer("0.123.1", "0.123.0-a1b2c3d"), Some(true));
-        assert_eq!(is_newer("0.123.0-b1c2d3e", "0.123.0-a1b2c3d"), Some(true));
-        assert_eq!(is_newer("0.123.0", "0.123.0-a1b2c3d"), Some(false));
+    fn fork_snapshot_notices_compare_identity_instead_of_hash_order() {
+        for (client, server) in [
+            ("0.164.0-aaaaaaa", "0.164.0-fffffff"),
+            ("0.164.0-fffffff", "0.164.0-aaaaaaa"),
+        ] {
+            assert_eq!(
+                server_version_notice_kind(client, server),
+                Some(ServerVersionNoticeKind::Different)
+            );
+        }
         assert_eq!(
-            parse_version("v0.123.0-a1b2c3d").map(|v| v.to_string()),
-            Some("0.123.0-a1b2c3d".to_string())
+            server_version_notice_kind("0.164.0-aaaaaaa", "0.164.0-aaaaaaa"),
+            None
         );
     }
 

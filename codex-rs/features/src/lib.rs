@@ -1039,8 +1039,8 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::DaemonAutoStart,
         key: "daemon_auto_start",
         stage: Stage::Stable,
-        // Android releases ship standalone binaries, without a supported daemon package.
-        default_enabled: !cfg!(target_os = "android"),
+        // The shared daemon is opt-in on every fork platform.
+        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::AppServerWebSocketCompression,

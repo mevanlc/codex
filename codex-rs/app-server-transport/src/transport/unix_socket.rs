@@ -80,6 +80,7 @@ pub async fn bind_private_daemon_socket(
             // The advertised path is only an alias; preserve existing parents.
             match tokio::fs::DirBuilder::new()
                 .mode(0o700)
+                .recursive(true)
                 .create(parent)
                 .await
             {

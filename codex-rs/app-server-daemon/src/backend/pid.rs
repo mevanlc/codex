@@ -36,6 +36,7 @@ const STDERR_LOG_TAIL_BYTES: u64 = 4096;
 #[derive(Debug)]
 #[cfg_attr(not(any(unix, windows)), allow(dead_code))]
 pub(crate) struct PidBackend {
+    pub(super) codex_home: Option<PathBuf>,
     pub(super) feature_overrides: BTreeMap<String, bool>,
     codex_bin: PathBuf,
     pid_file: PathBuf,
@@ -111,6 +112,7 @@ impl PidBackend {
     pub(crate) fn new(codex_bin: PathBuf, pid_file: PathBuf, remote_control_enabled: bool) -> Self {
         let lock_file = pid_file.with_extension("pid.lock");
         Self {
+            codex_home: None,
             feature_overrides: BTreeMap::new(),
             codex_bin,
             pid_file,
@@ -128,6 +130,7 @@ impl PidBackend {
     ) -> Self {
         let lock_file = pid_file.with_extension("pid.lock");
         Self {
+            codex_home: None,
             feature_overrides: BTreeMap::new(),
             codex_bin,
             pid_file,
@@ -198,10 +201,9 @@ impl PidBackend {
                 match self.command_kind {
                     PidCommandKind::AppServer { .. } => {
                         let codex_home = self
-                            .pid_file
-                            .parent()
-                            .and_then(Path::parent)
-                            .context("daemon pid path has no Codex home")?;
+                            .codex_home
+                            .as_deref()
+                            .context("daemon has no configured Codex home")?;
                         let socket_path =
                             codex_app_server_transport::app_server_control_socket_path(codex_home)?;
                         if let Err(err) =

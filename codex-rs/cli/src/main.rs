@@ -81,8 +81,6 @@ mod remote_control_cmd;
 mod sandbox_setup;
 mod sandbox_uninstall;
 mod state_db_recovery;
-#[cfg(not(windows))]
-mod wsl_paths;
 
 use crate::exec_server_command::ExecServerCommand;
 use crate::mcp_cmd::McpCli;
@@ -812,51 +810,43 @@ fn run_update_action(
         println!("Relaunch Codex to reconnect.");
         return Ok(());
     }
-    println!();
-    let cmd_str = action.command_str();
-    println!("Updating Codex via `{cmd_str}`...");
-    let status = {
-        #[cfg(windows)]
-        {
-            let (cmd, args) = action.command_args();
-            let cmd = if action == UpdateAction::StandaloneWindows {
-                // These args contain PowerShell metacharacters, so do not let
-                // PATHEXT select a batch shim for this action.
-                "powershell.exe"
-            } else {
-                cmd
-            };
-            let path_env =
-                std::env::var_os("PATH").ok_or_else(|| anyhow::anyhow!("PATH is not set"))?;
-            let command_path = resolve_windows_update_command_from_path(cmd, &path_env)?;
-            // Do not let a project-local command or package-manager config
-            // influence the updater after the user accepts the update prompt.
-            let update_cwd = tempfile::tempdir()?;
-            // Resolve through PATH without consulting the project cwd. When
-            // this returns a .cmd/.bat shim, std::process::Command routes the
-            // absolute path through the system command processor.
-            std::process::Command::new(command_path)
-                .args(args)
-                .current_dir(update_cwd.path())
-                .status()?
-        }
-        #[cfg(not(windows))]
-        {
-            let (cmd, args) = action.command_args();
-            let command_path = crate::wsl_paths::normalize_for_wsl(cmd);
-            let normalized_args: Vec<String> = args
-                .iter()
-                .map(crate::wsl_paths::normalize_for_wsl)
-                .collect();
-            std::process::Command::new(&command_path)
-                .args(&normalized_args)
-                .status()?
-        }
-    };
-    if !status.success() {
-        anyhow::bail!("`{cmd_str}` failed with status {status}");
+    println!("Updating Codex from mevanlc/codex...");
+    // Download before starting Bash so a failed HTTP request cannot execute a
+    // partial installer. gh and the shell never consult the project directory.
+    let cwd = tempfile::tempdir()?;
+    let output = std::process::Command::new(if cfg!(windows) { "gh.exe" } else { "gh" })
+        .args([
+            "api",
+            "repos/mevanlc/codex/contents/codex-rs/scripts/install-from-gh.sh",
+            "-H",
+            "Accept: application/vnd.github.raw",
+        ])
+        .current_dir(cwd.path())
+        .output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "Could not download the fork installer: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut child = std::process::Command::new(codex_install_context::fork::installer_bash()?)
+        .args(["-s", "--"])
+        .current_dir(cwd.path())
+        .stdin(std::process::Stdio::piped())
+        .spawn()?;
+    {
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("installer stdin unavailable"))?
+            .write_all(&output.stdout)?;
     }
-    println!("\n🎉 Update ran successfully! Please restart Codex.");
+    let status = child.wait()?;
+    anyhow::ensure!(
+        status.success(),
+        "Fork installer failed with status {status}"
+    );
+    println!("Update installed. Restart Codex to use it.");
     Ok(())
 }
 
@@ -869,7 +859,7 @@ fn resolve_windows_update_command_from_path(
         std::env::join_paths(std::env::split_paths(path_env).filter(|path| path.is_absolute()))?;
     if path_env.is_empty() {
         anyhow::bail!(
-            "Could not find an absolute update command `{command}` on PATH. Please update manually: https://developers.openai.com/codex/cli/"
+            "Could not find an absolute update command `{command}` on PATH. Please update manually: https://github.com/mevanlc/codex#install"
         );
     }
     which::which_in_global(command, Some(&path_env))?
@@ -889,7 +879,7 @@ fn run_update_command() -> anyhow::Result<()> {
     {
         let Some(action) = codex_tui::get_update_action() else {
             anyhow::bail!(
-                "Could not detect the Codex installation method. Please update manually: https://developers.openai.com/codex/cli/"
+                "Could not detect the Codex installation method. Please update manually: https://github.com/mevanlc/codex#install"
             );
         };
         run_update_action(action, /*cli_executable*/ None)
@@ -2854,7 +2844,7 @@ mod tests {
         assert_eq!(
             err.to_string(),
             format!(
-                "Could not find an absolute update command `{command}` on PATH. Please update manually: https://developers.openai.com/codex/cli/"
+                "Could not find an absolute update command `{command}` on PATH. Please update manually: https://github.com/mevanlc/codex#install"
             )
         );
     }

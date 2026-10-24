@@ -133,10 +133,10 @@ impl PidBackend {
             command.arg("--managed-daemon");
         } else if managed_app_server {
             let codex_home = self
-                .pid_file
-                .parent()
-                .and_then(std::path::Path::parent)
-                .context("daemon pid path has no Codex home")?;
+                .codex_home
+                .as_deref()
+                .or_else(|| self.pid_file.parent().and_then(std::path::Path::parent))
+                .context("daemon has no configured Codex home")?;
             let recovery_file = codex_app_server_transport::daemon_recovery_file_path(codex_home);
             match fs::remove_file(&recovery_file).await {
                 Ok(()) => {}
@@ -145,6 +145,9 @@ impl PidBackend {
                     tracing::warn!(path = %recovery_file.display(), %err, "failed to clear daemon recovery state before legacy launch");
                 }
             }
+        }
+        if let Some(home) = &self.codex_home {
+            command.env("CODEX_HOME", home);
         }
         if let Some((key, value)) = self.command_env() {
             command.env(key, value);

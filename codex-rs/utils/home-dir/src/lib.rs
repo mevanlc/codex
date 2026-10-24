@@ -1,6 +1,33 @@
 use codex_utils_absolute_path::AbsolutePathBuf;
 use dirs::home_dir;
+use std::path::Path;
 use std::path::PathBuf;
+
+/// Fork packages have the same home-relative location on every OS. Neither
+/// CODEX_HOME nor XDG_DATA_HOME changes the installation directory.
+pub fn fork_install_root(user_home: &Path) -> PathBuf {
+    user_home.join(".local/share/mevanlc-codex")
+}
+
+pub fn find_fork_install_root() -> std::io::Result<PathBuf> {
+    // Match the Bash installer, including a custom Git for Windows HOME.
+    // dirs::home_dir() alone always uses the Windows profile directory.
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|home| home.is_absolute())
+        .or_else(home_dir)
+        .map(|home| fork_install_root(&home))
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Could not find home directory",
+            )
+        })
+}
+
+pub fn fork_state_root(codex_home: &Path) -> PathBuf {
+    codex_home.join("mevanlc")
+}
 
 /// Returns the path to the Codex configuration directory, which can be
 /// specified by the `CODEX_HOME` environment variable. If not set, defaults to
@@ -130,5 +157,48 @@ mod tests {
         expected.push(".codex");
         let expected = AbsolutePathBuf::from_absolute_path(expected).expect("absolute home");
         assert_eq!(resolved, expected);
+    }
+}
+
+#[cfg(test)]
+mod fork_paths_tests {
+    #[test]
+    fn package_root_uses_the_launching_shell_home() {
+        if let Some(home) = std::env::var_os("CODEX_TEST_FORK_HOME") {
+            assert_eq!(
+                super::find_fork_install_root().unwrap(),
+                super::fork_install_root(std::path::Path::new(&home))
+            );
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("native home & 100% ready!");
+        std::fs::create_dir(&home).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "fork_paths_tests::package_root_uses_the_launching_shell_home",
+            ])
+            .env("HOME", &home)
+            .env("CODEX_TEST_FORK_HOME", &home)
+            .env("CODEX_HOME", temp.path().join("configuration"))
+            .env("XDG_DATA_HOME", temp.path().join("data"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
+    fn package_and_state_roots_are_independent() {
+        let user = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        assert_eq!(
+            super::fork_install_root(user.path()),
+            user.path().join(".local/share/mevanlc-codex")
+        );
+        assert_eq!(
+            super::fork_state_root(config.path()),
+            config.path().join("mevanlc")
+        );
     }
 }

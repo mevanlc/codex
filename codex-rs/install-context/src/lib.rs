@@ -9,6 +9,7 @@ use serde::Deserialize;
 
 pub use version::is_newer_version;
 
+pub mod fork;
 mod version;
 
 const BIN_DIRNAME: &str = "bin";
@@ -315,6 +316,12 @@ fn standalone_install_method(
     codex_home: Option<&Path>,
     package_layout: Option<&CodexPackageLayout>,
 ) -> Option<InstallMethod> {
+    if let Some(layout) = package_layout
+        && let Ok(root) = codex_utils_home_dir::find_fork_install_root()
+        && let Some(method) = fork_install_method(layout, &root)
+    {
+        return Some(method);
+    }
     let canonical_codex_home = canonical_absolute_path(codex_home?)?;
     let release_dir = if let Some(package_layout) = package_layout {
         package_layout.package_dir.clone()
@@ -334,6 +341,17 @@ fn standalone_install_method(
         release_dir,
         resources_dir: resources_dir.is_dir().then_some(resources_dir),
         platform: standalone_platform(),
+    })
+}
+
+fn fork_install_method(layout: &CodexPackageLayout, root: &Path) -> Option<InstallMethod> {
+    let releases = canonical_absolute_path(&root.join("packages/cli/releases"))?;
+    (layout.package_dir.parent().as_deref() == Some(releases.as_path())).then(|| {
+        InstallMethod::Standalone {
+            release_dir: layout.package_dir.clone(),
+            resources_dir: layout.resources_dir.clone(),
+            platform: standalone_platform(),
+        }
     })
 }
 
@@ -880,5 +898,29 @@ mod tests {
                 package_layout: None,
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod fork_layout_tests {
+    use super::*;
+
+    #[test]
+    fn fork_layout_is_managed_independently_of_codex_home() {
+        let home = tempfile::tempdir().unwrap();
+        let root = codex_utils_home_dir::fork_install_root(home.path());
+        let release = root.join("packages/cli/releases/1.2.3-target-digest");
+        let bin = release.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir(release.join("codex-path")).unwrap();
+        std::fs::write(release.join("codex-package.json"), "{}").unwrap();
+        let exe = bin.join("codex");
+        std::fs::write(&exe, "codex").unwrap();
+        let layout = CodexPackageLayout::from_exe(&exe).unwrap();
+        assert!(matches!(
+            fork_install_method(&layout, &root),
+            Some(InstallMethod::Standalone { .. })
+        ));
+        assert!(fork_install_method(&layout, home.path()).is_none());
     }
 }

@@ -38,30 +38,92 @@ Everything else behaves like upstream Codex.
 
 ## Install
 
-Grab the archive for your platform from [Releases](https://github.com/mevanlc/codex/releases). Desktop archives use the Rust target triple in their names:
-
-- `codex-{x86_64,aarch64}-unknown-linux-musl.tar.zst`
-- `codex-{x86_64,aarch64}-apple-darwin.tar.zst`
-- `codex-{x86_64,aarch64}-pc-windows-msvc.zip`
-
-Each desktop archive contains a complete Codex package, including `codex`, `codex-code-mode-host`, ripgrep, and the platform-specific sandbox helpers where applicable.
-
-The Android/Termux archive, `codex-aarch64-linux-android.tar.zst`, contains
-`bin/codex` and `bin/codex-code-mode-host`. Extract it into `~/.local` to install
-both binaries into the same directory on `PATH`, since the code-mode runtime
-resolves its host beside `codex`:
+Install the newest complete package available for your platform from
+[mevanlc/codex releases](https://github.com/mevanlc/codex/releases):
 
 ```shell
-mkdir -p "$HOME/.local/bin"
-zstd -d -c codex-aarch64-linux-android.tar.zst | tar -xf - -C "$HOME/.local"
+bash codex-rs/scripts/install-from-gh.sh
+# or, without a checkout:
+codex_installer="$(mktemp)"
+curl -fsSL https://raw.githubusercontent.com/mevanlc/codex/main/codex-rs/scripts/install-from-gh.sh -o "$codex_installer"
+bash "$codex_installer"
+rm -f "$codex_installer"
 ```
 
-Android/Termux uses the embedded app server by default; the shared background
-daemon requires a complete package and does not support the Android target yet.
-If an installed release fails with `this CLI has no complete local package`, run
-`codex features disable daemon_auto_start` once to save the embedded-server
-preference, or use `codex --no-daemon` for a single launch. The same flag works
-with `resume` and `fork`.
+The installer needs authenticated GitHub CLI (`gh`), Python 3.9+, and `zstd` for
+Unix/Android archives. On Windows, run it in **Git for Windows Bash** with native
+Python and `gh` available. Add `~/.local/bin` to `PATH` (also on Windows).
+
+All platforms use the same installation root, independently of `CODEX_HOME` and
+`XDG_DATA_HOME`:
+
+```text
+~/.local/share/mevanlc-codex/
+  packages/
+    cli/
+      releases/<version-target-digest>/
+      current
+    app-server-daemon/
+      releases/<version-target-digest>/
+      current
+```
+
+Commands in `~/.local/bin` select the CLI package through `current`. Unix uses
+symlinks; Windows uses Bash and `.cmd` launchers plus an NTFS directory junction,
+without administrator symlink privileges. Replaced loose commands are saved in
+`~/.local/share/mevanlc-codex/backups/`. Old releases are retained for recovery;
+the installer never prunes them automatically or changes your configuration.
+
+Every archive contains `codex-package.json`, `bin/codex`,
+`bin/codex-code-mode-host`, `codex-path/rg`, and the applicable sandbox resources
+(with `.exe` suffixes on Windows). Android ripgrep is built for Android without
+Termux library dependencies; Android does not include Linux bwrap. Keep this
+whole directory together: extracting just the binaries loses required resources.
+
+- Android: `codex-aarch64-linux-android.tar.zst`
+- Linux: `codex-{x86_64,aarch64}-unknown-linux-musl.tar.zst`
+- macOS: `codex-{x86_64,aarch64}-apple-darwin.tar.zst`
+- Windows: `codex-{x86_64,aarch64}-pc-windows-msvc.zip`
+
+Each build also uploads one Actions artifact named `codex-<target>`, containing
+that archive. Use `--artifact` to install the newest non-expired artifact,
+`--list-available` to list platform releases, `--version <tag-or-version>` to pin
+an exact release (including downgrades), or `--force` to reinstall. The default
+chooses the newest published non-prerelease carrying your platform's package;
+other platforms may still be building. Incomplete and loose-binary archives are
+rejected before changing the installation.
+
+### Embedded server or managed daemon
+
+The embedded app server is the default on **every platform**, including Android.
+To opt into the shared background daemon, put this in `config.toml`:
+
+```toml
+[features]
+daemon_auto_start = true
+```
+
+`false` always uses the embedded server, even if a daemon is running. For a single
+invocation use `--enable daemon_auto_start`, `--disable daemon_auto_start`, or
+`--no-daemon` (which forces embedded mode). These choices also apply to `resume`
+and `fork`. Explicit remote connections and daemon/agents commands keep their
+own behavior. MCP, OSS, and execution-environment exclusions still apply.
+
+The first opted-in launch copies the complete CLI package to the daemon's own
+release directory. CLI and daemon selections are independent. Fork daemon state,
+logs, PIDs, locks, recovery files, and default sockets live under
+`$CODEX_HOME/mevanlc/` (normally `~/.codex/mevanlc/`), separate from OpenAI's
+installation and daemon. On Android the daemon can share loaded sessions across
+clients, but Android may stop background processes; embedded mode needs fewer
+persistent processes.
+
+`codex update` updates the CLI from **mevanlc/codex**. Daemon updates also use the
+fork installer and retain their own auto-update preference. Explicit version
+pins do not auto-update; `codex app-server daemon update` explicitly returns the
+daemon to the latest fork channel. `codex app-server daemon update --from-cli
+--yes` selects and pins this CLI's package instead. Only daemon updates restart
+the daemon. No fork update path installs OpenAI releases, npm packages, or Brew
+casks. A separate upstream-version notification is deferred.
 
 Or [build from source](#building).
 
@@ -174,7 +236,7 @@ The response status is `notPending` if the input was already consumed, was alrea
 
 - Shell detection prefers `$SHELL` over the `passwd` entry on Android, where Termux's shell is not in `/etc/passwd`.
 - OpenSSL is vendored for `aarch64-linux-android`.
-- Update checks parse full semver and rank the fork's `X.Y.Z-<sha>` snapshots after the matching `X.Y.Z` release. Ordinary prereleases, including `X.Y.Z-alpha.N-<sha>`, remain before the release.
+- Fork update checks use platform availability and publication time, including `X.Y.Z-<sha>` snapshots; commit hashes are identities, not version order.
 
 ## Building
 

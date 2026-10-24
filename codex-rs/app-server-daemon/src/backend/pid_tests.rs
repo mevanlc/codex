@@ -160,7 +160,7 @@ async fn start_retries_stale_empty_pid_file_under_its_own_lock() {
 async fn legacy_launch_clears_recovery_best_effort() {
     for snapshot_is_directory in [false, true] {
         let home = TempDir::new().expect("temp dir");
-        let state_dir = home.path().join("app-server-daemon");
+        let state_dir = home.path().join("mevanlc/app-server-daemon");
         std::fs::create_dir_all(&state_dir).expect("state dir");
         let recovery_file = codex_app_server_transport::daemon_recovery_file_path(home.path());
         if snapshot_is_directory {
@@ -168,12 +168,13 @@ async fn legacy_launch_clears_recovery_best_effort() {
         } else {
             std::fs::write(&recovery_file, "{}").expect("pending snapshot");
         }
-        let backend = PidBackend::new(
+        let mut backend = PidBackend::new(
             home.path().join("missing-codex"),
             state_dir.join("app-server.pid"),
             /*remote_control_enabled*/ false,
         );
 
+        backend.codex_home = Some(home.path().to_path_buf());
         let error = backend.start().await.expect_err("missing binary");
         assert!(
             error
@@ -571,6 +572,7 @@ async fn exited_unreaped_updater_is_reaped() {
 #[test]
 fn update_loop_uses_hidden_app_server_subcommand() {
     let backend = PidBackend {
+        codex_home: None,
         feature_overrides: Default::default(),
         codex_bin: "codex".into(),
         pid_file: "updater.pid".into(),

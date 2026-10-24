@@ -20,6 +20,8 @@ def fetch_rg(
     *,
     manifest_path: Path = RG_MANIFEST,
 ) -> Path:
+    if spec.target.endswith("-android"):
+        raise ValueError("Android packages require an NDK-built ripgrep via --rg-bin")
     rg_bin = fetch_dotslash_executable(
         spec,
         manifest_path=manifest_path,

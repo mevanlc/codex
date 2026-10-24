@@ -1,0 +1,190 @@
+//! Installation and update contracts for the maintained fork.
+use std::path::Path;
+use std::path::PathBuf;
+
+use serde::Deserialize;
+
+pub const INSTALLER_URL: &str =
+    "https://raw.githubusercontent.com/mevanlc/codex/main/codex-rs/scripts/install-from-gh.sh";
+pub const RELEASES_URL: &str = "https://api.github.com/repos/mevanlc/codex/releases";
+pub const VERSION_CACHE: &str = "mevanlc-version.json";
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Release {
+    pub tag_name: String,
+    pub published_at: Option<String>,
+    #[serde(default)]
+    pub draft: bool,
+    #[serde(default)]
+    pub prerelease: bool,
+    #[serde(default)]
+    pub assets: Vec<ReleaseAsset>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct ReleaseAsset {
+    pub name: String,
+}
+
+pub fn release_asset_name() -> Option<String> {
+    let target = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("android", "aarch64") => "aarch64-linux-android",
+        ("linux", "aarch64") => "aarch64-unknown-linux-musl",
+        ("linux", "x86_64") => "x86_64-unknown-linux-musl",
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        ("macos", "x86_64") => "x86_64-apple-darwin",
+        ("windows", "aarch64") => "aarch64-pc-windows-msvc",
+        ("windows", "x86_64") => "x86_64-pc-windows-msvc",
+        _ => return None,
+    };
+    Some(format!(
+        "codex-{target}{}",
+        if cfg!(windows) { ".zip" } else { ".tar.zst" }
+    ))
+}
+
+/// Partial platform releases, drafts and prereleases cannot become the default.
+/// Commit hashes identify snapshots; they never determine chronological order.
+pub fn newest_release<'a>(releases: &'a [Release], asset: &str) -> Option<&'a Release> {
+    releases
+        .iter()
+        .filter(|r| {
+            !r.draft
+                && !r.prerelease
+                && r.published_at.is_some()
+                && r.tag_name
+                    .strip_prefix("fork-v")
+                    .is_some_and(|version| semver::Version::parse(version).is_ok())
+                && r.assets.iter().any(|a| a.name == asset)
+        })
+        .max_by_key(|r| r.published_at.as_deref())
+}
+
+pub fn installed_publication_epoch(package_dir: &Path) -> Option<i64> {
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(package_dir.join("install-receipt.json")).ok()?)
+            .ok()?;
+    (receipt["repository"] == "mevanlc/codex")
+        .then(|| receipt["publishedEpoch"].as_i64())
+        .flatten()
+}
+
+pub fn release_is_newer(
+    latest: &str,
+    published: Option<i64>,
+    current: &str,
+    installed: Option<i64>,
+) -> bool {
+    if latest == current {
+        return false;
+    }
+    if let (Some(published), Some(installed)) = (published, installed) {
+        return published > installed;
+    }
+    let (Ok(latest), Ok(current)) = (
+        semver::Version::parse(latest),
+        semver::Version::parse(current),
+    ) else {
+        return false;
+    };
+    // With no installation receipt, only order different numeric release lines.
+    (latest.major, latest.minor, latest.patch) > (current.major, current.minor, current.patch)
+}
+
+/// Resolve Bash explicitly on Windows: PATH's bash.exe may be the WSL launcher.
+/// Git for Windows Bash is the installer prerequisite on that platform.
+pub fn installer_bash() -> std::io::Result<PathBuf> {
+    let paths: Vec<_> = std::env::var_os("PATH")
+        .map(|p| {
+            std::env::split_paths(&p)
+                .filter(|p| p.is_absolute())
+                .collect()
+        })
+        .unwrap_or_default();
+    #[cfg(windows)]
+    {
+        let mut roots = Vec::new();
+        for path in &paths {
+            if path.join("git.exe").is_file() {
+                roots.push(path.clone());
+                if let Some(parent) = path.parent() {
+                    roots.push(parent.to_path_buf());
+                    if let Some(parent) = parent.parent() {
+                        roots.push(parent.to_path_buf());
+                    }
+                }
+            }
+        }
+        for key in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+            if let Some(path) = std::env::var_os(key) {
+                roots.push(PathBuf::from(&path).join("Git"));
+                roots.push(PathBuf::from(path).join("Programs/Git"));
+            }
+        }
+        for root in roots {
+            let bash = root.join("bin/bash.exe");
+            if bash.is_file() && root.join("usr/bin/bash.exe").is_file() {
+                return Ok(bash);
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    for path in paths {
+        let bash = path.join("bash");
+        if bash.is_file() {
+            return Ok(bash);
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "Bash is required for the mevanlc/codex installer (Git for Windows Bash on Windows)",
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshots_use_publication_order() {
+        assert!(release_is_newer(
+            "1.2.3-aaaaaaa",
+            Some(20),
+            "1.2.3-fffffff",
+            Some(10)
+        ));
+        assert!(!release_is_newer(
+            "1.2.3-fffffff",
+            Some(10),
+            "1.2.3-aaaaaaa",
+            Some(20)
+        ));
+        assert!(!release_is_newer(
+            "1.2.3-fffffff",
+            None,
+            "1.2.3-aaaaaaa",
+            None
+        ));
+        assert!(!release_is_newer(
+            "1.2.3-aaaaaaa",
+            Some(20),
+            "1.2.3-aaaaaaa",
+            Some(10)
+        ));
+    }
+
+    #[test]
+    fn selection_requires_a_published_platform_asset() {
+        let releases: Vec<Release> = serde_json::from_value(serde_json::json!([
+            {"tag_name":"fork-v1.0.0-fffffff", "published_at":"2026-10-01T00:00:00Z", "assets":[{"name":"android"}]},
+            {"tag_name":"fork-v1.0.0-aaaaaaa", "published_at":"2026-10-02T00:00:00Z", "assets":[{"name":"android"}]},
+            {"tag_name":"fork-v1.0.1", "published_at":"2026-10-03T00:00:00Z", "assets":[{"name":"desktop"}]},
+            {"tag_name":"fork-v1.0.2", "published_at":"2026-10-04T00:00:00Z", "draft":true, "assets":[{"name":"android"}]},
+            {"tag_name":"fork-v1.0.3", "published_at":"2026-10-05T00:00:00Z", "prerelease":true, "assets":[{"name":"android"}]}
+        ])).unwrap();
+        assert_eq!(
+            newest_release(&releases, "android").unwrap().tag_name,
+            "fork-v1.0.0-aaaaaaa"
+        );
+    }
+}

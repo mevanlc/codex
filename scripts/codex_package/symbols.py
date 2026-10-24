@@ -18,7 +18,7 @@ def strip_binary(binary: Path, spec: TargetSpec, *, tool: str | None = None) -> 
     if spec.is_windows:
         return
 
-    if spec.is_linux:
+    if spec.is_linux or spec.target.endswith("-android"):
         # A host GNU strip may not understand a cross-compiled ELF architecture.
         # LLVM supports both packaged Linux architectures from any host.
         machine = spec.target.split("-", 1)[0]

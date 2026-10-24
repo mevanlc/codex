@@ -42,25 +42,11 @@ use crate::settings::UpdaterSettings;
 
 #[path = "manual_update.rs"]
 mod manual_update;
-#[path = "migration.rs"]
-mod migration;
 
 pub(crate) async fn request_manual_update(
     daemon: &Daemon,
-    http_client_factory: HttpClientFactory,
+    _http_client_factory: HttpClientFactory,
 ) -> Result<crate::UpdateOutput> {
-    if daemon
-        .pid_file
-        .file_name()
-        .is_some_and(|name| name == crate::LEGACY_PID_FILE_NAME)
-        && manual_update::supported(daemon)?
-    {
-        let http = RouteAwareClientPool::new_without_request_logging(
-            http_client_factory,
-            ClientRouteClass::Other,
-        );
-        return migration::run(&http, daemon).await;
-    }
     manual_update::request(daemon).await
 }
 
@@ -70,10 +56,7 @@ const RESTART_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 // envelope, and the worst-case six-byte JSON escape for every captured byte.
 const INSTALLER_STDERR_TAIL_BYTES: usize = 2 * 1024;
 const INSTALLER_STDERR_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
-#[cfg(unix)]
-const INSTALL_URL: &str = "https://chatgpt.com/codex/install.sh";
-#[cfg(windows)]
-const INSTALL_URL: &str = "https://chatgpt.com/codex/install.ps1";
+const INSTALL_URL: &str = codex_install_context::fork::INSTALLER_URL;
 
 pub(crate) async fn run(
     http_client_factory: HttpClientFactory,
@@ -348,10 +331,8 @@ async fn update_once(
         return Ok((UpdateLoopControl::Continue, None));
     }
     let (package_root, _, previous_release) = selected_release(daemon)?;
-    let codex_home = package_root
-        .parent()
-        .and_then(Path::parent)
-        .context("daemon package root has no Codex home")?;
+    let root_identity = package_root.canonicalize()?;
+    let codex_home = &daemon.codex_home;
     let (installer_mode, installer_guard) =
         if let UpdateTrigger::RestoreProduction(expected) = trigger {
             anyhow::ensure!(
@@ -387,6 +368,10 @@ async fn update_once(
             "installer does not support daemon-owned packages"
         );
     }
+    anyhow::ensure!(
+        daemon.package_root == package_root && package_root.canonicalize()? == root_identity,
+        "daemon package root changed during the update; retry the command"
+    );
     if trigger == UpdateTrigger::Scheduled
         && !UpdaterSettings::load(&daemon.settings_file)
             .await?
@@ -397,17 +382,20 @@ async fn update_once(
     if release_selection_unstable(daemon, trigger)? {
         return Ok((UpdateLoopControl::Continue, None));
     }
-    anyhow::ensure!(
-        crate::managed_install::package_root(codex_home) == package_root,
-        "daemon package root changed during the update; retry the command"
-    );
     let started = std::time::Instant::now();
     #[cfg(unix)]
     if matches!(
         crate::diagnostics::result(
             "installer_run",
             started,
-            run_installer_script(&script, installer_mode, &package_root, terminate.recv()).await
+            run_installer_script(
+                &script,
+                installer_mode,
+                &package_root,
+                codex_home,
+                terminate.recv()
+            )
+            .await
         )?,
         UpdateLoopControl::Stop
     ) {
@@ -415,7 +403,7 @@ async fn update_once(
     }
     #[cfg(windows)]
     tokio::select! {
-        result = run_installer_script(&script, installer_mode, &package_root) => { crate::diagnostics::result("installer_run", started, result)?; },
+        result = run_installer_script(&script, installer_mode, &package_root, codex_home) => { crate::diagnostics::result("installer_run", started, result)?; },
         _ = terminate.recv() => return Ok((UpdateLoopControl::Stop, None)),
     }
     anyhow::ensure!(
@@ -529,12 +517,7 @@ fn release_selection_unstable(daemon: &Daemon, trigger: UpdateTrigger<'_>) -> Re
 }
 
 fn selected_release(daemon: &Daemon) -> Result<(std::path::PathBuf, std::path::PathBuf, String)> {
-    let home = daemon
-        .settings_file
-        .parent()
-        .and_then(Path::parent)
-        .context("daemon settings path has no Codex home")?;
-    let root = crate::managed_install::package_root(home);
+    let root = daemon.package_root.clone();
     let release = std::fs::canonicalize(root.join("current"))?;
     let name = release
         .file_name()
@@ -567,43 +550,35 @@ pub(crate) fn reexec_managed_updater(managed_codex_bin: &Path, state_dir: &Path)
 enum InstallerMode<'a> {
     Update(&'a str),
     RestoreProduction(&'a str),
-    Migration,
 }
 
 async fn run_installer_script(
     script: &[u8],
     mode: InstallerMode<'_>,
     package_root: &Path,
+    codex_home: &Path,
     #[cfg(unix)] terminate: impl std::future::Future<Output = Option<()>>,
 ) -> Result<UpdateLoopControl> {
     #[cfg(unix)]
     let mut command = {
-        let mut command = Command::new("/bin/sh");
+        let mut command = Command::new(codex_install_context::fork::installer_bash()?);
         command.arg("-s");
         command.process_group(0);
         command
     };
     #[cfg(windows)]
     let mut command = {
-        let mut command = Command::new("powershell.exe");
+        let mut command = Command::new(codex_install_context::fork::installer_bash()?);
         command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
-        command.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); try { Invoke-Expression ([Console]::In.ReadToEnd()) } catch { Write-Error $_; exit 1 }"])
-            .kill_on_drop(true);
+        command.arg("-s").kill_on_drop(true);
         command
     };
     let (latest_guard, current_guard, previous_release, defer_selection) = match mode {
         InstallerMode::Update(release) => ("1", "0", release, "0"),
         InstallerMode::RestoreProduction(release) => ("0", "1", release, "0"),
-        InstallerMode::Migration => ("0", "0", "", "1"),
     };
     let mut child = command
-        .env(
-            "CODEX_HOME",
-            package_root
-                .parent()
-                .and_then(Path::parent)
-                .context("package root has no Codex home")?,
-        )
+        .env("CODEX_HOME", codex_home)
         .env("CODEX_INSTALL_DEFER_SELECTION", defer_selection)
         .env(
             "CODEX_INSTALL_DAEMON_ONLY",

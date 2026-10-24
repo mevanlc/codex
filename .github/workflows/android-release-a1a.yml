@@ -253,6 +253,14 @@ jobs:
           )
           PY
 
+      - name: Upload package
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: codex-${{ matrix.target }}
+          path: dist/${{ matrix.archive }}
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Publish ${{ matrix.label }} artifact
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
@@ -373,6 +381,28 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "codex.exe --version failed with exit code $LASTEXITCODE"
           }
+
+      - name: Test native package installation
+        shell: pwsh
+        run: |
+          if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) {
+            cargo nextest run --manifest-path codex-rs/Cargo.toml -p codex-utils-home-dir --lib
+          } else {
+            cargo test --manifest-path codex-rs/Cargo.toml -p codex-utils-home-dir --lib
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Package path tests failed" }
+          $env:CODEX_TEST_NATIVE_PACKAGE = (Resolve-Path "dist/${{ matrix.archive }}").Path
+          $env:CODEX_TEST_BASH = "$env:ProgramFiles/Git/bin/bash.exe"
+          python -m unittest discover -s codex-rs/scripts -p test_install_from_gh.py -k NativePackageInstallTest -v
+          if ($LASTEXITCODE -ne 0) { throw "Package installer tests failed" }
+
+      - name: Upload package
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: codex-${{ matrix.target }}
+          path: dist/${{ matrix.archive }}
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Publish ${{ matrix.label }} artifact
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
@@ -538,17 +568,32 @@ jobs:
           echo "Post-build V8-related files under $CARGO_TARGET_DIR:"
           find "$CARGO_TARGET_DIR" -maxdepth 10 \( -path "*/build/v8-*/out/*" -o -name "librusty_v8*.a" -o -name "*.sum" \) -print 2>/dev/null | sort
 
-      - name: Archive Android binaries
+      - name: Build Android ripgrep
         run: |
           set -euo pipefail
-          package_dir="dist/codex-aarch64-linux-android"
-          mkdir -p "$package_dir/bin"
-          install -m 755 "$CARGO_TARGET_DIR/aarch64-linux-android/release/codex" \
-            "$package_dir/bin/codex"
-          install -m 755 "$CARGO_TARGET_DIR/aarch64-linux-android/release/codex-code-mode-host" \
-            "$package_dir/bin/codex-code-mode-host"
-          tar -cf - -C "$package_dir" bin/codex bin/codex-code-mode-host | \
-            zstd -19 -o codex-aarch64-linux-android.tar.zst
+          # Match the desktop package pin, without Termux paths or libpcre2.
+          cargo install ripgrep --version '=15.2.0' --locked --no-default-features \
+            --target aarch64-linux-android --root "$RUNNER_TEMP/android-ripgrep"
+
+      - name: Assemble Android package
+        working-directory: .
+        run: |
+          set -euo pipefail
+          python3 scripts/build_codex_package.py \
+            --target aarch64-linux-android --variant codex --strip none \
+            --entrypoint-bin "$CARGO_TARGET_DIR/aarch64-linux-android/release/codex" \
+            --code-mode-host-bin "$CARGO_TARGET_DIR/aarch64-linux-android/release/codex-code-mode-host" \
+            --rg-bin "$RUNNER_TEMP/android-ripgrep/bin/rg" \
+            --package-dir dist/codex-aarch64-linux-android \
+            --archive-output dist/codex-aarch64-linux-android.tar.zst --force
+
+      - name: Upload Android package
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: codex-aarch64-linux-android
+          path: dist/codex-aarch64-linux-android.tar.zst
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Publish Android/Termux archive
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
@@ -560,7 +605,7 @@ jobs:
           make_latest: true
           fail_on_unmatched_files: true
           overwrite_files: true
-          files: codex-rs/codex-aarch64-linux-android.tar.zst
+          files: dist/codex-aarch64-linux-android.tar.zst
           body: |
             Codex CLI fork release with Android/Termux support.
 

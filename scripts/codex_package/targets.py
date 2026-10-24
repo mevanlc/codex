@@ -66,6 +66,13 @@ PACKAGE_VARIANTS: dict[str, PackageVariant] = {
 
 
 TARGET_SPECS: dict[str, TargetSpec] = {
+    "aarch64-linux-android": TargetSpec(
+        target="aarch64-linux-android",
+        is_windows=False,
+        # Android uses its own sandbox; Linux bwrap is not applicable.
+        is_linux=False,
+        dotslash_platform="android-aarch64",
+    ),
     "x86_64-unknown-linux-gnu": TargetSpec(
         target="x86_64-unknown-linux-gnu",
         is_windows=False,

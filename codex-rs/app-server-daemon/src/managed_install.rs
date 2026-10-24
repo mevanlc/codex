@@ -14,104 +14,30 @@ use tokio::fs;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-/// New daemons own their packages, regardless of how the calling CLI was installed.
-/// Preserve legacy launch state, including logs left after a daemon is stopped;
-/// settings, installer selections, and lock files alone do not prove a prior launch.
-pub(crate) fn package_root(codex_home: &Path) -> PathBuf {
-    let dedicated = codex_home.join("packages/app-server-daemon");
-    if !matches!(dedicated.join("current").symlink_metadata(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound)
-    {
-        return dedicated;
-    }
-    let state = codex_home.join("app-server-daemon");
-    for (package, artifacts) in [
-        (
-            "app-server-daemon",
-            [
-                crate::DAEMON_PID_FILE_NAME,
-                "daemon.stderr.log",
-                crate::DAEMON_UPDATE_PID_FILE_NAME,
-                "daemon-updater.stderr.log",
-            ],
-        ),
-        (
-            "standalone",
-            [
-                crate::LEGACY_PID_FILE_NAME,
-                "app-server.stderr.log",
-                crate::LEGACY_UPDATE_PID_FILE_NAME,
-                "app-server-updater.stderr.log",
-            ],
-        ),
-    ] {
-        if artifacts.iter().any(|name| {
-            !matches!(state.join(name).symlink_metadata(),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound)
-        }) {
-            return codex_home.join("packages").join(package);
-        }
-    }
-    dedicated
+/// Fork packages are independent of CODEX_HOME and of upstream installations.
+#[cfg(test)]
+pub(crate) fn package_root(user_home: &Path) -> PathBuf {
+    codex_utils_home_dir::fork_install_root(user_home).join("packages/app-server-daemon")
 }
 
-/// Resolve both packaged and legacy binaries without requiring a valid install.
-pub(crate) fn managed_codex_bin(codex_home: &Path) -> PathBuf {
-    let root = package_root(codex_home);
-    let current = root.join("current");
-    let packaged = current.join("bin").join(managed_codex_file_name());
-    let legacy = current.join(managed_codex_file_name());
-    if packaged.is_file()
-        || !legacy.is_file() && (cfg!(windows) || root.ends_with("app-server-daemon"))
-    {
-        packaged
-    } else {
-        legacy
-    }
+pub(crate) fn managed_codex_bin(root: &Path) -> PathBuf {
+    root.join("current/bin").join(managed_codex_file_name())
 }
 
-/// Only latest-channel stable releases may run the public latest-version updater.
-pub(crate) fn is_stable_standalone_release(codex_home: &Path, codex_bin: &Path) -> bool {
-    let standalone = package_root(codex_home);
-    let Ok(releases) = std::fs::canonicalize(standalone.join("releases")) else {
+/// Eligibility follows the installer's latest-channel selection, including fork
+/// snapshots. Explicit pins and packages copied with --from-cli stay pinned.
+pub(crate) fn is_latest_release(root: &Path, codex_bin: &Path) -> bool {
+    let Ok(releases) = std::fs::canonicalize(root.join("releases")) else {
         return false;
     };
-    let Ok(release) = std::fs::canonicalize(standalone.join("current")) else {
+    let Ok(release) = std::fs::canonicalize(root.join("current")) else {
         return false;
     };
-    if release.parent() != Some(releases.as_path()) {
-        return false;
-    }
-    let Some(release_name) = release.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    // GNU packages can seed the new directory; retain legacy updater eligibility.
-    if standalone.ends_with("standalone") && release_name.ends_with("-gnu") {
-        return false;
-    }
-    let targets = [
-        "aarch64-apple-darwin",
-        "x86_64-apple-darwin",
-        "aarch64-unknown-linux-gnu",
-        "x86_64-unknown-linux-gnu",
-        "aarch64-unknown-linux-musl",
-        "x86_64-unknown-linux-musl",
-        "aarch64-pc-windows-msvc",
-        "x86_64-pc-windows-msvc",
-    ];
-    let Some(version) = targets
-        .iter()
-        .find_map(|target| release_name.strip_suffix(&format!("-{target}")))
-    else {
-        return false;
-    };
-    let components: Vec<_> = version.split('.').collect();
-    components.len() == 3
-        && components.iter().all(|component| {
-            !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit())
+    release.parent() == Some(releases.as_path())
+        && release.join("codex-package.json").is_file()
+        && std::fs::read_to_string(root.join("auto-update-version")).is_ok_and(|selected| {
+            Some(selected.as_str()) == release.file_name().and_then(|name| name.to_str())
         })
-        && std::fs::read_to_string(standalone.join("auto-update-version"))
-            .is_ok_and(|selected| selected == release_name)
         && std::fs::canonicalize(codex_bin).is_ok_and(|bin| bin.starts_with(&release))
 }
 

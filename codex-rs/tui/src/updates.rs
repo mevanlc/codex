@@ -1,12 +1,9 @@
 #![cfg(not(debug_assertions))]
 
 use crate::legacy_core::config::Config;
-use crate::npm_registry;
-use crate::npm_registry::NpmPackageInfo;
 use crate::update_action;
 use crate::update_action::UpdateAction;
 use crate::update_versions::extract_version_from_latest_tag;
-use crate::update_versions::is_newer;
 use crate::update_versions::is_source_build_version;
 use crate::updates_cache::VersionInfo;
 use crate::updates_cache::read_version_info;
@@ -17,7 +14,6 @@ use codex_http_client::ClientRouteClass;
 use codex_http_client::HttpClientFactory;
 use codex_http_client::RouteAwareClientPool;
 use codex_login::default_client::default_headers;
-use serde::Deserialize;
 use std::path::Path;
 
 use crate::version::CODEX_CLI_VERSION;
@@ -49,26 +45,25 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
     }
 
     info.and_then(|info| {
-        if is_newer(&info.latest_version, CODEX_CLI_VERSION).unwrap_or(false) {
+        let installed = codex_install_context::InstallContext::current()
+            .package_layout
+            .as_ref()
+            .and_then(|layout| {
+                codex_install_context::fork::installed_publication_epoch(
+                    layout.package_dir.as_path(),
+                )
+            });
+        if codex_install_context::fork::release_is_newer(
+            &info.latest_version,
+            info.latest_published_epoch,
+            CODEX_CLI_VERSION,
+            installed,
+        ) {
             Some(info.latest_version)
         } else {
             None
         }
     })
-}
-
-// We use the latest version from the cask if installation is via homebrew - homebrew does not immediately pick up the latest release and can lag behind.
-const HOMEBREW_CASK_API_URL: &str = "https://formulae.brew.sh/api/cask/codex.json";
-const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/openai/codex/releases/latest";
-
-#[derive(Deserialize, Debug, Clone)]
-struct ReleaseInfo {
-    tag_name: String,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-struct HomebrewCaskInfo {
-    version: String,
 }
 
 async fn check_for_update(
@@ -81,44 +76,17 @@ async fn check_for_update(
         ClientRouteClass::Other,
     )
     .with_legacy_custom_ca_fallback();
-    let latest_version = match action {
-        Some(UpdateAction::Daemon(_)) => return Ok(()),
-        Some(UpdateAction::BrewUpgrade) => {
-            let HomebrewCaskInfo { version } = client_pool
-                .get(HOMEBREW_CASK_API_URL)
-                .headers(default_headers())
-                .send()
-                .await?
-                .error_for_status()?
-                .json::<HomebrewCaskInfo>()
-                .await?;
-            version
-        }
-        Some(UpdateAction::NpmGlobalLatest)
-        | Some(UpdateAction::BunGlobalLatest)
-        | Some(UpdateAction::VitePlusGlobalLatest)
-        | Some(UpdateAction::PnpmGlobalLatest) => {
-            let latest_version = fetch_latest_github_release_version(&client_pool).await?;
-            let package_info = client_pool
-                .get(npm_registry::PACKAGE_URL)
-                .headers(default_headers())
-                .send()
-                .await?
-                .error_for_status()?
-                .json::<NpmPackageInfo>()
-                .await?;
-            npm_registry::ensure_version_ready(&package_info, &latest_version)?;
-            latest_version
-        }
-        Some(UpdateAction::StandaloneUnix) | Some(UpdateAction::StandaloneWindows) | None => {
-            fetch_latest_github_release_version(&client_pool).await?
-        }
-    };
+    if matches!(action, Some(UpdateAction::Daemon(_))) {
+        return Ok(());
+    }
+    let (latest_version, latest_published_epoch) =
+        fetch_latest_github_release_version(&client_pool).await?;
 
     // Preserve any previously dismissed version if present.
     let prev_info = read_version_info(version_file).ok();
     let info = VersionInfo {
         latest_version,
+        latest_published_epoch: Some(latest_published_epoch),
         last_checked_at: Utc::now(),
         dismissed_version: prev_info.and_then(|p| p.dismissed_version),
     };
@@ -133,18 +101,36 @@ async fn check_for_update(
 
 async fn fetch_latest_github_release_version(
     client_pool: &RouteAwareClientPool,
-) -> anyhow::Result<String> {
-    let ReleaseInfo {
-        tag_name: latest_tag_name,
-    } = client_pool
-        .get(LATEST_RELEASE_URL)
-        .headers(default_headers())
-        .send()
-        .await?
-        .error_for_status()?
-        .json::<ReleaseInfo>()
-        .await?;
-    extract_version_from_latest_tag(&latest_tag_name)
+) -> anyhow::Result<(String, i64)> {
+    use codex_install_context::fork;
+    let asset =
+        fork::release_asset_name().ok_or_else(|| anyhow::anyhow!("unsupported fork platform"))?;
+    let mut releases = Vec::new();
+    for page in 1..=1000 {
+        let batch = client_pool
+            .get(format!("{}?per_page=100&page={page}", fork::RELEASES_URL))
+            .headers(default_headers())
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Vec<fork::Release>>()
+            .await?;
+        let done = batch.len() < 100;
+        releases.extend(batch);
+        if done {
+            let release = fork::newest_release(&releases, &asset)
+                .ok_or_else(|| anyhow::anyhow!("no fork release carries {asset}"))?;
+            let published = chrono::DateTime::parse_from_rfc3339(
+                release.published_at.as_deref().unwrap_or_default(),
+            )?
+            .timestamp();
+            return Ok((
+                extract_version_from_latest_tag(&release.tag_name)?,
+                published,
+            ));
+        }
+    }
+    anyhow::bail!("fork release pagination exceeded limit")
 }
 
 /// Returns the latest version to show in a popup, if it should be shown.

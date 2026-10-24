@@ -10,7 +10,7 @@ machines that should expose app-server with `remote_control` enabled.
 
 ## Platform support
 
-The daemon supports Linux, macOS, and Windows using platform-specific process
+The fork daemon supports Android/Termux, Linux, macOS, and Windows using platform-specific process
 and file-locking primitives. Windows startup requires a non-elevated terminal
 whose host permits detached child processes.
 
@@ -46,7 +46,7 @@ responses report the resolved backend, socket path, local CLI version, and
 running app-server version when applicable.
 
 Eligible managed daemons check for updates after five minutes, then hourly by
-default. Edit `CODEX_HOME/app-server-daemon/settings.json` to change this:
+default. Edit `$CODEX_HOME/mevanlc/app-server-daemon/settings.json` to change this:
 
 ```json
 {
@@ -60,14 +60,14 @@ Positive minute intervals have no configured cap. `daemon restart` applies the
 enabled state; the next updater wait reads a new interval. The preference does
 not affect an explicit `codex update` command or `daemon update`.
 
-`daemon update` selects the latest stable release, even with automatic updates
-disabled. It also returns pinned or local managed packages to production update
-eligibility, preserving the automatic-update preference. Legacy installations
-migrate to the dedicated root once the published installer and release support
-migration. JSON reports `updated`, `noUpdate`, or `unsupported`, with installed
-and running versions. A running daemon restarts, so active or queued work may be
-interrupted; a stopped daemon stays stopped. Installer errors return nonzero.
-The updater uses saved network settings; CLI `-c` overrides do not reach it.
+`daemon update` selects the newest published fork release carrying this platform's
+package, including fork snapshots, even with automatic updates disabled. It
+returns pinned or local managed packages to latest-channel eligibility while
+preserving the automatic-update preference. JSON reports `updated`, `noUpdate`,
+or `unsupported`, with installed and running versions. A running daemon restarts,
+so active or queued work may be interrupted; a stopped daemon stays stopped.
+Installer errors return nonzero. The updater uses saved network settings; CLI
+`-c` overrides do not reach it. Every update uses **mevanlc/codex**.
 
 For all managed app-server shutdowns, including explicit stop and restart and
 updater-triggered restarts, `shutdownGraceSeconds` defaults to 60 and accepts
@@ -77,44 +77,48 @@ running.
 
 ## Bootstrap flow
 
-For a new Linux or macOS machine:
+Install the fork's complete CLI package using
+[`install-from-gh.sh`](../scripts/install-from-gh.sh), then run:
 
 ```sh
-curl -fsSL https://chatgpt.com/codex/install.sh | sh
-$HOME/.codex/packages/standalone/current/codex app-server daemon bootstrap --remote-control
+codex app-server daemon bootstrap --remote-control
 ```
 
-On Windows, use a non-elevated PowerShell terminal whose host allows breakaway:
+On Windows, install from Git for Windows Bash, then run the lifecycle command
+in a non-elevated terminal whose host permits detached children. The updater
+also uses Git for Windows Bash; it never invokes a WSL Bash launcher.
 
-```powershell
-irm https://chatgpt.com/codex/install.ps1 | iex
-$codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
-& "$codexHome\packages\standalone\current\bin\codex.exe" app-server daemon bootstrap --remote-control
-```
+If no daemon package is selected, `bootstrap` copies the invoking complete CLI
+package into `~/.local/share/mevanlc-codex/packages/app-server-daemon` without
+asking for confirmation. Existing fork selections are reused; broken selections
+require repair. A bare executable cannot supply a new installation. Upstream
+packages and daemon state are never adopted or migrated.
 
-`bootstrap` can use any complete CLI package. If no daemon package is installed,
-it copies the invoking package into `CODEX_HOME/packages/app-server-daemon` and
-prints an installation message without asking for confirmation. Existing daemon
-packages are reused, including legacy installations; a broken selection is not
-silently replaced. A bare executable cannot supply a new installation.
+Settings, logs, PIDs, locks and recovery files use
+`$CODEX_HOME/mevanlc/app-server-daemon/`. Default control sockets and startup
+locks use `$CODEX_HOME/mevanlc/app-server-control/`. The detached updater runs
+only when automatic updates are enabled and the selected package follows the
+fork's latest channel. Explicit pins remain pinned.
 
-It records the daemon settings under `CODEX_HOME/app-server-daemon/`, starts app-server as a
-pidfile-backed detached process. It launches a detached updater loop when
-automatic updates are enabled, the installer selected the stable `latest`
-channel, and the managed binary supports the updater command.
+On Unix the advertised socket is an alias into a fixed private socket directory.
+Android uses `/data/data/com.termux/files/mc-daemon/` because Termux cannot write
+`/tmp`; the physical socket names remain short enough for Unix socket addresses.
+
+Ordinary interactive launches use the embedded server by default. Set
+`[features].daemon_auto_start = true` or use `--enable daemon_auto_start` to opt
+in; `false`, `--disable daemon_auto_start`, and `--no-daemon` force embedded mode.
+Explicit daemon commands and `codex agents` request the shared server directly.
+Android can stop background processes, so embedded mode is often preferable there.
 
 ## Installation and update cases
 
-New daemons use `CODEX_HOME/packages/app-server-daemon/current/bin/codex`
-(`codex.exe` on Windows). The package contains the executable and its helpers.
-Daemon-only installer updates leave the user's CLI command and shell setup alone.
-
-Previously launched legacy daemons retain `CODEX_HOME/packages/standalone/current`,
-including its flat binary layout when present. Starts and scheduled updates keep
-using that location. An explicit production update prepares and validates a
-compatible dedicated package before stopping the legacy updater and daemon,
-selecting the new package, and restarting only a previously running daemon.
-The old CLI package files and selection remain unchanged.
+The selected executable is
+`~/.local/share/mevanlc-codex/packages/app-server-daemon/current/bin/codex`
+(`codex.exe` on Windows). The package includes its helpers. All OSs use this same
+home-relative layout; `CODEX_HOME` and `XDG_DATA_HOME` do not redirect packages.
+CLI packages use a separate `packages/cli/current` selection. Daemon-only
+installer updates leave the CLI command and shell setup alone. Old releases
+remain available for recovery; neither installer nor daemon prunes them.
 
 | Situation                                                                                       | What starts                                                            | Does this daemon fetch new binaries?                                      | Does a running app-server eventually move to a newer binary on its own?                                                                       |
 | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -124,21 +128,18 @@ The old CLI package files and selection remain unchanged.
 
 ### Managed packages
 
-For dedicated and retained legacy daemon installations:
+For fork daemon installations:
 
 - lifecycle commands use the selected daemon package, regardless of the invoking
   CLI version; they do not implicitly replace an existing package
 - `bootstrap` is supported
 - managed `start`, `restart`, and `bootstrap` ensure a single detached pid-backed
-  updater loop only when automatic updates are enabled for a stable latest-channel
+  updater loop only when automatic updates are enabled for a latest-channel
   release whose managed binary supports the updater command
 - the installer records the latest-channel selection alongside `current`;
   selecting an explicit release clears it, even if that version is currently
   latest. The updater checks the selection again while holding the install lock
   so an in-flight update cannot override a new pin
-- installs made before the installer recorded channel selections need one new
-  `latest` installation to opt into automatic updates; until then the daemon
-  continues to serve app-server without updating the selected release
 - after a successful refresh, if app-server is running and the managed binary
   contents changed, the updater restarts app-server with that binary first and
   only then replaces its own process image
