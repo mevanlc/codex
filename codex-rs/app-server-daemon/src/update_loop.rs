@@ -18,7 +18,6 @@ use futures::FutureExt;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use tokio::io::AsyncReadExt;
-use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 #[cfg(unix)]
 use tokio::signal::unix::Signal;
@@ -33,6 +32,9 @@ use tokio::time::sleep_until;
 use crate::Daemon;
 use crate::RestartIfRunningOutcome;
 use crate::RestartMode;
+use crate::fork_installer::InstallerHttp;
+#[cfg(test)]
+use crate::fork_installer::InstallerResponse;
 use crate::managed_install::ExecutableIdentity;
 use crate::managed_install::executable_identity;
 use crate::managed_install::resolved_managed_codex_bin;
@@ -56,7 +58,6 @@ const RESTART_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 // envelope, and the worst-case six-byte JSON escape for every captured byte.
 const INSTALLER_STDERR_TAIL_BYTES: usize = 2 * 1024;
 const INSTALLER_STDERR_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
-const INSTALL_URL: &str = codex_install_context::fork::INSTALLER_URL;
 
 pub(crate) async fn run(
     http_client_factory: HttpClientFactory,
@@ -330,81 +331,67 @@ async fn update_once(
         // latest-channel marker. Retry after the interval instead of exiting.
         return Ok((UpdateLoopControl::Continue, None));
     }
-    let (package_root, _, previous_release) = selected_release(daemon)?;
+    let (package_root, previous_release_dir, previous_release) = selected_release(daemon)?;
     let root_identity = package_root.canonicalize()?;
-    let codex_home = &daemon.codex_home;
-    let (installer_mode, installer_guard) =
-        if let UpdateTrigger::RestoreProduction(expected) = trigger {
-            anyhow::ensure!(
-                previous_release == expected,
-                "daemon selection changed; retry the update"
-            );
-            (
-                InstallerMode::RestoreProduction(&previous_release),
-                "CODEX_INSTALL_IF_CURRENT",
-            )
-        } else {
-            (
-                InstallerMode::Update(&previous_release),
-                "CODEX_INSTALL_IF_LATEST",
-            )
-        };
+    let installer_mode = if let UpdateTrigger::RestoreProduction(expected) = trigger {
+        anyhow::ensure!(
+            previous_release == expected,
+            "daemon selection changed; retry the update"
+        );
+        InstallerMode::RestoreProduction(&previous_release)
+    } else {
+        InstallerMode::Update(&previous_release)
+    };
     let started = std::time::Instant::now();
-    let script = tokio::select! {
-        result = fetch_installer_script(http) => crate::diagnostics::result("installer_fetch", started, result)?,
+    let releases = tokio::select! {
+        result = crate::fork_installer::fetch_releases(http) => crate::diagnostics::result("installer_fetch", started, result)?,
         _ = terminate.recv() => return Ok((UpdateLoopControl::Stop, None)),
     };
-    anyhow::ensure!(
-        script
-            .windows(installer_guard.len())
-            .any(|window| window == installer_guard.as_bytes()),
-        "standalone installer does not support {installer_guard} guarded updates"
-    );
-    if package_root.ends_with("app-server-daemon") {
+    // A scheduled check downloads and runs the installer only when a newer
+    // release exists; restart handling below still applies either way.
+    let install = trigger != UpdateTrigger::Scheduled
+        || !crate::fork_installer::newest_release_installed(&releases, &previous_release_dir);
+    if install {
+        let installer = tokio::select! {
+            result = crate::fork_installer::fetch_installer(http, &releases) => crate::diagnostics::result("installer_fetch", started, result)?,
+            _ = terminate.recv() => return Ok((UpdateLoopControl::Stop, None)),
+        };
         anyhow::ensure!(
-            script
-                .windows(b"CODEX_INSTALL_DAEMON_ONLY".len())
-                .any(|window| window == b"CODEX_INSTALL_DAEMON_ONLY"),
-            "installer does not support daemon-owned packages"
+            daemon.package_root == package_root && package_root.canonicalize()? == root_identity,
+            "daemon package root changed during the update; retry the command"
         );
-    }
-    anyhow::ensure!(
-        daemon.package_root == package_root && package_root.canonicalize()? == root_identity,
-        "daemon package root changed during the update; retry the command"
-    );
-    if trigger == UpdateTrigger::Scheduled
-        && !UpdaterSettings::load(&daemon.settings_file)
-            .await?
-            .auto_update_enabled
-    {
-        return Ok((UpdateLoopControl::Stop, None));
-    }
-    if release_selection_unstable(daemon, trigger)? {
-        return Ok((UpdateLoopControl::Continue, None));
-    }
-    let started = std::time::Instant::now();
-    #[cfg(unix)]
-    if matches!(
-        crate::diagnostics::result(
-            "installer_run",
-            started,
-            run_installer_script(
-                &script,
-                installer_mode,
-                &package_root,
-                codex_home,
-                terminate.recv()
-            )
-            .await
-        )?,
-        UpdateLoopControl::Stop
-    ) {
-        return Ok((UpdateLoopControl::Stop, None));
-    }
-    #[cfg(windows)]
-    tokio::select! {
-        result = run_installer_script(&script, installer_mode, &package_root, codex_home) => { crate::diagnostics::result("installer_run", started, result)?; },
-        _ = terminate.recv() => return Ok((UpdateLoopControl::Stop, None)),
+        if trigger == UpdateTrigger::Scheduled
+            && !UpdaterSettings::load(&daemon.settings_file)
+                .await?
+                .auto_update_enabled
+        {
+            return Ok((UpdateLoopControl::Stop, None));
+        }
+        if release_selection_unstable(daemon, trigger)? {
+            return Ok((UpdateLoopControl::Continue, None));
+        }
+        let directory = tempfile::Builder::new()
+            .prefix("codex-fork-installer-")
+            .tempdir()
+            .context("failed to stage the standalone Codex updater")?;
+        let installer = crate::fork_installer::write_installer(directory.path(), &installer)?;
+        let started = std::time::Instant::now();
+        #[cfg(unix)]
+        if matches!(
+            crate::diagnostics::result(
+                "installer_run",
+                started,
+                run_installer(&installer, installer_mode, &package_root, terminate.recv()).await
+            )?,
+            UpdateLoopControl::Stop
+        ) {
+            return Ok((UpdateLoopControl::Stop, None));
+        }
+        #[cfg(windows)]
+        tokio::select! {
+            result = run_installer(&installer, installer_mode, &package_root) => { crate::diagnostics::result("installer_run", started, result)?; },
+            _ = terminate.recv() => return Ok((UpdateLoopControl::Stop, None)),
+        }
     }
     anyhow::ensure!(
         trigger == UpdateTrigger::Scheduled || daemon.is_stable_standalone_release()?,
@@ -552,34 +539,24 @@ enum InstallerMode<'a> {
     RestoreProduction(&'a str),
 }
 
-async fn run_installer_script(
-    script: &[u8],
+/// Run the downloaded installer with the guards that keep it from replacing a
+/// selection that changed or was pinned since this update began.
+async fn run_installer(
+    installer: &Path,
     mode: InstallerMode<'_>,
     package_root: &Path,
-    codex_home: &Path,
     #[cfg(unix)] terminate: impl std::future::Future<Output = Option<()>>,
 ) -> Result<UpdateLoopControl> {
+    let mut command = Command::new(installer);
     #[cfg(unix)]
-    let mut command = {
-        let mut command = Command::new(codex_install_context::fork::installer_bash()?);
-        command.arg("-s");
-        command.process_group(0);
-        command
-    };
+    command.process_group(0);
     #[cfg(windows)]
-    let mut command = {
-        let mut command = Command::new(codex_install_context::fork::installer_bash()?);
-        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
-        command.arg("-s").kill_on_drop(true);
-        command
+    command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+    let (latest_guard, current_guard, previous_release) = match mode {
+        InstallerMode::Update(release) => ("1", "0", release),
+        InstallerMode::RestoreProduction(release) => ("0", "1", release),
     };
-    let (latest_guard, current_guard, previous_release, defer_selection) = match mode {
-        InstallerMode::Update(release) => ("1", "0", release, "0"),
-        InstallerMode::RestoreProduction(release) => ("0", "1", release, "0"),
-    };
-    let mut child = command
-        .env("CODEX_HOME", codex_home)
-        .env("CODEX_INSTALL_DEFER_SELECTION", defer_selection)
+    command
         .env(
             "CODEX_INSTALL_DAEMON_ONLY",
             if package_root.ends_with("app-server-daemon") {
@@ -588,16 +565,15 @@ async fn run_installer_script(
                 "0"
             },
         )
-        .env("CODEX_RELEASE", "latest")
-        .env("CODEX_NON_INTERACTIVE", "1")
         .env("CODEX_INSTALL_IF_LATEST", latest_guard)
         .env("CODEX_INSTALL_IF_CURRENT", current_guard)
         .env("CODEX_UPDATE_FROM_RELEASE", previous_release)
         .kill_on_drop(true)
-        .stdin(Stdio::piped())
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
+        .stderr(Stdio::piped());
+    let mut child = spawn_installer(&mut command)
+        .await
         .context("failed to invoke standalone Codex updater")?;
     let mut stderr = child
         .stderr
@@ -636,35 +612,14 @@ async fn run_installer_script(
     });
     #[cfg(windows)]
     let _installer_job = crate::backend::windows::installer_job(&child)?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .context("standalone Codex updater stdin was unavailable")?;
     #[cfg(unix)]
     let mut terminate = std::pin::pin!(terminate);
-    #[cfg(unix)]
-    let write_result = tokio::select! {
-        result = stdin.write_all(script) => Some(result),
-        _ = &mut terminate => None,
-    };
-    #[cfg(windows)]
-    let write_result = Some(stdin.write_all(script).await);
-    drop(stdin);
-    #[cfg(unix)]
-    if write_result.is_none() {
-        cancel_installer(&mut child, package_root).await;
-        stderr_task.abort();
-        return Ok(UpdateLoopControl::Stop);
-    }
-    if let Some(Err(err)) = write_result {
-        stderr_task.abort();
-        return Err(err).context("failed to pass standalone Codex updater to shell");
-    }
     #[cfg(unix)]
     let status = tokio::select! {
         result = child.wait() => result,
         _ = &mut terminate => {
-            cancel_installer(&mut child, package_root).await;
+            cancel_installer(&mut child).await;
+            stderr_task.abort();
             return Ok(UpdateLoopControl::Stop);
         }
     };
@@ -697,71 +652,33 @@ async fn run_installer_script(
     }
 }
 
+async fn spawn_installer(command: &mut Command) -> std::io::Result<tokio::process::Child> {
+    // Another thread forking while the installer was being written can hold
+    // its write descriptor open for a moment.
+    #[cfg(unix)]
+    for _ in 0..20 {
+        match command.spawn() {
+            Err(error) if error.raw_os_error() == Some(libc::ETXTBSY) => {
+                sleep(Duration::from_millis(50)).await;
+            }
+            result => return result,
+        }
+    }
+    command.spawn()
+}
+
 #[cfg(unix)]
-async fn cancel_installer(child: &mut tokio::process::Child, package_root: &Path) {
+async fn cancel_installer(child: &mut tokio::process::Child) {
     let Some(pid) = child.id().and_then(|pid| libc::pid_t::try_from(pid).ok()) else {
         return;
     };
-    // Let the shell's EXIT/TERM trap release the installer lock first.
+    // TERM lets the installer roll back; its OS lock is released when it exits.
     unsafe { libc::kill(-pid, libc::SIGTERM) };
     sleep(Duration::from_secs(2)).await;
-    // Keep the shell unreaped until after the group kill, so its PID cannot
+    // Keep the installer unreaped until after the group kill, so its PID cannot
     // be reused while descendants that ignored TERM are still running.
     unsafe { libc::kill(-pid, libc::SIGKILL) };
-    // A forced kill can bypass the shell trap on hosts using the mkdir lock.
-    // The lock is ours only if its recorded owner is this still-unreaped shell.
-    let lock = package_root.join("install.lock.d");
-    if std::fs::read_to_string(lock.join("pid")).is_ok_and(|owner| owner.trim() == pid.to_string())
-    {
-        let _ = std::fs::remove_dir_all(lock);
-    }
     let _ = child.wait().await;
-}
-
-async fn fetch_installer_script(http: &impl InstallerHttp) -> Result<Vec<u8>> {
-    match http.get(INSTALL_URL).await? {
-        InstallerResponse::Success(body) => Ok(body),
-        InstallerResponse::Unsuccessful { status } => {
-            anyhow::bail!("standalone Codex updater request failed with status {status}")
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum InstallerResponse {
-    Success(Vec<u8>),
-    Unsuccessful { status: u16 },
-}
-
-/// HTTP boundary used to download the standalone installer.
-///
-/// Implementations must issue a GET for the supplied URL, return exact response bytes for a
-/// successful status, and report a non-success status without buffering its response body.
-trait InstallerHttp: Send + Sync {
-    fn get<'a>(
-        &'a self,
-        url: &'a str,
-    ) -> impl std::future::Future<Output = Result<InstallerResponse>> + Send + 'a;
-}
-
-impl InstallerHttp for RouteAwareClientPool {
-    async fn get(&self, url: &str) -> Result<InstallerResponse> {
-        let response = RouteAwareClientPool::get(self, url)
-            .send()
-            .await
-            .context("failed to fetch standalone Codex updater")?;
-        if !response.status().is_success() {
-            return Ok(InstallerResponse::Unsuccessful {
-                status: response.status().as_u16(),
-            });
-        }
-        let body = response
-            .bytes()
-            .await
-            .context("failed to read standalone Codex updater")?
-            .to_vec();
-        Ok(InstallerResponse::Success(body))
-    }
 }
 
 #[cfg(test)]

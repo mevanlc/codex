@@ -6,10 +6,8 @@ use pretty_assertions::assert_eq;
 #[cfg(unix)]
 use tempfile::TempDir;
 
-use super::INSTALL_URL;
 use super::InstallerHttp;
 use super::InstallerResponse;
-use super::fetch_installer_script;
 #[cfg(unix)]
 use super::manual_update::run as manual_update_once;
 #[cfg(unix)]
@@ -20,35 +18,99 @@ use crate::RestartIfRunningOutcome;
 use crate::UpdateOutput;
 #[cfg(unix)]
 use crate::UpdateStatus;
+use crate::fork_installer::fetch_installer;
+use crate::fork_installer::fetch_releases;
 #[cfg(unix)]
 use crate::managed_install::executable_identity;
 #[cfg(unix)]
 use crate::managed_install::executable_identity_from_reader;
+use codex_install_context::fork;
+use sha2::Digest;
+
+const FAKE_TAG: &str = "fork-v9.9.9-test";
+const FAKE_INSTALLER_URL: &str = "https://example.invalid/codex-fork-installer";
+
+fn releases_page_url() -> String {
+    format!("{}?per_page=100&page=1", fork::RELEASES_URL)
+}
+
+/// One complete release whose installer for this platform has `installer`'s digest.
+fn fake_releases(installer: &[u8]) -> Vec<u8> {
+    serde_json::json!([{
+        "tag_name": FAKE_TAG,
+        "published_at": "2026-10-01T00:00:00Z",
+        "assets": [
+            {"name": fork::release_asset_name().expect("supported platform")},
+            {
+                "name": fork::installer_asset_name().expect("supported platform"),
+                "browser_download_url": FAKE_INSTALLER_URL,
+                "digest": format!("sha256:{:x}", sha2::Sha256::digest(installer)),
+            },
+        ],
+    }])
+    .to_string()
+    .into_bytes()
+}
 
 #[tokio::test]
-async fn installer_fetch_uses_exact_url_and_preserves_bytes() {
-    let script = b"#!/bin/sh\nprintf 'update bytes'\n".to_vec();
-    let http = FakeInstallerHttp::new(InstallerResponse::Success(script.clone()));
+async fn installer_fetch_reads_releases_and_returns_the_verified_installer() {
+    let installer = b"#!/bin/sh\nprintf 'update bytes'\n".to_vec();
+    let http = FakeInstallerHttp::new(InstallerResponse::Success(installer.clone()));
 
+    let releases = fetch_releases(&http).await.expect("release metadata");
     assert_eq!(
-        fetch_installer_script(&http)
+        fetch_installer(&http, &releases)
             .await
             .expect("installer fetch should succeed"),
-        script
+        installer
     );
-    assert_eq!(http.requested_urls(), vec![INSTALL_URL.to_string()]);
+    assert_eq!(
+        http.requested_urls(),
+        vec![releases_page_url(), FAKE_INSTALLER_URL.to_string()]
+    );
+}
+
+#[tokio::test]
+async fn installer_fetch_rejects_a_digest_mismatch() {
+    struct Tampered;
+    impl InstallerHttp for Tampered {
+        async fn get(&self, url: &str) -> anyhow::Result<InstallerResponse> {
+            Ok(InstallerResponse::Success(if url == FAKE_INSTALLER_URL {
+                b"tampered".to_vec()
+            } else {
+                fake_releases(b"published")
+            }))
+        }
+    }
+    let releases = fetch_releases(&Tampered).await.expect("release metadata");
+    let error = fetch_installer(&Tampered, &releases)
+        .await
+        .expect_err("tampered installer should fail");
+    assert!(
+        error
+            .to_string()
+            .contains("does not match its published digest")
+    );
 }
 
 #[tokio::test]
 async fn installer_fetch_rejects_non_success_status() {
     let http = FakeInstallerHttp::new(InstallerResponse::Unsuccessful { status: 503 });
 
-    let error = fetch_installer_script(&http)
+    let error = fetch_releases(&http)
         .await
         .expect_err("non-success response should fail");
 
     assert!(error.to_string().contains("503"));
-    assert_eq!(http.requested_urls(), vec![INSTALL_URL.to_string()]);
+    assert_eq!(http.requested_urls(), vec![releases_page_url()]);
+}
+
+#[cfg(unix)]
+fn test_installer(script: &str) -> (TempDir, std::path::PathBuf) {
+    let directory = TempDir::new().expect("installer directory");
+    let installer = crate::fork_installer::write_installer(directory.path(), script.as_bytes())
+        .expect("write installer");
+    (directory, installer)
 }
 
 #[cfg(unix)]
@@ -210,31 +272,33 @@ impl FakeInstallerHttp {
     }
 }
 
+/// Serves one release whose installer is the configured response.
 impl InstallerHttp for FakeInstallerHttp {
     async fn get(&self, url: &str) -> anyhow::Result<InstallerResponse> {
         self.requested_urls
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(url.to_string());
-        Ok(self.response.clone())
+        Ok(match &self.response {
+            InstallerResponse::Success(installer) if url.starts_with(fork::RELEASES_URL) => {
+                InstallerResponse::Success(fake_releases(installer))
+            }
+            response => response.clone(),
+        })
     }
 }
 
 #[cfg(unix)]
 #[tokio::test]
-async fn cancelling_installer_stops_children_and_releases_fallback_lock() {
+async fn cancelling_installer_stops_its_children() {
     let home = tempfile::TempDir::new().expect("home");
     let ready = home.path().join("ready");
     let delayed = home.path().join("delayed");
-    let lock = home
-        .path()
-        .join(".local/share/mevanlc-codex/packages/app-server-daemon/install.lock.d");
-    let script = format!(
-        "mkdir -p '{lock}'\necho $$ > '{lock}/pid'\n(trap '' TERM; echo ready > '{ready}'; sleep 4; echo late > '{delayed}') &\nwait\n",
-        lock = lock.display(),
+    let (_directory, installer) = test_installer(&format!(
+        "#!/bin/sh\n(trap '' TERM; echo ready > '{ready}'; sleep 4; echo late > '{delayed}') &\nwait\n",
         ready = ready.display(),
         delayed = delayed.display(),
-    );
+    ));
     let (cancel, cancelled) = tokio::sync::oneshot::channel();
     let ready_for_signal = ready.clone();
     let signal_sender = tokio::spawn(async move {
@@ -250,13 +314,12 @@ async fn cancelling_installer_stops_children_and_releases_fallback_lock() {
     });
     let result = tokio::time::timeout(
         Duration::from_secs(10),
-        super::run_installer_script(
-            script.as_bytes(),
+        super::run_installer(
+            &installer,
             super::InstallerMode::Update("0.150.0-test"),
             &home
                 .path()
                 .join(".local/share/mevanlc-codex/packages/app-server-daemon"),
-            home.path(),
             async { cancelled.await.ok() },
         ),
     )
@@ -265,7 +328,6 @@ async fn cancelling_installer_stops_children_and_releases_fallback_lock() {
     .expect("installer cancellation failed");
     signal_sender.await.expect("signal sender");
     assert!(matches!(result, super::UpdateLoopControl::Stop));
-    assert!(!lock.exists());
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert!(!delayed.exists());
 }
@@ -609,9 +671,7 @@ async fn scheduled_no_op_preserves_daemon_and_hands_off_stale_updater() {
     backend.start().await.expect("start daemon");
     let server = test_control_server(&daemon, home.path()).await;
     let pid_record = std::fs::read(&daemon.pid_file).expect("daemon PID record");
-    let no_op = FakeInstallerHttp::new(InstallerResponse::Success(
-        b"# CODEX_INSTALL_IF_LATEST CODEX_INSTALL_DAEMON_ONLY\nexit 0\n".to_vec(),
-    ));
+    let no_op = FakeInstallerHttp::new(InstallerResponse::Success(b"#!/bin/sh\nexit 0\n".to_vec()));
 
     let outcome = super::update_once(
         &no_op,
@@ -656,7 +716,7 @@ async fn scheduled_resource_only_update_restarts_daemon() {
     let next_release = release.replacen("1.0.0", "1.0.1", 1);
     let installer = FakeInstallerHttp::new(InstallerResponse::Success(
         format!(
-            "#!/bin/sh\n# CODEX_INSTALL_IF_LATEST CODEX_INSTALL_DAEMON_ONLY\nmkdir -p '{root}/releases/{next_release}/bin'\ncp '{root}/releases/{release}/bin/codex' '{root}/releases/{next_release}/bin/codex'\ncp '{root}/releases/{release}/codex-package.json' '{root}/releases/{next_release}/codex-package.json'\nln -sfn 'releases/{next_release}' '{root}/current'\nprintf '{next_release}' > '{root}/auto-update-version'\n",
+            "#!/bin/sh\nmkdir -p '{root}/releases/{next_release}/bin'\ncp '{root}/releases/{release}/bin/codex' '{root}/releases/{next_release}/bin/codex'\ncp '{root}/releases/{release}/codex-package.json' '{root}/releases/{next_release}/codex-package.json'\nln -sfn 'releases/{next_release}' '{root}/current'\nprintf '{next_release}' > '{root}/auto-update-version'\n",
             root = root.display(),
         )
         .into_bytes(),
@@ -913,7 +973,7 @@ async fn check_manual_update_restart(package_directory: &str) {
     let ready = home.path().join("installer-ready");
     let proceed = home.path().join("installer-proceed");
     let script = format!(
-        "#!/bin/sh\n# CODEX_INSTALL_IF_LATEST CODEX_INSTALL_IF_CURRENT CODEX_INSTALL_DAEMON_ONLY\nif [ \"$CODEX_UPDATE_FROM_RELEASE\" = '{next}' ]; then exit 0; fi\ntest \"${guard}\" = 1 || exit 4\ntest \"$CODEX_UPDATE_FROM_RELEASE\" = '{release}' || exit 5\ntouch '{ready}'\nwhile [ ! -e '{proceed}' ]; do sleep .05; done\nmkdir -p '{root}/releases/{next}/bin'\n{install_binary}\nchmod +x '{root}/releases/{next}/bin/codex'\nprintf '{{}}' > '{root}/releases/{next}/codex-package.json'\nln -sfn 'releases/{next}' '{root}/current'\nprintf '{next}' > '{root}/auto-update-version'\n",
+        "#!/bin/sh\nif [ \"$CODEX_UPDATE_FROM_RELEASE\" = '{next}' ]; then exit 0; fi\ntest \"${guard}\" = 1 || exit 4\ntest \"$CODEX_UPDATE_FROM_RELEASE\" = '{release}' || exit 5\ntouch '{ready}'\nwhile [ ! -e '{proceed}' ]; do sleep .05; done\nmkdir -p '{root}/releases/{next}/bin'\n{install_binary}\nchmod +x '{root}/releases/{next}/bin/codex'\nprintf '{{}}' > '{root}/releases/{next}/codex-package.json'\nln -sfn 'releases/{next}' '{root}/current'\nprintf '{next}' > '{root}/auto-update-version'\n",
         root = standalone.display(),
         ready = ready.display(),
         proceed = proceed.display(),
@@ -985,9 +1045,7 @@ async fn check_manual_update_restart(package_directory: &str) {
         .expect("one-shot updater did not exit")
         .expect("updater task")
         .expect("updater loop");
-    let no_op = FakeInstallerHttp::new(InstallerResponse::Success(
-        b"#!/bin/sh\n# CODEX_INSTALL_IF_LATEST CODEX_INSTALL_DAEMON_ONLY\nexit 0\n".to_vec(),
-    ));
+    let no_op = FakeInstallerHttp::new(InstallerResponse::Success(b"#!/bin/sh\nexit 0\n".to_vec()));
     let bin = daemon
         .current_managed_codex_bin()
         .expect("current executable");
@@ -1014,45 +1072,49 @@ async fn check_manual_update_restart(package_directory: &str) {
 
 #[cfg(windows)]
 #[tokio::test]
-async fn git_bash_installer_is_noninteractive_and_reports_script_failure() {
-    let home = TempDir::new().unwrap();
-    let script = br#"set -eu
-    test "$CODEX_NON_INTERACTIVE" = 1
-    test "$CODEX_INSTALL_DAEMON_ONLY" = 1
-    test "$CODEX_HOME" != "$CODEX_INSTALL_PACKAGE_ROOT"
-    "#;
-    super::run_installer_script(
-        script,
+async fn windows_installer_receives_guards_and_reports_failure() {
+    let home = tempfile::TempDir::new().unwrap();
+    let installer = home.path().join("installer.cmd");
+    let package_root = home.path().join("packages/app-server-daemon");
+    std::fs::write(
+        &installer,
+        "@echo off\r\nif not \"%CODEX_INSTALL_DAEMON_ONLY%\"==\"1\" exit /b 3\r\nif not \"%CODEX_INSTALL_IF_CURRENT%\"==\"1\" exit /b 4\r\nif not \"%CODEX_UPDATE_FROM_RELEASE%\"==\"release\" exit /b 5\r\n",
+    )
+    .unwrap();
+    super::run_installer(
+        &installer,
         super::InstallerMode::RestoreProduction("release"),
-        &home.path().join("packages/app-server-daemon"),
-        home.path(),
+        &package_root,
     )
     .await
     .unwrap();
-    let error = super::run_installer_script(
-        "printf 'échec installation' >&2; exit 1".as_bytes(),
+    std::fs::write(
+        &installer,
+        "@echo off\r\necho installer failed 1>&2\r\nexit /b 1\r\n",
+    )
+    .unwrap();
+    let error = super::run_installer(
+        &installer,
         super::InstallerMode::RestoreProduction("release"),
-        &home.path().join("packages/app-server-daemon"),
-        home.path(),
+        &package_root,
     )
     .await
     .err()
     .unwrap();
-    assert!(error.to_string().contains("échec installation"));
+    assert!(error.to_string().contains("installer failed"), "{error:#}");
 }
 
 #[cfg(unix)]
 #[tokio::test]
 async fn installer_failure_includes_stderr() {
-    let script = format!(
-        "printf 'discard me{}' >&2\nprintf 'installer failed' >&2\nexit 1\n",
+    let (_directory, installer) = test_installer(&format!(
+        "#!/bin/sh\nprintf 'discard me{}' >&2\nprintf 'installer failed' >&2\nexit 1\n",
         "x".repeat(super::INSTALLER_STDERR_TAIL_BYTES),
-    );
-    let error = super::run_installer_script(
-        script.as_bytes(),
+    ));
+    let error = super::run_installer(
+        &installer,
         super::InstallerMode::Update("0.150.0-x86_64-unknown-linux-gnu"),
         std::path::Path::new("packages/app-server-daemon"),
-        std::path::Path::new("independent-codex-home"),
         futures::future::pending(),
     )
     .await
@@ -1066,13 +1128,14 @@ async fn installer_failure_includes_stderr() {
 #[cfg(unix)]
 #[tokio::test]
 async fn installer_failure_preserves_stderr_before_drain_timeout() {
+    let (_directory, installer) =
+        test_installer("#!/bin/sh\nprintf 'installer failed' >&2\nsleep 5 &\nexit 1\n");
     let error = tokio::time::timeout(
         Duration::from_secs(3),
-        super::run_installer_script(
-            b"printf 'installer failed' >&2\nsleep 5 &\nexit 1\n",
+        super::run_installer(
+            &installer,
             super::InstallerMode::Update("0.150.0-x86_64-unknown-linux-gnu"),
             std::path::Path::new("packages/app-server-daemon"),
-            std::path::Path::new("independent-codex-home"),
             futures::future::pending(),
         ),
     )
@@ -1086,17 +1149,17 @@ async fn installer_failure_preserves_stderr_before_drain_timeout() {
 #[cfg(unix)]
 #[tokio::test]
 async fn update_rejects_a_package_root_change_during_download() {
-    struct ChangingRoot<'a>(&'a std::path::Path);
+    struct ChangingRoot<'a>(&'a std::path::Path, FakeInstallerHttp);
     impl InstallerHttp for ChangingRoot<'_> {
-        async fn get(&self, _url: &str) -> anyhow::Result<InstallerResponse> {
-            let root = crate::managed_install::package_root(self.0);
-            std::fs::rename(&root, root.with_extension("previous"))?;
-            let replacement = root.with_extension("replacement");
-            std::fs::create_dir(&replacement)?;
-            std::os::unix::fs::symlink(&replacement, &root)?;
-            Ok(InstallerResponse::Success(
-                b"# CODEX_INSTALL_IF_LATEST CODEX_INSTALL_DAEMON_ONLY\nexit 99\n".to_vec(),
-            ))
+        async fn get(&self, url: &str) -> anyhow::Result<InstallerResponse> {
+            if url.starts_with(fork::RELEASES_URL) {
+                let root = crate::managed_install::package_root(self.0);
+                std::fs::rename(&root, root.with_extension("previous"))?;
+                let replacement = root.with_extension("replacement");
+                std::fs::create_dir(&replacement)?;
+                std::os::unix::fs::symlink(&replacement, &root)?;
+            }
+            self.1.get(url).await
         }
     }
     let home = TempDir::new().unwrap();
@@ -1105,7 +1168,10 @@ async fn update_rejects_a_package_root_change_during_download() {
         .await
         .unwrap();
     let error = manual_update_once(
-        &ChangingRoot(home.path()),
+        &ChangingRoot(
+            home.path(),
+            FakeInstallerHttp::new(InstallerResponse::Success(b"#!/bin/sh\nexit 99\n".to_vec())),
+        ),
         &daemon,
         &identity,
         &mut test_terminate(),
@@ -1118,7 +1184,7 @@ async fn update_rejects_a_package_root_change_during_download() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn daemon_owned_updates_require_and_request_an_isolated_installer() {
+async fn daemon_owned_updates_request_an_isolated_installer() {
     let home = TempDir::new().unwrap();
     let (mut daemon, release) = manual_update_daemon(&home);
     let root = daemon.package_root.clone();
@@ -1126,25 +1192,8 @@ async fn daemon_owned_updates_require_and_request_an_isolated_installer() {
     let identity = executable_identity(&daemon.managed_codex_bin)
         .await
         .unwrap();
-    let old = FakeInstallerHttp::new(InstallerResponse::Success(
-        b"# CODEX_INSTALL_IF_LATEST\nexit 0\n".to_vec(),
-    ));
-    let error = manual_update_once(
-        &old,
-        &daemon,
-        &identity,
-        &mut test_terminate(),
-        super::UpdateTrigger::Manual,
-    )
-    .await
-    .unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("does not support daemon-owned packages")
-    );
     let current = FakeInstallerHttp::new(InstallerResponse::Success(
-        b"# CODEX_INSTALL_IF_LATEST CODEX_INSTALL_DAEMON_ONLY\ntest \"$CODEX_INSTALL_IF_LATEST\" = 1 && test \"$CODEX_INSTALL_DAEMON_ONLY\" = 1\n".to_vec(),
+        b"#!/bin/sh\ntest \"$CODEX_INSTALL_IF_LATEST\" = 1 && test \"$CODEX_INSTALL_DAEMON_ONLY\" = 1\n".to_vec(),
     ));
     let output = manual_update_once(
         &current,
@@ -1160,16 +1209,13 @@ async fn daemon_owned_updates_require_and_request_an_isolated_installer() {
 
     // Reuse the stopped daemon to verify explicit unpinning with either preference.
     let marker = root.join("auto-update-version");
-    let no_op = FakeInstallerHttp::new(InstallerResponse::Success(
-        b"# CODEX_INSTALL_IF_CURRENT CODEX_INSTALL_DAEMON_ONLY\nexit 0\n".to_vec(),
-    ));
+    let no_op = FakeInstallerHttp::new(InstallerResponse::Success(b"#!/bin/sh\nexit 0\n".to_vec()));
     let script = format!(
-        r#"# CODEX_INSTALL_IF_CURRENT CODEX_INSTALL_DAEMON_ONLY
+        r#"#!/bin/sh
 set -eu
 test "$CODEX_INSTALL_IF_CURRENT" = 1
 test "$CODEX_INSTALL_IF_LATEST" = 0
 test "$CODEX_INSTALL_DAEMON_ONLY" = 1
-test "$CODEX_RELEASE" = latest
 test "$CODEX_UPDATE_FROM_RELEASE" = '{release}'
 printf '%s' '{release}' > '{marker}'
 "#,
@@ -1213,4 +1259,55 @@ printf '%s' '{release}' > '{marker}'
             settings
         );
     }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn scheduled_check_skips_the_installer_when_the_newest_release_is_installed() {
+    let home = TempDir::new().unwrap();
+    let (daemon, _) = manual_update_daemon(&home);
+    let identity = executable_identity(&daemon.managed_codex_bin)
+        .await
+        .unwrap();
+    let release = super::selected_release(&daemon).unwrap().1;
+    // An installer that fails proves it never ran.
+    let http = FakeInstallerHttp::new(InstallerResponse::Success(b"#!/bin/sh\nexit 1\n".to_vec()));
+    std::fs::write(
+        release.join("install-receipt.json"),
+        serde_json::json!({"repository": "mevanlc/codex", "tag": FAKE_TAG}).to_string(),
+    )
+    .unwrap();
+    let (control, _) = super::update_once(
+        &http,
+        &daemon,
+        &identity,
+        &mut test_terminate(),
+        super::UpdateTrigger::Scheduled,
+    )
+    .await
+    .expect("scheduled check");
+    assert!(matches!(control, super::UpdateLoopControl::Continue));
+    assert_eq!(http.requested_urls(), vec![releases_page_url()]);
+
+    // A newer release than the receipt records is installed.
+    std::fs::write(
+        release.join("install-receipt.json"),
+        serde_json::json!({"repository": "mevanlc/codex", "tag": "fork-v1.0.0"}).to_string(),
+    )
+    .unwrap();
+    let Err(error) = super::update_once(
+        &http,
+        &daemon,
+        &identity,
+        &mut test_terminate(),
+        super::UpdateTrigger::Scheduled,
+    )
+    .await
+    else {
+        panic!("the failing installer should run");
+    };
+    assert!(
+        error.to_string().contains("exited with status"),
+        "{error:#}"
+    );
 }

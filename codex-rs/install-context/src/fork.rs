@@ -1,11 +1,8 @@
 //! Installation and update contracts for the maintained fork.
 use std::path::Path;
-use std::path::PathBuf;
 
 use serde::Deserialize;
 
-pub const INSTALLER_URL: &str =
-    "https://raw.githubusercontent.com/mevanlc/codex/main/codex-rs/scripts/install-from-gh.sh";
 pub const RELEASES_URL: &str = "https://api.github.com/repos/mevanlc/codex/releases";
 pub const VERSION_CACHE: &str = "mevanlc-version.json";
 
@@ -24,6 +21,11 @@ pub struct Release {
 #[derive(Clone, Debug, Deserialize)]
 pub struct ReleaseAsset {
     pub name: String,
+    #[serde(default)]
+    pub browser_download_url: Option<String>,
+    /// GitHub's digest of the asset, such as `sha256:<hex>`.
+    #[serde(default)]
+    pub digest: Option<String>,
 }
 
 /// Name of the installer binary and the prefix of its per-target release assets.
@@ -86,6 +88,16 @@ pub fn installed_publication_epoch(package_dir: &Path) -> Option<i64> {
         .flatten()
 }
 
+/// The release tag a fork installation receipt records, if it came from a release.
+pub fn installed_release_tag(package_dir: &Path) -> Option<String> {
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(package_dir.join("install-receipt.json")).ok()?)
+            .ok()?;
+    (receipt["repository"] == "mevanlc/codex")
+        .then(|| receipt["tag"].as_str().map(str::to_string))
+        .flatten()
+}
+
 pub fn release_is_newer(
     latest: &str,
     published: Option<i64>,
@@ -106,56 +118,6 @@ pub fn release_is_newer(
     };
     // With no installation receipt, only order different numeric release lines.
     (latest.major, latest.minor, latest.patch) > (current.major, current.minor, current.patch)
-}
-
-/// Resolve Bash explicitly on Windows: PATH's bash.exe may be the WSL launcher.
-/// Git for Windows Bash is the installer prerequisite on that platform.
-pub fn installer_bash() -> std::io::Result<PathBuf> {
-    let paths: Vec<_> = std::env::var_os("PATH")
-        .map(|p| {
-            std::env::split_paths(&p)
-                .filter(|p| p.is_absolute())
-                .collect()
-        })
-        .unwrap_or_default();
-    #[cfg(windows)]
-    {
-        let mut roots = Vec::new();
-        for path in &paths {
-            if path.join("git.exe").is_file() {
-                roots.push(path.clone());
-                if let Some(parent) = path.parent() {
-                    roots.push(parent.to_path_buf());
-                    if let Some(parent) = parent.parent() {
-                        roots.push(parent.to_path_buf());
-                    }
-                }
-            }
-        }
-        for key in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
-            if let Some(path) = std::env::var_os(key) {
-                roots.push(PathBuf::from(&path).join("Git"));
-                roots.push(PathBuf::from(path).join("Programs/Git"));
-            }
-        }
-        for root in roots {
-            let bash = root.join("bin/bash.exe");
-            if bash.is_file() && root.join("usr/bin/bash.exe").is_file() {
-                return Ok(bash);
-            }
-        }
-    }
-    #[cfg(not(windows))]
-    for path in paths {
-        let bash = path.join("bash");
-        if bash.is_file() {
-            return Ok(bash);
-        }
-    }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::NotFound,
-        "Bash is required for the mevanlc/codex installer (Git for Windows Bash on Windows)",
-    ))
 }
 
 #[cfg(test)]

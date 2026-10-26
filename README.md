@@ -39,20 +39,41 @@ Everything else behaves like upstream Codex.
 ## Install
 
 Install the newest complete package available for your platform from
-[mevanlc/codex releases](https://github.com/mevanlc/codex/releases):
+[mevanlc/codex releases](https://github.com/mevanlc/codex/releases) with
+`codex-fork-installer`, a single self-contained program published for every
+platform. Download it and run it; it needs no Python, Bash, `gh`, or `zstd`.
+
+macOS, Linux, and Android/Termux (`pkg install curl` if needed):
 
 ```shell
-bash codex-rs/scripts/install-from-gh.sh
-# or, without a checkout:
-codex_installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/mevanlc/codex/main/codex-rs/scripts/install-from-gh.sh -o "$codex_installer"
-bash "$codex_installer"
-rm -f "$codex_installer"
+curl -fsSLo codex-fork-installer https://github.com/mevanlc/codex/releases/latest/download/codex-fork-installer-<target>
+chmod +x codex-fork-installer && ./codex-fork-installer && rm codex-fork-installer
 ```
 
-The installer needs authenticated GitHub CLI (`gh`), Python 3.9+, and `zstd` for
-Unix/Android archives. On Windows, run it in **Git for Windows Bash** with native
-Python and `gh` available. Add `~/.local/bin` to `PATH` (also on Windows).
+PowerShell 7 or Windows PowerShell 5.1 (replace `x86_64` with `aarch64` on Arm):
+
+```powershell
+&{(iwr -useb -pa -ou($t=new-temporaryfile)https://github.com/mevanlc/codex/releases/latest/download/codex-fork-installer-x86_64-pc-windows-msvc.exe)|%{saps -n -wait $t};rm $t}
+```
+
+| Platform | `<target>` |
+| --- | --- |
+| macOS Apple silicon / Intel | `aarch64-apple-darwin` / `x86_64-apple-darwin` |
+| Linux arm64 / x86-64 | `aarch64-unknown-linux-musl` / `x86_64-unknown-linux-musl` |
+| Android/Termux | `aarch64-linux-android` |
+| Windows Arm / x86-64 | `aarch64-pc-windows-msvc` / `x86_64-pc-windows-msvc` (assets end in `.exe`) |
+
+`gh release download -R mevanlc/codex -p 'codex-fork-installer-<target>*'` also
+works. Command-line downloads are normally not quarantined; if you download with a
+browser instead, macOS Gatekeeper and Windows SmartScreen may ask before running it.
+While a new release is still building, `latest/download` can briefly miss your
+platform; retry, or pick an earlier release on the releases page.
+
+Add `~/.local/bin` to `PATH` (also on Windows). After the first install,
+`codex update` and the daemon updater download and run the newest release's
+installer themselves, so installer fixes reach existing installs.
+`codex-rs/scripts/install-from-gh.sh` remains only so that builds released before
+the installer can update to it.
 
 All platforms use the same installation root, independently of `CODEX_HOME` and
 `XDG_DATA_HOME`:
@@ -86,12 +107,15 @@ whole directory together: extracting just the binaries loses required resources.
 - Windows: `codex-{x86_64,aarch64}-pc-windows-msvc.zip`
 
 Each build also uploads one Actions artifact named `codex-<target>`, containing
-that archive. Use `--artifact` to install the newest non-expired artifact,
-`--list-available` to list platform releases, `--version <tag-or-version>` to pin
-an exact release (including downgrades), or `--force` to reinstall. The default
-chooses the newest published non-prerelease carrying your platform's package;
-other platforms may still be building. Incomplete and loose-binary archives are
-rejected before changing the installation.
+that archive. Pass `--artifact` to install the newest non-expired artifact (it
+needs `GH_TOKEN` or `gh auth login`), `--list-available` to list platform
+releases, `--version <tag-or-version>` to pin an exact release (including
+downgrades), `--archive <path>` to pin a downloaded archive, or `--force` to
+reinstall. The default chooses the newest published non-prerelease carrying your
+platform's package; other platforms may still be building. Downloads must match
+the SHA-256 digest GitHub publishes for them, and incomplete and loose-binary
+archives are rejected before changing the installation. Release metadata is read
+without credentials; set `GH_TOKEN` if you hit GitHub's anonymous rate limit.
 
 ### Embedded server or managed daemon
 

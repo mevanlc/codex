@@ -77,16 +77,16 @@ running.
 
 ## Bootstrap flow
 
-Install the fork's complete CLI package using
-[`install-from-gh.sh`](../scripts/install-from-gh.sh), then run:
+Install the fork's complete CLI package with `codex-fork-installer` (see the
+[repository README](../../README.md#install)), then run:
 
 ```sh
 codex app-server daemon bootstrap --remote-control
 ```
 
-On Windows, install from Git for Windows Bash, then run the lifecycle command
-in a non-elevated terminal whose host permits detached children. The updater
-also uses Git for Windows Bash; it never invokes a WSL Bash launcher.
+On Windows, run the lifecycle command in a non-elevated terminal whose host
+permits detached children. The updater runs the newest release's
+`codex-fork-installer` directly and needs no Bash.
 
 If no daemon package is selected, `bootstrap` copies the invoking complete CLI
 package into `~/.local/share/mevanlc-codex/packages/app-server-daemon` without

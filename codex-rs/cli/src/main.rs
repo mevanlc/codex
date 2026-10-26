@@ -758,7 +758,7 @@ fn parse_socket_path(raw: &str) -> Result<AbsolutePathBuf, String> {
 }
 
 /// Handle the app exit and print the results. Optionally run the update action.
-fn handle_app_exit(
+async fn handle_app_exit(
     exit_info: AppExitInfo,
     cli_executable: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
@@ -785,13 +785,13 @@ fn handle_app_exit(
         std::process::exit(1);
     }
     if let Some(action) = update_action {
-        run_update_action(action, cli_executable)?;
+        run_update_action(action, cli_executable).await?;
     }
     Ok(())
 }
 
 /// Run the update action and print the result.
-fn run_update_action(
+async fn run_update_action(
     action: UpdateAction,
     cli_executable: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
@@ -811,37 +811,22 @@ fn run_update_action(
         return Ok(());
     }
     println!("Updating Codex from mevanlc/codex...");
-    // Download before starting Bash so a failed HTTP request cannot execute a
-    // partial installer. gh and the shell never consult the project directory.
-    let cwd = tempfile::tempdir()?;
-    let output = std::process::Command::new(if cfg!(windows) { "gh.exe" } else { "gh" })
-        .args([
-            "api",
-            "repos/mevanlc/codex/contents/codex-rs/scripts/install-from-gh.sh",
-            "-H",
-            "Accept: application/vnd.github.raw",
-        ])
-        .current_dir(cwd.path())
-        .output()?;
-    anyhow::ensure!(
-        output.status.success(),
-        "Could not download the fork installer: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let mut child = std::process::Command::new(codex_install_context::fork::installer_bash()?)
-        .args(["-s", "--"])
-        .current_dir(cwd.path())
-        .stdin(std::process::Stdio::piped())
-        .spawn()?;
-    {
-        use std::io::Write;
-        child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("installer stdin unavailable"))?
-            .write_all(&output.stdout)?;
-    }
-    let status = child.wait()?;
+    // The newest release's installer performs the update, so installation
+    // fixes reach existing installs without a new release of this binary.
+    let directory = tempfile::Builder::new()
+        .prefix("codex-fork-installer-")
+        .tempdir()?;
+    let installer = codex_app_server_daemon::download_installer(
+        codex_http_client::HttpClientFactory::new(
+            codex_http_client::OutboundProxyPolicy::ReqwestDefault,
+        ),
+        directory.path(),
+    )
+    .await
+    .map_err(|error| error.context("Could not download the fork installer"))?;
+    let status = std::process::Command::new(&installer)
+        .current_dir(directory.path())
+        .status()?;
     anyhow::ensure!(
         status.success(),
         "Fork installer failed with status {status}"
@@ -867,7 +852,7 @@ fn resolve_windows_update_command_from_path(
         .ok_or_else(|| anyhow::anyhow!("could not find update command `{command}` on PATH"))
 }
 
-fn run_update_command() -> anyhow::Result<()> {
+async fn run_update_command() -> anyhow::Result<()> {
     #[cfg(debug_assertions)]
     {
         anyhow::bail!(
@@ -882,7 +867,7 @@ fn run_update_command() -> anyhow::Result<()> {
                 "Could not detect the Codex installation method. Please update manually: https://github.com/mevanlc/codex#install"
             );
         };
-        run_update_action(action, /*cli_executable*/ None)
+        run_update_action(action, /*cli_executable*/ None).await
     }
 }
 
@@ -1140,7 +1125,7 @@ async fn cli_main(
                 arg0_paths.clone(),
             )
             .await?;
-            handle_app_exit(exit_info, daemon_cli_executable.as_deref())?;
+            handle_app_exit(exit_info, daemon_cli_executable.as_deref()).await?;
         }
         Some(Subcommand::TcpTunnel(args)) => {
             return codex_tcp_tunnel::run(args).await;
@@ -1532,7 +1517,7 @@ async fn cli_main(
                 arg0_paths.clone(),
             )
             .await?;
-            handle_app_exit(exit_info, daemon_cli_executable.as_deref())?;
+            handle_app_exit(exit_info, daemon_cli_executable.as_deref()).await?;
         }
         Some(Subcommand::Archive(cmd)) => {
             let output = run_session_archive_cli_command(
@@ -1619,7 +1604,7 @@ async fn cli_main(
                 arg0_paths.clone(),
             )
             .await?;
-            handle_app_exit(exit_info, daemon_cli_executable.as_deref())?;
+            handle_app_exit(exit_info, daemon_cli_executable.as_deref()).await?;
         }
         Some(Subcommand::Login(mut login_cli)) => {
             reject_remote_mode_for_subcommand(
@@ -1691,7 +1676,7 @@ async fn cli_main(
                 root_remote_auth_token_env.as_deref(),
                 "update",
             )?;
-            run_update_command()?;
+            run_update_command().await?;
         }
         Some(Subcommand::Doctor(doctor_cli)) => {
             reject_remote_mode_for_subcommand(

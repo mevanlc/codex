@@ -10,6 +10,8 @@ pub use backend::windows::is_elevated;
 use backend::windows::try_lock_file;
 mod client;
 mod diagnostics;
+mod fork_installer;
+pub use fork_installer::download_installer;
 mod install_lock;
 mod launch;
 pub use launch::restart_with_features;
