@@ -220,6 +220,15 @@ jobs:
           fi
           python scripts/build_codex_package.py "${package_args[@]}"
 
+      - name: Build installer
+        working-directory: codex-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          cargo build --target "$target" --release -p codex-fork-installer
+          cp "target/${target}/release/codex-fork-installer" "../dist/codex-fork-installer-${target}"
+
       - if: ${{ runner.os == 'macOS' }}
         name: Ad-hoc sign macOS binaries
         shell: bash
@@ -228,6 +237,7 @@ jobs:
           package_dir="dist/codex-${{ matrix.target }}"
           codesign --force --sign - "$package_dir/bin/codex"
           codesign --force --sign - "$package_dir/bin/codex-code-mode-host"
+          codesign --force --sign - "dist/codex-fork-installer-${{ matrix.target }}"
 
       - name: Smoke test package
         shell: bash
@@ -253,6 +263,15 @@ jobs:
           )
           PY
 
+      - name: Test package installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          home="$RUNNER_TEMP/installer home"
+          rm -rf "$home"
+          HOME="$home" "dist/codex-fork-installer-${{ matrix.target }}" --archive "dist/${{ matrix.archive }}"
+          "$home/.local/bin/codex" --version
+
       - name: Upload package
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
@@ -271,7 +290,9 @@ jobs:
           make_latest: true
           fail_on_unmatched_files: true
           overwrite_files: true
-          files: dist/${{ matrix.archive }}
+          files: |
+            dist/${{ matrix.archive }}
+            dist/codex-fork-installer-${{ matrix.target }}
           body: |
             Codex CLI fork release with Android/Termux support.
 
@@ -382,6 +403,13 @@ jobs:
             throw "codex.exe --version failed with exit code $LASTEXITCODE"
           }
 
+      - name: Build installer
+        shell: pwsh
+        run: |
+          cargo build --manifest-path codex-rs/Cargo.toml --release --target "${{ matrix.target }}" -p codex-fork-installer
+          if ($LASTEXITCODE -ne 0) { throw "Installer build failed with exit code $LASTEXITCODE" }
+          Copy-Item (Join-Path $env:CARGO_TARGET_DIR "${{ matrix.target }}/release/codex-fork-installer.exe") "dist/codex-fork-installer-${{ matrix.target }}.exe"
+
       - name: Test native package installation
         shell: pwsh
         run: |
@@ -391,10 +419,17 @@ jobs:
             cargo test --manifest-path codex-rs/Cargo.toml -p codex-utils-home-dir --lib
           }
           if ($LASTEXITCODE -ne 0) { throw "Package path tests failed" }
-          $env:CODEX_TEST_NATIVE_PACKAGE = (Resolve-Path "dist/${{ matrix.archive }}").Path
-          $env:CODEX_TEST_BASH = "$env:ProgramFiles/Git/bin/bash.exe"
-          python -m unittest discover -s codex-rs/scripts -p test_install_from_gh.py -k NativePackageInstallTest -v
-          if ($LASTEXITCODE -ne 0) { throw "Package installer tests failed" }
+          # Spaces, cmd metacharacters, and non-ASCII names exercise both launchers.
+          $installHome = Join-Path $env:RUNNER_TEMP "installer home & 100% café 測試"
+          New-Item -ItemType Directory -Force -Path $installHome | Out-Null
+          $env:HOME = $installHome
+          & "dist/codex-fork-installer-${{ matrix.target }}.exe" --archive "dist/${{ matrix.archive }}"
+          if ($LASTEXITCODE -ne 0) { throw "Package installer failed with exit code $LASTEXITCODE" }
+          $bin = Join-Path $installHome ".local/bin"
+          & (Join-Path $bin "codex.cmd") --version
+          if ($LASTEXITCODE -ne 0) { throw "codex.cmd --version failed with exit code $LASTEXITCODE" }
+          & "$env:ProgramFiles/Git/bin/bash.exe" (Join-Path $bin "codex").Replace('\', '/') --version
+          if ($LASTEXITCODE -ne 0) { throw "Bash launcher --version failed with exit code $LASTEXITCODE" }
 
       - name: Upload package
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -414,7 +449,9 @@ jobs:
           make_latest: true
           fail_on_unmatched_files: true
           overwrite_files: true
-          files: dist/${{ matrix.archive }}
+          files: |
+            dist/${{ matrix.archive }}
+            dist/codex-fork-installer-${{ matrix.target }}.exe
           body: |
             Codex CLI fork release with Android/Termux support.
 
@@ -564,6 +601,7 @@ jobs:
           cargo build --release \
             --bin codex \
             --bin codex-code-mode-host \
+            --bin codex-fork-installer \
             --target aarch64-linux-android
           echo "Post-build V8-related files under $CARGO_TARGET_DIR:"
           find "$CARGO_TARGET_DIR" -maxdepth 10 \( -path "*/build/v8-*/out/*" -o -name "librusty_v8*.a" -o -name "*.sum" \) -print 2>/dev/null | sort
@@ -586,6 +624,10 @@ jobs:
             --rg-bin "$RUNNER_TEMP/android-ripgrep/bin/rg" \
             --package-dir dist/codex-aarch64-linux-android \
             --archive-output dist/codex-aarch64-linux-android.tar.zst --force
+          # The installer runs on Android only; this Linux runner cannot smoke test it.
+          cp "$CARGO_TARGET_DIR/aarch64-linux-android/release/codex-fork-installer" \
+            dist/codex-fork-installer-aarch64-linux-android
+          file dist/codex-fork-installer-aarch64-linux-android
 
       - name: Upload Android package
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -605,7 +647,9 @@ jobs:
           make_latest: true
           fail_on_unmatched_files: true
           overwrite_files: true
-          files: dist/codex-aarch64-linux-android.tar.zst
+          files: |
+            dist/codex-aarch64-linux-android.tar.zst
+            dist/codex-fork-installer-aarch64-linux-android
           body: |
             Codex CLI fork release with Android/Termux support.
 

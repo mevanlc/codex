@@ -26,8 +26,13 @@ pub struct ReleaseAsset {
     pub name: String,
 }
 
-pub fn release_asset_name() -> Option<String> {
-    let target = match (std::env::consts::OS, std::env::consts::ARCH) {
+/// Name of the installer binary and the prefix of its per-target release assets.
+pub const INSTALLER_NAME: &str = "codex-fork-installer";
+
+/// The release target this build installs and updates. Linux releases are
+/// static musl builds, so local glibc builds update to them as well.
+pub fn release_target() -> Option<&'static str> {
+    Some(match (std::env::consts::OS, std::env::consts::ARCH) {
         ("android", "aarch64") => "aarch64-linux-android",
         ("linux", "aarch64") => "aarch64-unknown-linux-musl",
         ("linux", "x86_64") => "x86_64-unknown-linux-musl",
@@ -36,11 +41,23 @@ pub fn release_asset_name() -> Option<String> {
         ("windows", "aarch64") => "aarch64-pc-windows-msvc",
         ("windows", "x86_64") => "x86_64-pc-windows-msvc",
         _ => return None,
-    };
-    Some(format!(
-        "codex-{target}{}",
-        if cfg!(windows) { ".zip" } else { ".tar.zst" }
-    ))
+    })
+}
+
+pub fn release_asset_name() -> Option<String> {
+    release_target().map(|target| {
+        format!(
+            "codex-{target}{}",
+            if cfg!(windows) { ".zip" } else { ".tar.zst" }
+        )
+    })
+}
+
+/// The installer is versioned by this name: an incompatible change to its
+/// command line or `CODEX_INSTALL_*` contract must publish under a new name.
+pub fn installer_asset_name() -> Option<String> {
+    release_target()
+        .map(|target| format!("{INSTALLER_NAME}-{target}{}", std::env::consts::EXE_SUFFIX))
 }
 
 /// Partial platform releases, drafts and prereleases cannot become the default.

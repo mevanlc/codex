@@ -25,6 +25,7 @@ members = [
     "feedback",
     "features",
     "install-context",
+    "fork-installer",
     "codex-backend-openapi-models",
     "code-mode",
     "code-mode-host",
@@ -238,6 +239,7 @@ codex-experimental-api-macros = { path = "codex-experimental-api-macros" }
 codex-features = { path = "features" }
 codex-feedback = { path = "feedback" }
 codex-install-context = { path = "install-context" }
+codex-fork-installer = { path = "fork-installer" }
 codex-file-search = { path = "file-search" }
 codex-file-watcher = { path = "file-watcher" }
 codex-git-utils = { path = "git-utils" }

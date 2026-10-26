@@ -3525,6 +3525,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-fork-installer"
+version = "0.162.1"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "chrono",
+ "clap",
+ "codex-install-context",
+ "codex-utils-home-dir",
+ "codex-utils-rustls-provider",
+ "libc",
+ "pretty_assertions",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "signal-hook",
+ "tar",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "windows-sys 0.61.2",
+ "wiremock",
+ "zip",
+ "zstd",
+]
+
+[[package]]
 name = "codex-git-attribution"
 version = "0.162.1"
 dependencies = [

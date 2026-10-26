@@ -6,17 +6,21 @@ use std::path::PathBuf;
 /// Fork packages have the same home-relative location on every OS. Neither
 /// CODEX_HOME nor XDG_DATA_HOME changes the installation directory.
 pub fn fork_install_root(user_home: &Path) -> PathBuf {
-    user_home.join(".local/share/mevanlc-codex")
+    user_home.join(".local").join("share").join("mevanlc-codex")
 }
 
 pub fn find_fork_install_root() -> std::io::Result<PathBuf> {
-    // Match the Bash installer, including a custom Git for Windows HOME.
+    find_fork_user_home().map(|home| fork_install_root(&home))
+}
+
+/// The home directory that holds fork packages (`.local/share`) and commands (`.local/bin`).
+pub fn find_fork_user_home() -> std::io::Result<PathBuf> {
+    // Honor a custom Git for Windows HOME, as the fork installer always has.
     // dirs::home_dir() alone always uses the Windows profile directory.
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .filter(|home| home.is_absolute())
         .or_else(home_dir)
-        .map(|home| fork_install_root(&home))
         .ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::NotFound,

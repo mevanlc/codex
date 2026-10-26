@@ -1,0 +1,58 @@
+name: Fork installer
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/fork-installer.yml
+      - codex-rs/fork-installer/**
+      - codex-rs/install-context/**
+      - codex-rs/utils/home-dir/**
+  pull_request:
+    paths:
+      - .github/workflows/fork-installer.yml
+      - codex-rs/fork-installer/**
+      - codex-rs/install-context/**
+      - codex-rs/utils/home-dir/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test on ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux
+            runner: ubuntu-24.04
+          - label: macOS
+            runner: macos-15
+          - label: Windows
+            runner: windows-2022
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+
+      - if: ${{ runner.os == 'Windows' }}
+        name: Configure MSVC toolchain
+        uses: ./.github/actions/setup-msvc-env
+        with:
+          target: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: codex-rs -> target
+
+      - name: Test installer
+        working-directory: codex-rs
+        shell: bash
+        run: cargo test -p codex-fork-installer -p codex-install-context -p codex-utils-home-dir

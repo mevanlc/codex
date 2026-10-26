@@ -100,6 +100,13 @@ jobs:
             throw "codex.exe --version failed with exit code $LASTEXITCODE"
           }
 
+      - name: Build installer
+        shell: pwsh
+        run: |
+          cargo build --manifest-path codex-rs/Cargo.toml --release --target "${{ matrix.target }}" -p codex-fork-installer
+          if ($LASTEXITCODE -ne 0) { throw "Installer build failed with exit code $LASTEXITCODE" }
+          Copy-Item (Join-Path $env:CARGO_TARGET_DIR "${{ matrix.target }}/release/codex-fork-installer.exe") "dist/codex-fork-installer-${{ matrix.target }}.exe"
+
       - name: Test native package installation
         shell: pwsh
         run: |
@@ -109,10 +116,17 @@ jobs:
             cargo test --manifest-path codex-rs/Cargo.toml -p codex-utils-home-dir --lib
           }
           if ($LASTEXITCODE -ne 0) { throw "Package path tests failed" }
-          $env:CODEX_TEST_NATIVE_PACKAGE = (Resolve-Path "dist/codex-${{ matrix.target }}.zip").Path
-          $env:CODEX_TEST_BASH = "$env:ProgramFiles/Git/bin/bash.exe"
-          python -m unittest discover -s codex-rs/scripts -p test_install_from_gh.py -k NativePackageInstallTest -v
-          if ($LASTEXITCODE -ne 0) { throw "Package installer tests failed" }
+          # Spaces, cmd metacharacters, and non-ASCII names exercise both launchers.
+          $installHome = Join-Path $env:RUNNER_TEMP "installer home & 100% café 測試"
+          New-Item -ItemType Directory -Force -Path $installHome | Out-Null
+          $env:HOME = $installHome
+          & "dist/codex-fork-installer-${{ matrix.target }}.exe" --archive "dist/codex-${{ matrix.target }}.zip"
+          if ($LASTEXITCODE -ne 0) { throw "Package installer failed with exit code $LASTEXITCODE" }
+          $bin = Join-Path $installHome ".local/bin"
+          & (Join-Path $bin "codex.cmd") --version
+          if ($LASTEXITCODE -ne 0) { throw "codex.cmd --version failed with exit code $LASTEXITCODE" }
+          & "$env:ProgramFiles/Git/bin/bash.exe" (Join-Path $bin "codex").Replace('\', '/') --version
+          if ($LASTEXITCODE -ne 0) { throw "Bash launcher --version failed with exit code $LASTEXITCODE" }
 
       - name: Upload Windows package
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
