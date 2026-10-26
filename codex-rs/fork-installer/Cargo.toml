@@ -24,7 +24,16 @@ clap = { workspace = true, features = ["derive"] }
 codex-install-context = { workspace = true }
 codex-utils-home-dir = { workspace = true }
 codex-utils-rustls-provider = { workspace = true }
-reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls", "rustls-tls-native-roots"] }
+# Not the workspace entry: its default native TLS would link OpenSSL on Linux.
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "charset",
+    "http2",
+    "json",
+    "rustls-tls",
+    "rustls-tls-native-roots",
+    "system-proxy",
+] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
