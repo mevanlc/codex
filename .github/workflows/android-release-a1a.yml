@@ -601,8 +601,9 @@ jobs:
           cargo build --release \
             --bin codex \
             --bin codex-code-mode-host \
-            --bin codex-fork-installer \
             --target aarch64-linux-android
+          # Built alone so features unified with codex do not link OpenSSL into it.
+          cargo build --release -p codex-fork-installer --target aarch64-linux-android
           echo "Post-build V8-related files under $CARGO_TARGET_DIR:"
           find "$CARGO_TARGET_DIR" -maxdepth 10 \( -path "*/build/v8-*/out/*" -o -name "librusty_v8*.a" -o -name "*.sum" \) -print 2>/dev/null | sort
 

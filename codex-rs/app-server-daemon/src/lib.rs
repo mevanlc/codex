@@ -12,6 +12,7 @@ mod client;
 mod diagnostics;
 mod fork_installer;
 pub use fork_installer::download_installer;
+pub use fork_installer::selected_cli_release;
 mod install_lock;
 mod launch;
 pub use launch::restart_with_features;

@@ -824,6 +824,7 @@ async fn run_update_action(
     )
     .await
     .map_err(|error| error.context("Could not download the fork installer"))?;
+    let selected = codex_app_server_daemon::selected_cli_release();
     let status = std::process::Command::new(&installer)
         .current_dir(directory.path())
         .status()?;
@@ -831,7 +832,11 @@ async fn run_update_action(
         status.success(),
         "Fork installer failed with status {status}"
     );
-    println!("Update installed. Restart Codex to use it.");
+    if selected.is_some() && codex_app_server_daemon::selected_cli_release() == selected {
+        println!("Codex is already up to date.");
+    } else {
+        println!("Update installed. Restart Codex to use it.");
+    }
     Ok(())
 }
 

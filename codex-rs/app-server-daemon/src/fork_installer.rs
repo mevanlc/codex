@@ -152,3 +152,10 @@ pub async fn download_installer(
     let bytes = fetch_installer(&http, &releases).await?;
     write_installer(directory, &bytes)
 }
+
+/// The release the CLI package's `current` selection resolves to. The
+/// installer leaves it unchanged when the installed package is current.
+pub fn selected_cli_release() -> Option<PathBuf> {
+    let root = codex_utils_home_dir::find_fork_install_root().ok()?;
+    std::fs::canonicalize(root.join("packages").join("cli").join("current")).ok()
+}
