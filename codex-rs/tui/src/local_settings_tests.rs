@@ -162,6 +162,16 @@ primary_accent = "3,4,5"
 "#,
             )?;
         }
+        let cli_overrides = vec![
+            ("tui.disable_paste_burst".into(), true.into()),
+            ("tui.right_click_paste".into(), "on".into()),
+            ("tui.mouse_scroll_speed".into(), 1.5.into()),
+            // The removed flag must not override the TUI preference.
+            (
+                "features.transcript_v2".into(),
+                config_text.is_empty().into(),
+            ),
+        ];
         let config = ConfigBuilder::default()
             .codex_home(home.path().to_path_buf())
             .strict_config(true)
@@ -169,32 +179,16 @@ primary_accent = "3,4,5"
                 ignore_project_config: true,
                 ..LoaderOverrides::without_managed_config_for_tests()
             })
-            .cli_overrides(vec![
-                ("tui.disable_paste_burst".into(), true.into()),
-                ("tui.right_click_paste".into(), "on".into()),
-                ("tui.mouse_scroll_speed".into(), 1.5.into()),
-                // The deprecated flag must not override or migrate into the TUI preference.
-                (
-                    "features.transcript_v2".into(),
-                    config_text.is_empty().into(),
-                ),
-            ])
+            .cli_overrides(cli_overrides.clone())
             .build()
             .await?;
         assert_eq!(config.startup_warnings, Vec::<String>::new());
         assert_eq!(config.tui_mouse_scroll_speed, Some(1.5));
+        assert!(config.tui_fullscreen_transcript);
         let bootstrap = crate::legacy_core::config::load_config_toml_with_layer_stack(
             home.path(),
             /*cwd*/ None,
-            vec![
-                ("tui.disable_paste_burst".into(), true.into()),
-                ("tui.right_click_paste".into(), "on".into()),
-                ("tui.mouse_scroll_speed".into(), 1.5.into()),
-                (
-                    "features.transcript_v2".into(),
-                    config_text.is_empty().into(),
-                ),
-            ],
+            cli_overrides,
             codex_config::ConfigLoadOptions {
                 loader_overrides: LoaderOverrides {
                     ignore_project_config: true,
@@ -218,14 +212,7 @@ primary_accent = "3,4,5"
             }
         };
         assert_eq!(local.tui.fork, expected_fork);
-        assert_eq!(
-            config
-                .features
-                .legacy_feature_usages()
-                .map(|usage| usage.alias.as_str())
-                .collect::<Vec<_>>(),
-            vec!["features.transcript_v2"],
-        );
+        assert_eq!(config.features.legacy_feature_usages().count(), 1);
     }
     Ok(())
 }

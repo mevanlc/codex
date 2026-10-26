@@ -536,6 +536,15 @@ async fn assert_cancelled_queued_menu_drains_next_input(
     complete_turn_with_message(&mut chat, "turn-1", Some("done"));
 
     assert_eq!(chat.input_queue.queued_user_messages.len(), 1);
+    if command.trim() == "/permissions" {
+        assert!(
+            std::iter::from_fn(|| rx.try_recv().ok())
+                .any(|event| matches!(event, AppEvent::OpenPermissionsPopup)),
+            "permission menu must go through the app"
+        );
+        assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
+        chat.open_permissions_popup();
+    }
     let popup = render_bottom_popup(&chat, /*width*/ 80);
     assert!(
         popup.contains(expected_popup_text),
@@ -609,6 +618,10 @@ async fn queued_settings_selection_applies_before_next_input() {
             AppEvent::OpenReasoningPopup { model } => chat.open_reasoning_popup(model),
             AppEvent::UpdateModel(model) => chat.set_model(&model),
             AppEvent::UpdateReasoningEffort(effort) => chat.set_reasoning_effort(effort),
+            AppEvent::ApplyModelSelection { model, effort } => {
+                chat.set_model(&model);
+                chat.set_reasoning_effort(effort);
+            }
             AppEvent::SettingsSelectionClosed => {
                 chat.app_event_tx.send(AppEvent::SettingsSelectionSettled);
             }
@@ -1735,11 +1748,10 @@ async fn slash_copy_picker_uses_completed_commentary_during_active_turn() {
     let commentary = "Here is the command:\n\n```sh\necho current\n```";
     let current_thread_id = chat.thread_id.map(|id| id.to_string()).unwrap_or_default();
     chat.handle_server_notification(
-        ServerNotification::ItemCompleted(ItemCompletedNotification {
-            thread_id: current_thread_id,
-            turn_id: "active".to_string(),
-            completed_at_ms: 0,
-            item: AppServerThreadItem::AgentMessage {
+        ServerNotification::ItemCompleted(ItemCompletedNotification::new(
+            current_thread_id,
+            "active".to_string(),
+            AppServerThreadItemPayload::AgentMessage {
                 id: "active-commentary".to_string(),
                 text: commentary.to_string(),
                 phase: Some(MessagePhase::Commentary),
@@ -1747,7 +1759,9 @@ async fn slash_copy_picker_uses_completed_commentary_during_active_turn() {
                 delivery: None,
                 questions: None,
             },
-        }),
+            /*started_at_ms*/ None,
+            /*completed_at_ms*/ 0,
+        )),
         /*replay_kind*/ None,
     );
     while rx.try_recv().is_ok() {}
@@ -1769,15 +1783,16 @@ async fn slash_copy_state_tracks_plan_item_completion() {
     let plan_text = "## Plan\n\n1. Build it\n2. Test it\n\n```sh\r\njust test  \r\n```".to_string();
 
     chat.handle_server_notification(
-        ServerNotification::ItemCompleted(ItemCompletedNotification {
-            thread_id: String::new(),
-            turn_id: "turn-1".to_string(),
-            completed_at_ms: 0,
-            item: AppServerThreadItem::Plan {
+        ServerNotification::ItemCompleted(ItemCompletedNotification::new(
+            String::new(),
+            "turn-1".to_string(),
+            AppServerThreadItemPayload::Plan {
                 id: "plan-1".to_string(),
                 text: plan_text.clone(),
             },
-        }),
+            /*started_at_ms*/ None,
+            /*completed_at_ms*/ 0,
+        )),
         /*replay_kind*/ None,
     );
     handle_turn_completed(&mut chat, "turn-1", /*duration_ms*/ None);

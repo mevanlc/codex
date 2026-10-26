@@ -104,6 +104,7 @@ pub enum RolloutRecorderParams {
         /// thread ID stable while creating a new immutable rollout file.
         rollout_id_override: Option<RolloutId>,
         forked_from_id: Option<ThreadId>,
+        attached_thread: bool,
         forked_from_ordinal_exclusive: Option<u64>,
         parent_thread_id: Option<ThreadId>,
         source: Box<SessionSource>,
@@ -128,6 +129,9 @@ pub enum RolloutRecorderParams {
 
 enum RolloutCmd {
     AddItems(Vec<RolloutItem>),
+    ReadUnpersistedSessionMeta {
+        ack: oneshot::Sender<Option<SessionMeta>>,
+    },
     Persist {
         ack: oneshot::Sender<std::io::Result<()>>,
     },
@@ -194,6 +198,17 @@ fn clone_io_error(err: &IoError) -> IoError {
 }
 
 impl RolloutRecorderParams {
+    pub fn with_attached_thread(mut self, attached_thread: bool) -> Self {
+        if let Self::Create {
+            attached_thread: value,
+            ..
+        } = &mut self
+        {
+            *value = attached_thread;
+        }
+        self
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         conversation_id: ThreadId,
@@ -210,6 +225,7 @@ impl RolloutRecorderParams {
             conversation_id,
             rollout_id_override: None,
             forked_from_id,
+            attached_thread: false,
             forked_from_ordinal_exclusive: None,
             parent_thread_id,
             source: Box::new(source),
@@ -916,6 +932,7 @@ impl RolloutRecorder {
                 conversation_id,
                 rollout_id_override,
                 forked_from_id,
+                attached_thread,
                 forked_from_ordinal_exclusive,
                 parent_thread_id,
                 source,
@@ -950,6 +967,7 @@ impl RolloutRecorder {
                     session_id,
                     id: conversation_id,
                     forked_from_id,
+                    attached_thread,
                     forked_from_ordinal_exclusive: forked_from_ordinal_exclusive
                         .filter(|_| forked_from_id.is_some()),
                     parent_thread_id,
@@ -1044,6 +1062,19 @@ impl RolloutRecorder {
 
     pub fn rollout_path(&self) -> &Path {
         self.rollout_path.as_path()
+    }
+
+    /// Reads the creation metadata while this writer still defers its rollout file.
+    ///
+    /// The writer orders this read with persistence. Resumed or already materialized rollouts
+    /// return `None`, so callers must keep using their durable metadata.
+    pub async fn unpersisted_session_meta(&self) -> std::io::Result<Option<SessionMeta>> {
+        let (ack, result) = oneshot::channel();
+        self.tx
+            .send(RolloutCmd::ReadUnpersistedSessionMeta { ack })
+            .await
+            .map_err(IoError::other)?;
+        result.await.map_err(IoError::other)
     }
 
     pub async fn record_canonical_items(&self, items: &[RolloutItem]) -> std::io::Result<()> {
@@ -1969,6 +2000,14 @@ async fn rollout_writer(
     // Process rollout commands
     while let Some(cmd) = rx.recv().await {
         match cmd {
+            RolloutCmd::ReadUnpersistedSessionMeta { ack } => {
+                let metadata = if state.is_deferred() {
+                    state.meta.clone()
+                } else {
+                    None
+                };
+                let _ = ack.send(metadata);
+            }
             RolloutCmd::AddItems(items) => {
                 state.add_items(items);
                 state.flush_if_materialized().await;
@@ -2018,7 +2057,7 @@ async fn write_session_meta(
         git: git_info,
     };
 
-    let rollout_item = RolloutItem::SessionMeta(session_meta_line);
+    let rollout_item = RolloutItem::SessionMeta(Box::new(session_meta_line));
     if let Some(writer) = writer.as_mut() {
         let ordinal = ordinal_state.current()?;
         writer.write_rollout_item(&rollout_item, ordinal).await?;

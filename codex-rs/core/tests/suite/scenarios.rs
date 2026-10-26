@@ -1,5 +1,6 @@
 //! Multi-turn Astra scenarios snapshot the model-visible request history of shipped features.
 
+use super::permissions_messages::PermissionPathScenario;
 use codex_protocol_test_support::ContentItemTestExt;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -46,6 +47,7 @@ use codex_protocol::items::TurnItem;
 use codex_protocol::models::ImageReference;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::CodeModeToolMessages;
+use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ToolMessage;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::EnvironmentConfigState;
@@ -109,6 +111,9 @@ mod incremental_tools_resume;
 #[path = "scenarios_model_instructions.rs"]
 mod model_instructions;
 
+#[path = "scenarios_context_management_tools.rs"]
+mod context_management_tools;
+
 #[path = "scenarios_code_mode_settled_helpers_tests.rs"]
 mod code_mode_settled_helpers;
 
@@ -145,6 +150,12 @@ mod indirect_namespace_prefixes;
 #[path = "scenarios_mcp_resource_messages.rs"]
 mod mcp_resource_messages;
 
+#[path = "scenarios_mcp_ema.rs"]
+mod mcp_ema;
+
+#[path = "scenarios_mcp_sharing.rs"]
+mod mcp_sharing;
+
 #[path = "scenarios_guardian_agent_messages_tests.rs"]
 mod guardian_agent_messages;
 
@@ -180,13 +191,20 @@ mod tools_namespace_budget;
 #[path = "scenarios_skill_catalog_dedup.rs"]
 mod skill_catalog_dedup;
 
+#[path = "scenarios_frozen_cloud_skills.rs"]
+mod frozen_cloud_skills;
+
 #[path = "scenarios_compaction_tests.rs"]
 mod compaction;
+
+#[path = "scenarios_world_state_prefix_tests.rs"]
+mod world_state_prefix;
 
 fn skills_extensions() -> Arc<ExtensionRegistry<Config>> {
     let mut extensions = ExtensionRegistryBuilder::<Config>::new();
     install(&mut extensions, |config: &Config| SkillsExtensionConfig {
         include_instructions: config.include_skill_instructions,
+        catalog_deltas_enabled: config.features.enabled(Feature::SkillCatalogDeltas),
         max_context_tokens: config.skill_max_context_tokens,
         bundled_skills_enabled: config.bundled_skills_enabled(),
         cloud_skill_enabled: config.cloud_skill_enabled,
@@ -293,7 +311,8 @@ fn configure_scenario_catalog(config: &mut Config) {
         stack.requirements().clone(),
         stack.requirements_toml().clone(),
     )
-    .expect("fixture config layers");
+    .expect("fixture config layers")
+    .with_cloud_config_binding(stack.cloud_config_binding().cloned());
     config.model_catalog = Some(bundled_models_response().expect("bundled model catalog"));
     config.cloud_skill_enabled = false;
 }
@@ -975,6 +994,7 @@ async fn astra_omits_disabled_executor_and_plugin_skills_from_model_context(
         SkillProviders::new().with_executor_provider(Arc::new(provider)),
         |config: &Config| SkillsExtensionConfig {
             include_instructions: config.include_skill_instructions,
+            catalog_deltas_enabled: config.features.enabled(Feature::SkillCatalogDeltas),
             max_context_tokens: config.skill_max_context_tokens,
             bundled_skills_enabled: false,
             cloud_skill_enabled: false,
@@ -1398,7 +1418,8 @@ async fn skill_read_recovers_omitted_installation_and_reads_selected_environment
         }
     }
 
-    let executor = core_test_support::exec_server::ExecServerProcess::start().await?;
+    let executor =
+        core_test_support::exec_server::ExecServerProcess::start_with_version("0.164.0").await?;
     // Keep byte-budget decisions stable across host temporary-directory lengths.
     let temp_root = fs::canonicalize(std::env::temp_dir())?;
     let workspace = tempfile::Builder::new()
@@ -1461,6 +1482,7 @@ async fn skill_read_recovers_omitted_installation_and_reads_selected_environment
             )),
         |config: &Config| SkillsExtensionConfig {
             include_instructions: config.include_skill_instructions,
+            catalog_deltas_enabled: config.features.enabled(Feature::SkillCatalogDeltas),
             max_context_tokens: config.skill_max_context_tokens,
             bundled_skills_enabled: false,
             cloud_skill_enabled: true,
@@ -2666,6 +2688,68 @@ async fn model_catalog_refresh_preserves_tools_and_history() -> Result<()> {
     Ok(())
 }
 
+#[test_case::test_case(PermissionPathScenario::OmittedPaths; "omitted_paths")]
+#[test_case::test_case(PermissionPathScenario::DeniedReads; "denied_reads")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn catalog_permission_paths_follow_selected_model(
+    scenario: PermissionPathScenario,
+) -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    if matches!(scenario, PermissionPathScenario::DeniedReads) {
+        core_test_support::skip_if_target_windows!(
+            Ok(()),
+            "Windows restricted-token sandbox cannot enforce deny-read policies"
+        );
+    }
+    let requests =
+        super::permissions_messages::catalog_permission_paths_model_change_requests(scenario)
+            .await?;
+    let mut bodies = requests
+        .iter()
+        .map(core_test_support::responses::ResponsesRequest::body_json)
+        .collect::<Vec<_>>();
+    // Keep the complete history, but collapse the large platform-specific fixture path lists
+    // before snapshot hashing. The helper verifies selected roots, denial facts, and omission.
+    let roots = regex_lite::Regex::new(r"(?m)^(Model [AB] roots: ).*$")?;
+    let filesystem = regex_lite::Regex::new(r"<filesystem>.*</filesystem>")?;
+    for body in &mut bodies {
+        for item in body["input"].as_array_mut().expect("request input") {
+            for content in item["content"].as_array_mut().into_iter().flatten() {
+                if let Some(text) = content["text"].as_str() {
+                    let text = roots.replace_all(text, "${1}<BOUNDED_ROOT_LIST>.");
+                    content["text"] = filesystem
+                        .replace_all(
+                            &text,
+                            "<filesystem><LARGE_PERMISSION_PATH_FIXTURE/></filesystem>",
+                        )
+                        .into_owned()
+                        .into();
+                }
+            }
+        }
+    }
+    let entries = bodies.iter().map(SnapshotEntry::body).collect::<Vec<_>>();
+    let (snapshot_name, description) = match scenario {
+        PermissionPathScenario::OmittedPaths => (
+            "catalog_writable_roots_follow_selected_model",
+            "Catalog root and omitted-path wording follows the selected model, appending changed permissions once while preserving prior input and the mandatory omission warning.",
+        ),
+        PermissionPathScenario::DeniedReads => (
+            "catalog_denied_reads_follow_selected_model",
+            "Catalog denied-read wording follows the selected model, appending changed permissions once while preserving prior input, denial facts, and mandatory policy warnings.",
+        ),
+    };
+    insta::assert_snapshot!(
+        snapshot_name,
+        context_snapshot::format_context_snapshot(
+            description,
+            &entries,
+            &ContextSnapshotOptions::default().include_request_settings(),
+        )
+    );
+    Ok(())
+}
+
 fn compaction_chunk(
     gate: Option<oneshot::Receiver<()>>,
     events: Vec<serde_json::Value>,
@@ -2910,7 +2994,7 @@ async fn astra_async_compaction_keeps_work_added_after_its_snapshot(
     )
     .await?;
     assert_eq!(compaction_events.len(), if over_budget { 4 } else { 2 });
-    for pair in compaction_events.chunks_exact(2) {
+    for pair in compaction_events.as_chunks::<2>().0 {
         assert_eq!((pair[0].0, pair[1].0), ("started", "completed"));
         assert_eq!(pair[0].1, pair[1].1);
     }
@@ -3005,11 +3089,13 @@ enum PendingCompactionOutcome {
     SuccessOverBudget,
     StaleSuccess,
     Failure,
+    ReadyFailure,
     Interrupted,
 }
 
 #[test_case::test_case(PendingCompactionOutcome::Success, CompactionTrigger::Auto; "auto uses pending result")]
 #[test_case::test_case(PendingCompactionOutcome::Failure, CompactionTrigger::Auto; "auto falls back after failure")]
+#[test_case::test_case(PendingCompactionOutcome::ReadyFailure, CompactionTrigger::Auto; "auto falls back after failure before checkpoint")]
 #[test_case::test_case(PendingCompactionOutcome::StaleSuccess, CompactionTrigger::Auto; "auto falls back after account changes")]
 #[test_case::test_case(PendingCompactionOutcome::Interrupted, CompactionTrigger::Auto; "auto can be interrupted")]
 #[test_case::test_case(PendingCompactionOutcome::Absent, CompactionTrigger::Manual; "manual without background")]
@@ -3037,12 +3123,16 @@ async fn async_compaction_reuses_pending_work(
     } else {
         10_000
     };
-    let valid_output = outcome != PendingCompactionOutcome::Failure;
+    let valid_output = !matches!(
+        outcome,
+        PendingCompactionOutcome::Failure | PendingCompactionOutcome::ReadyFailure
+    );
     let succeeds = !matches!(
         outcome,
         PendingCompactionOutcome::Absent
             | PendingCompactionOutcome::SuccessOverBudget
             | PendingCompactionOutcome::Failure
+            | PendingCompactionOutcome::ReadyFailure
             | PendingCompactionOutcome::StaleSuccess
     );
     let response = |id, event, tokens| vec![event, ev_completed_with_tokens(id, tokens)];
@@ -3108,6 +3198,20 @@ async fn async_compaction_reuses_pending_work(
     if has_background {
         tokio::time::timeout(timeout, streaming.wait_for_request_count(/*count*/ 2)).await?;
     }
+    let release_background = if outcome == PendingCompactionOutcome::ReadyFailure {
+        release_background
+            .send(())
+            .expect("fail background compaction before the next checkpoint");
+        // The client must observe the failure before take_ready polls the closed receiver.
+        tokio::time::timeout(
+            timeout,
+            test.codex.wait_for_background_compaction_for_test(),
+        )
+        .await?;
+        None
+    } else {
+        Some(release_background)
+    };
     if manual {
         test.codex.submit(Op::Compact).await?;
     } else if over_budget {
@@ -3127,7 +3231,7 @@ async fn async_compaction_reuses_pending_work(
             if matches!(event.item, TurnItem::ContextCompaction(_)))
     })
     .await;
-    if has_background {
+    if has_background && outcome != PendingCompactionOutcome::ReadyFailure {
         assert_eq!(streaming.requests().await.len(), if manual { 2 } else { 3 });
     }
     if outcome == PendingCompactionOutcome::Interrupted {
@@ -3136,7 +3240,10 @@ async fn async_compaction_reuses_pending_work(
             matches!(event, EventMsg::TurnAborted(_))
         })
         .await;
-        release_background.send(()).expect("release unused result");
+        release_background
+            .expect("pending background compaction")
+            .send(())
+            .expect("release unused result");
         completions.remove(1).await?;
         test.codex.shutdown_and_wait().await?;
         assert_eq!(streaming.requests().await.len(), if manual { 2 } else { 3 });
@@ -3156,7 +3263,7 @@ async fn async_compaction_reuses_pending_work(
         )?;
         auth.reload().await;
     }
-    if has_background {
+    if has_background && let Some(release_background) = release_background {
         release_background.send(()).expect("release pending result");
     }
     let EventMsg::ItemStarted(started) = started else {

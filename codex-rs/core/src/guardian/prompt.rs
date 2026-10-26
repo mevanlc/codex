@@ -18,7 +18,6 @@ use codex_guardian_context::TranscriptSelection;
 use codex_guardian_context::default_registry;
 use codex_protocol::models::ResponseItem;
 
-use crate::context::ContextualUserFragment;
 use crate::context::GuardianPermissionContext;
 use crate::context::GuardianReviewEvidence;
 use crate::context::GuardianToolDescriptions;
@@ -27,9 +26,7 @@ use crate::context::NodeReplReviewEvidenceMode;
 use crate::context::is_guardian_context_message;
 use crate::context::node_repl_review_evidence_mode;
 use crate::session::session::Session;
-use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::approx_bytes_for_tokens;
-use codex_utils_output_truncation::truncate_text;
 
 use super::ApprovalRequestReasons;
 use super::GUARDIAN_MAX_NODE_REPL_TOOL_RESULT_TOKENS;
@@ -38,7 +35,6 @@ use super::GuardianApprovalRequest;
 use super::GuardianReviewContext;
 use super::approval_request::format_guardian_action_pretty;
 
-const GUARDIAN_MAX_APPROVAL_REASON_TOKENS: usize = 512;
 // Bound both JSON and permission evidence without restricting manual approvals.
 const MAX_GUARDIAN_ENVIRONMENT_ID_BYTES: usize = 256;
 pub(super) const GUARDIAN_TRANSCRIPT_START: &str = ">>> TRANSCRIPT START\n";
@@ -138,7 +134,6 @@ pub(crate) async fn build_guardian_prompt_items_with_parent_turn(
                 tool_description.as_deref(),
                 connector_description.as_deref(),
             )
-            .map(|descriptions| descriptions.render().into_text().unwrap_or_default())
         } else {
             None
         },
@@ -152,12 +147,7 @@ pub(crate) async fn build_guardian_prompt_items_with_parent_turn(
             | GuardianApprovalRequest::McpToolCall { .. }
             | GuardianApprovalRequest::RequestPermissions { .. } => PlannedActionKind::Command,
         },
-        reason: reasons.retry.or(reasons.approval).map(|reason| {
-            truncate_text(
-                &reason,
-                TruncationPolicy::Tokens(GUARDIAN_MAX_APPROVAL_REASON_TOKENS),
-            )
-        }),
+        reason: reasons.retry.or(reasons.approval),
     };
     let permissions = parent_context
         .map(|context| {
@@ -225,6 +215,7 @@ pub(crate) async fn build_guardian_prompt_items_with_parent_turn(
         Some(context) => context.turn().config.guardian_transcript_mode,
         None => session.get_config().await.guardian_transcript_mode,
     };
+    profile.transcript.entry_limits.node_repl_output_tokens = node_repl_result_token_limit;
     let mut transcript = profile.prepare_transcript(transcript_entries, offset);
     if transcript_entries.is_empty() {
         transcript.items.push(Budgeted::required(
@@ -243,9 +234,11 @@ pub(crate) async fn build_guardian_prompt_items_with_parent_turn(
 #[cfg(test)]
 pub(crate) fn render_guardian_transcript_entries(
     entries: &[ConversationTranscriptEntry],
+    node_repl_result_token_limit: usize,
 ) -> (Vec<String>, Option<String>) {
-    let mut transcript =
-        ContextProfile::synchronous().prepare_transcript(entries, /*entry_number_offset*/ 0);
+    let mut profile = ContextProfile::synchronous();
+    profile.transcript.entry_limits.node_repl_output_tokens = node_repl_result_token_limit;
+    let mut transcript = profile.prepare_transcript(entries, /*entry_number_offset*/ 0);
     if entries.is_empty() {
         transcript.items.push(Budgeted::required(
             codex_guardian_context::TranscriptContent::Text(
@@ -277,8 +270,8 @@ pub(crate) fn render_guardian_transcript_entries(
 /// Keep both tool calls and tool results here. The reviewer often needs the
 /// agent's exact queried path / arguments as well as the returned evidence to
 /// decide whether the pending approval is justified.
-/// Per-entry truncation happens during collection, using the current review's
-/// Node REPL cap; the cursor still counts every non-empty evidence entry.
+/// Per-entry truncation happens in sync preparation after cursor selection.
+/// The cursor counts every non-empty evidence entry.
 pub(super) fn collect_guardian_context(
     history: &dyn SectionHistory,
     node_repl_result_token_limit: usize,

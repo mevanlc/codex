@@ -1,3 +1,4 @@
+use codex_app_server_protocol::ApplicationStorageRequirements;
 use std::sync::Arc;
 
 use crate::config_manager::ConfigManager;
@@ -71,6 +72,7 @@ const SUPPORTED_EXPERIMENTAL_FEATURE_ENABLEMENT: &[&str] = &[
     BACKGROUND_PAGINATED_ROLLOUT_MIGRATION_FEATURE,
     "codex_apps_mcp_2026_07_28",
     "mcp_2026_07_28",
+    "mcp_connection_sharing",
     "memories",
     "mentions_v2",
     "remote_control",
@@ -374,7 +376,7 @@ pub(super) async fn reload_user_config(
 }
 
 async fn reload_user_config_inner(config_manager: &ConfigManager, thread_manager: &ThreadManager) {
-    config_manager.revoke_mcp_ema();
+    config_manager.revoke_mcp_ema_startups();
     if let Err(err) = config_manager.load_config_layers(/*cwd*/ None).await {
         tracing::warn!("failed to rebuild user config for runtime refresh: {err}");
         for thread_id in thread_manager.list_thread_ids().await {
@@ -462,6 +464,14 @@ pub(crate) fn map_requirements_to_api(
         allowed_login_methods: Some(allowed_login_methods),
         application: requirements.application.map(|application| {
             codex_app_server_protocol::ApplicationRequirements {
+                storage: application
+                    .storage
+                    .map(|storage| ApplicationStorageRequirements {
+                        default_project_parent: storage.default_project_parent.map(Into::into),
+                        projectless_workspace_root: storage
+                            .projectless_workspace_root
+                            .map(Into::into),
+                    }),
                 network: application.network.map(|network| {
                     codex_app_server_protocol::ApplicationNetworkRequirements {
                         enabled: network.enabled,
@@ -859,6 +869,7 @@ fn map_network_requirements_to_api(
                 })
                 .collect()
         }),
+        review_domains: network.review_domains,
         managed_allowed_domains_only: network.managed_allowed_domains_only,
         allowed_domains,
         denied_domains,

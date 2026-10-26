@@ -8,14 +8,22 @@ use codex_app_server_protocol::DynamicToolSpec;
 use codex_app_server_protocol::HooksListParams;
 use codex_app_server_protocol::HooksListResponse;
 use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
 use codex_app_server_protocol::ThreadHistoryMode;
 use codex_app_server_protocol::ThreadLoadedListResponse;
+use codex_app_server_protocol::ThreadSampleCancelResponse;
 use codex_app_server_protocol::ThreadSampleParams;
 use codex_app_server_protocol::ThreadSampleResponse;
+use codex_app_server_protocol::ThreadSource;
 use codex_app_server_protocol::ThreadStartParams;
+use codex_app_server_protocol::TurnCompletedNotification;
+use codex_app_server_protocol::TurnInterruptParams;
+use codex_app_server_protocol::TurnInterruptResponse;
 use codex_app_server_protocol::TurnStartParams;
+use codex_app_server_protocol::TurnStartResponse;
+use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
 use codex_core::config::ConfigBuilder;
 use codex_core::test_support::construct_model_info_offline;
@@ -33,10 +41,12 @@ use core_test_support::skip_if_remote;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 use test_case::test_case;
+use test_case::test_matrix;
 use tokio::sync::Notify;
 use tokio::time::timeout;
 use wiremock::ResponseTemplate;
@@ -160,31 +170,39 @@ async fn prediction_fork(client: &mut TestAppServer, parent: &str) -> Result<Str
     Ok(fork.thread.id)
 }
 
-#[test_case(ThreadHistoryMode::Legacy; "legacy")]
-#[test_case(ThreadHistoryMode::Paginated; "paginated")]
+#[test_matrix(
+    [ThreadHistoryMode::Legacy, ThreadHistoryMode::Paginated],
+    [TurnStatus::Completed, TurnStatus::Failed, TurnStatus::Interrupted]
+)]
 #[tokio::test]
 async fn sample_preserves_context_and_keeps_source_unchanged(
     history_mode: ThreadHistoryMode,
+    parent_status: TurnStatus,
 ) -> Result<()> {
     let server = responses::start_mock_server().await;
+    let compact_parent =
+        history_mode == ThreadHistoryMode::Paginated && parent_status == TurnStatus::Completed;
     let mut parent_responses = vec![responses::sse(vec![
         responses::ev_reasoning_item(
             "parent-reasoning",
             &["Check the release."],
             &["Keep the existing context."],
         ),
-        responses::ev_assistant_message("answer", "Done"),
-        responses::ev_completed_with_tokens(
-            "parent",
-            /*total_tokens*/
-            if history_mode == ThreadHistoryMode::Paginated {
-                330_000
-            } else {
-                100
-            },
-        ),
+        if parent_status == TurnStatus::Interrupted {
+            responses::ev_function_call("parent-call", "parent_tool", "{}")
+        } else {
+            responses::ev_assistant_message("answer", "Done")
+        },
+        if parent_status == TurnStatus::Failed {
+            json!({"type":"response.failed","response":{"id":"parent","error":{"code":"insufficient_quota","message":"quota exceeded"}}})
+        } else {
+            responses::ev_completed_with_tokens(
+                "parent",
+                /*total_tokens*/ if compact_parent { 330_000 } else { 100 },
+            )
+        },
     ])];
-    if history_mode == ThreadHistoryMode::Paginated {
+    if compact_parent {
         parent_responses.push(responses::sse(vec![
             json!({"type":"response.output_item.done","item":{
                 "type":"compaction", "encrypted_content":"sample-test-compacted-parent",
@@ -222,18 +240,14 @@ async fn sample_preserves_context_and_keeps_source_unchanged(
                 ("model_auto_compact_token_limit".to_string(), json!(200_000)),
                 (
                     "model_post_turn_compact_threshold_percent".to_string(),
-                    json!(if history_mode == ThreadHistoryMode::Paginated {
-                        75
-                    } else {
-                        0
-                    }),
+                    json!(if compact_parent { 75 } else { 0 }),
                 ),
             ])),
             ..Default::default()
         })
         .await?;
-    let completed = client
-        .start_turn_and_wait_for_completion(TurnStartParams {
+    let start_id = client
+        .send_turn_start_request(TurnStartParams {
             thread_id: parent.thread.id.clone(),
             input: input("Initial turn"),
             turn_trigger: Some("parent-trigger".to_string()),
@@ -252,6 +266,35 @@ async fn sample_preserves_context_and_keeps_source_unchanged(
             ..Default::default()
         })
         .await?;
+    let started: TurnStartResponse = timeout(WAIT, client.read_response(start_id)).await??;
+    if parent_status == TurnStatus::Interrupted {
+        assert!(matches!(
+            timeout(WAIT, client.read_stream_until_request_message()).await??,
+            ServerRequest::DynamicToolCall { .. }
+        ));
+        let sample_id = client
+            .send_raw_request(
+                "thread/sample",
+                Some(json!({"threadId": parent.thread.id, "expectedTurnId": started.turn.id, "prompt": "Predict"})),
+            )
+            .await?;
+        let error = timeout(
+            WAIT,
+            client.read_stream_until_error_message(RequestId::Integer(sample_id)),
+        )
+        .await??;
+        assert_eq!(error.error.message, "sample source must be idle");
+        let interrupt_id = client
+            .send_turn_interrupt_request(TurnInterruptParams {
+                thread_id: parent.thread.id.clone(),
+                turn_id: started.turn.id,
+            })
+            .await?;
+        let _: TurnInterruptResponse = timeout(WAIT, client.read_response(interrupt_id)).await??;
+    }
+    let completed: TurnCompletedNotification =
+        timeout(WAIT, client.read_notification("turn/completed")).await??;
+    assert_eq!(completed.turn.status, parent_status);
     let path = parent.thread.path.as_ref().expect("persistent source path");
     let before = std::fs::read(path)?;
     client.clear_message_buffer();
@@ -262,7 +305,16 @@ async fn sample_preserves_context_and_keeps_source_unchanged(
             expected_turn_id: completed.turn.id.clone(),
             prompt: "Continue identically".to_string(),
             effort: Some(ReasoningEffort::Medium),
+            thread_source: Some(ThreadSource::Feature("composer_predictions".to_string())),
             turn_trigger: Some("composer_predictions".to_string()),
+            responsesapi_client_metadata: Some(HashMap::from([
+                (
+                    "generation_trigger".to_string(),
+                    "composer_prediction".to_string(),
+                ),
+                ("turn_trigger".to_string(), "client-supplied".to_string()),
+            ])),
+            ..Default::default()
         },
     )
     .await?;
@@ -302,7 +354,7 @@ async fn sample_preserves_context_and_keeps_source_unchanged(
     }
     let requests = mock.requests();
     assert_eq!(requests.len(), sample_index + 3);
-    if history_mode == ThreadHistoryMode::Legacy {
+    if history_mode == ThreadHistoryMode::Legacy && parent_status == TurnStatus::Completed {
         insta::assert_snapshot!(
             "sample_inherits_parent_context",
             context_snapshot::format_request_history_snapshot(
@@ -312,7 +364,7 @@ async fn sample_preserves_context_and_keeps_source_unchanged(
             )
         );
     }
-    if history_mode == ThreadHistoryMode::Paginated {
+    if compact_parent {
         assert_eq!(
             requests[sample_index].inputs_of_type("compaction")[0]["encrypted_content"],
             "sample-test-compacted-parent",
@@ -340,7 +392,21 @@ async fn sample_preserves_context_and_keeps_source_unchanged(
             .header("x-codex-turn-metadata")
             .expect("turn metadata"),
     )?;
+    assert_eq!(metadata["thread_source"], "composer_predictions");
     assert_eq!(metadata["turn_trigger"], "composer_predictions");
+    assert_eq!(metadata["generation_trigger"], "composer_prediction");
+    let body_metadata: Value = serde_json::from_str(
+        prediction.body_json()["client_metadata"]["x-codex-turn-metadata"]
+            .as_str()
+            .expect("body turn metadata"),
+    )?;
+    assert_eq!(body_metadata, metadata);
+    let parent_metadata: Value = serde_json::from_str(
+        &requests[sample_index + 2]
+            .header("x-codex-turn-metadata")
+            .expect("parent turn metadata"),
+    )?;
+    assert!(parent_metadata.get("generation_trigger").is_none());
     Ok(())
 }
 
@@ -450,6 +516,7 @@ async fn sample_preserves_effort_baseline(
             .header("x-codex-turn-metadata")
             .expect("turn metadata"),
     )?;
+    assert_eq!(metadata["thread_source"], "thread_sample");
     assert!(metadata.get("turn_trigger").is_none());
     Ok(())
 }
@@ -496,6 +563,7 @@ async fn sample_skips_inherited_stop_hooks() -> Result<()> {
     let list_id = client
         .send_hooks_list_request(HooksListParams {
             cwds: vec![home.path().to_path_buf()],
+            ..Default::default()
         })
         .await?;
     let hooks: HooksListResponse = client.read_response(list_id).await?;
@@ -588,8 +656,14 @@ async fn sample_returns_null_for_custom_tool_calls() -> Result<()> {
     Ok(())
 }
 
+#[test_case(false, true; "inherit MCPs by default")]
+#[test_case(true, true; "disable MCPs with incremental tools")]
+#[test_case(true, false; "retain MCPs without incremental tools")]
 #[tokio::test]
-async fn sample_blocks_mcp_execution_without_changing_parent_tools() -> Result<()> {
+async fn sample_blocks_mcp_execution_without_changing_parent_tools(
+    disable_mcp: bool,
+    incremental_tools: bool,
+) -> Result<()> {
     let server = responses::start_mock_server().await;
     let mcp = wiremock::MockServer::start().await;
     wiremock::Mock::given(wiremock::matchers::method("POST"))
@@ -653,13 +727,24 @@ async fn sample_blocks_mcp_execution_without_changing_parent_tools() -> Result<(
         &extra_config,
     )
     .await?;
-    let (parent_id, turn_id) = ready_parent(&mut client, ThreadStartParams::default()).await?;
+    let (parent_id, turn_id) = ready_parent(
+        &mut client,
+        ThreadStartParams {
+            config: Some(std::collections::HashMap::from([(
+                "features.incremental_tools".to_string(),
+                json!(incremental_tools),
+            )])),
+            ..Default::default()
+        },
+    )
+    .await?;
     let response = sample(
         &mut client,
         ThreadSampleParams {
             thread_id: parent_id.clone(),
             expected_turn_id: turn_id,
             prompt: "Call the tool again".to_string(),
+            disable_mcp,
             ..Default::default()
         },
     )
@@ -668,20 +753,40 @@ async fn sample_blocks_mcp_execution_without_changing_parent_tools() -> Result<(
         (response.text, response.response_id),
         (None, "sample-tool".to_string())
     );
-    let fork = prediction_fork(&mut client, &parent_id).await?;
+    let fork_id = client
+        .send_thread_fork_request(ThreadForkParams {
+            thread_id: parent_id,
+            experimental_prediction_mode: true,
+            experimental_disable_prediction_mcp: disable_mcp,
+            ephemeral: true,
+            exclude_turns: true,
+            ..Default::default()
+        })
+        .await?;
+    let fork: ThreadForkResponse = timeout(WAIT, client.read_response(fork_id)).await??;
     client
         .start_turn_and_wait_for_completion(TurnStartParams {
-            thread_id: fork,
+            thread_id: fork.thread.id,
             input: input("Call the tool again"),
             ..Default::default()
         })
         .await?;
     let requests = mock.requests();
     assert_eq!(requests.len(), 4);
+    let parent = comparable_request(requests[1].body_json());
+    let sample = comparable_request(requests[2].body_json());
+    let prefix = parent["input"].as_array().expect("parent input");
+    let sample_input = sample["input"].as_array().expect("sample input");
+    assert_eq!(&sample_input[..prefix.len()], prefix);
+    let removes_mcp = disable_mcp && incremental_tools;
     assert_eq!(
-        comparable_request(requests[2].body_json()),
-        comparable_request(requests[3].body_json())
+        sample_input[prefix.len()..].iter().any(|item| {
+            let text = item.to_string();
+            text.contains("namespaces are no longer available") && text.contains("mcp__sample_test")
+        }),
+        removes_mcp
     );
+    assert_eq!(sample, comparable_request(requests[3].body_json()));
     assert_eq!(
         requests[2].body_json()["tools"],
         requests[1].body_json()["tools"]
@@ -732,8 +837,15 @@ async fn sample_does_not_hide_stream_errors_after_tool_calls() -> Result<()> {
     Ok(())
 }
 
+enum SampleStop {
+    Timeout,
+    Cancel,
+}
+
+#[test_case(SampleStop::Timeout; "timeout")]
+#[test_case(SampleStop::Cancel; "cancel")]
 #[tokio::test]
-async fn sample_wait_keeps_parent_responsive_and_timeout_reclaims_child() -> Result<()> {
+async fn sample_wait_keeps_parent_responsive_and_reclaims_child(stop: SampleStop) -> Result<()> {
     let server = responses::start_mock_server().await;
     responses::mount_sse_once(
         &server,
@@ -781,16 +893,40 @@ async fn sample_wait_keeps_parent_responsive_and_timeout_reclaims_child() -> Res
         }),
     )
     .await??;
+    let (expected_error, wait) = match stop {
+        SampleStop::Timeout => ("sample timed out", WAIT),
+        SampleStop::Cancel => {
+            let cancel_id = client
+                .send_raw_request(
+                    "thread/sample/cancel",
+                    Some(json!({"requestId": sample_id})),
+                )
+                .await?;
+            let response: ThreadSampleCancelResponse =
+                timeout(Duration::from_secs(10), client.read_response(cancel_id)).await??;
+            assert_eq!(response, ThreadSampleCancelResponse {});
+            ("sample canceled", Duration::from_secs(10))
+        }
+    };
     let error = timeout(
-        WAIT,
+        wait,
         client.read_stream_until_error_message(RequestId::Integer(sample_id)),
     )
     .await??;
-    assert!(
-        error.error.message.contains("timed out"),
-        "{}",
-        error.error.message
-    );
+    assert_eq!(error.error.message, expected_error);
+    if matches!(stop, SampleStop::Cancel) {
+        for request_id in [json!(sample_id), json!("unknown")] {
+            let cancel_id = client
+                .send_raw_request(
+                    "thread/sample/cancel",
+                    Some(json!({"requestId": request_id})),
+                )
+                .await?;
+            let response: ThreadSampleCancelResponse =
+                timeout(Duration::from_secs(10), client.read_response(cancel_id)).await??;
+            assert_eq!(response, ThreadSampleCancelResponse {});
+        }
+    }
     assert_eq!(mock.requests().len(), 1);
     timeout(WAIT, async {
         loop {
@@ -849,7 +985,7 @@ async fn sample_rejects_invalid_sources_and_prompts() -> Result<()> {
             parent.clone(),
             "stale".to_string(),
             "Predict".to_string(),
-            "latest completed turn",
+            "latest finished turn",
         ),
         (parent.clone(), turn.clone(), String::new(), "prompt"),
         (

@@ -1,6 +1,6 @@
 //! Regression coverage for associating asynchronous matcher results with their query.
 
-use super::*;
+use crate::*;
 use nucleo::Utf32String;
 use pretty_assertions::assert_eq;
 

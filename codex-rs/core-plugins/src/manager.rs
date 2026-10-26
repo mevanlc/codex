@@ -14,6 +14,7 @@ use super::LoadedPlugin;
 use super::PluginLoadOutcome;
 use crate::PluginGitMode;
 use crate::app_mcp_routing::apply_app_mcp_routing_policy;
+use crate::app_mcp_routing::plugin_supports_apps;
 use crate::http_client_selector::HttpClientSelector;
 use crate::installed_marketplaces::installed_marketplace_roots_from_layer_stack;
 use crate::is_openai_curated_marketplace_name;
@@ -60,6 +61,7 @@ use crate::marketplace_upgrade::ConfiguredMarketplaceUpgradeError;
 use crate::marketplace_upgrade::ConfiguredMarketplaceUpgradeOutcome;
 use crate::marketplace_upgrade::upgrade_configured_git_marketplaces_with_mode;
 use crate::remote::CODEX_PRODUCT_SKU;
+use crate::remote::InstalledPluginDisplayAssets;
 use crate::remote::REMOTE_GLOBAL_MARKETPLACE_NAME;
 use crate::remote::RecommendedPluginsMode;
 use crate::remote::RemoteInstalledPlugin;
@@ -143,6 +145,7 @@ use std::time::Instant;
 use tokio::sync::OnceCell;
 use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::Semaphore;
+use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tracing::instrument;
 use tracing::warn;
@@ -279,10 +282,11 @@ struct RemoteInstalledPluginsCache {
     // A cancelled pass may mutate bundles before publication; retry must notify consumers.
     needs_effective_plugins_refresh: bool,
     plugins: Option<Vec<RemoteInstalledPlugin>>,
+    display_assets: InstalledPluginDisplayAssets,
 }
 
 enum RemoteInstalledPluginsCachePublication {
-    Refresh,
+    Refresh(InstalledPluginDisplayAssets),
     Reconcile,
 }
 
@@ -1247,10 +1251,23 @@ impl PluginsManager {
         &self,
         visible_marketplaces: &[&str],
     ) -> Option<Vec<crate::remote::RemoteMarketplace>> {
+        self.build_remote_installed_plugin_marketplaces_from_cache_with_display_assets(
+            visible_marketplaces,
+            InstalledPluginDisplayAssets::Include,
+        )
+    }
+
+    /// A runtime snapshot cannot satisfy a caller that requires display enrichment.
+    pub fn build_remote_installed_plugin_marketplaces_from_cache_with_display_assets(
+        &self,
+        visible_marketplaces: &[&str],
+        display_assets: InstalledPluginDisplayAssets,
+    ) -> Option<Vec<crate::remote::RemoteMarketplace>> {
         let auth = self.auth_manager.auth_cached();
         self.build_remote_installed_plugin_marketplaces_from_cache_for_auth(
             auth.as_ref(),
             visible_marketplaces,
+            display_assets,
         )
     }
 
@@ -1258,6 +1275,7 @@ impl PluginsManager {
         &self,
         auth: Option<&CodexAuth>,
         visible_marketplaces: &[&str],
+        display_assets: InstalledPluginDisplayAssets,
     ) -> Option<Vec<crate::remote::RemoteMarketplace>> {
         let cache = match self.remote_installed_plugins_cache.read() {
             Ok(cache) => cache,
@@ -1265,6 +1283,11 @@ impl PluginsManager {
         };
         if cache.auth_identity.as_ref()
             != Some(&RemoteInstalledPluginsAuthIdentity::from_auth(auth))
+        {
+            return None;
+        }
+        if display_assets == InstalledPluginDisplayAssets::Include
+            && cache.display_assets == InstalledPluginDisplayAssets::Skip
         {
             return None;
         }
@@ -1309,12 +1332,32 @@ impl PluginsManager {
         visible_marketplaces: &[&str],
         on_effective_plugins_changed: Option<EffectivePluginsChangedCallback>,
     ) -> Result<Vec<crate::remote::RemoteMarketplace>, RemotePluginCatalogError> {
+        self.build_and_cache_remote_installed_plugin_marketplaces_with_display_assets(
+            config,
+            auth,
+            visible_marketplaces,
+            on_effective_plugins_changed,
+            InstalledPluginDisplayAssets::Include,
+        )
+        .await
+    }
+
+    /// Fetch installed runtime metadata without optional display enrichment.
+    pub async fn build_and_cache_remote_installed_plugin_marketplaces_with_display_assets(
+        &self,
+        config: &PluginsConfigInput,
+        auth: Option<&CodexAuth>,
+        visible_marketplaces: &[&str],
+        on_effective_plugins_changed: Option<EffectivePluginsChangedCallback>,
+        display_assets: InstalledPluginDisplayAssets,
+    ) -> Result<Vec<crate::remote::RemoteMarketplace>, RemotePluginCatalogError> {
         let generation = self
             .prepare_remote_installed_plugins_cache_generation(auth)
             .ok_or(RemotePluginCatalogError::AuthRequired)?;
-        let plugins = crate::remote::fetch_remote_installed_plugins(
+        let plugins = crate::remote::fetch_remote_installed_plugins_with_display_assets(
             &remote_plugin_service_config(config),
             auth,
+            display_assets,
         )
         .await?;
         let marketplaces = crate::remote::group_remote_installed_plugins_by_marketplaces(
@@ -1325,7 +1368,7 @@ impl PluginsManager {
             generation,
             plugins,
             auth,
-            RemoteInstalledPluginsCachePublication::Refresh,
+            RemoteInstalledPluginsCachePublication::Refresh(display_assets),
         ) else {
             let auth_identity = RemoteInstalledPluginsAuthIdentity::from_auth(auth);
             if !self.remote_installed_plugins_auth_is_current(&auth_identity) {
@@ -1335,6 +1378,7 @@ impl PluginsManager {
                 .build_remote_installed_plugin_marketplaces_from_cache_for_auth(
                     auth,
                     visible_marketplaces,
+                    display_assets,
                 )
                 .unwrap_or(marketplaces));
         };
@@ -1345,6 +1389,7 @@ impl PluginsManager {
             .build_remote_installed_plugin_marketplaces_from_cache_for_auth(
                 auth,
                 visible_marketplaces,
+                display_assets,
             )
             .unwrap_or(marketplaces))
     }
@@ -1462,6 +1507,12 @@ impl PluginsManager {
         }
         let needs_effective_plugins_refresh =
             is_reconcile && std::mem::take(&mut cache.needs_effective_plugins_refresh);
+        cache.display_assets = match publication {
+            RemoteInstalledPluginsCachePublication::Refresh(display_assets) => display_assets,
+            RemoteInstalledPluginsCachePublication::Reconcile => {
+                InstalledPluginDisplayAssets::Include
+            }
+        };
         if cache.plugins.as_ref() == Some(&plugins) {
             drop(cache);
             if needs_effective_plugins_refresh {
@@ -1491,7 +1542,7 @@ impl PluginsManager {
             generation,
             plugins,
             auth.as_ref(),
-            RemoteInstalledPluginsCachePublication::Refresh,
+            RemoteInstalledPluginsCachePublication::Refresh(InstalledPluginDisplayAssets::Include),
         )
         .expect("test cache generation should remain current")
     }
@@ -1537,6 +1588,7 @@ impl PluginsManager {
         self: &Arc<Self>,
         config: &PluginsConfigInput,
         auth: Option<CodexAuth>,
+        prefetch_recommendations: bool,
         on_effective_plugins_changed: Option<EffectivePluginsChangedCallback>,
     ) {
         self.maybe_start_remote_installed_plugins_cache_refresh_with_notify(
@@ -1547,6 +1599,9 @@ impl PluginsManager {
             EffectivePluginsChange::default(),
         );
 
+        if !prefetch_recommendations {
+            return;
+        }
         let manager = Arc::clone(self);
         let config = config.clone();
         tokio::spawn(async move {
@@ -1822,6 +1877,7 @@ impl PluginsManager {
         self.maybe_start_remote_plugin_caches_refresh(
             &context.global_config,
             auth.clone(),
+            /*prefetch_recommendations*/ true,
             on_effective_plugins_changed.clone(),
         );
         self.maybe_start_remote_installed_plugin_bundle_sync(
@@ -2762,7 +2818,7 @@ impl PluginsManager {
             })
             .collect();
         let auth_mode = self.auth_mode();
-        let mut app_declarations = if manifest_format == PluginManifestFormat::Legacy {
+        let mut app_declarations = if plugin_supports_apps(manifest_format, &plugin_id) {
             load_plugin_apps_from_manifest(source_path.as_path(), &manifest.paths).await
         } else {
             Vec::new()
@@ -2777,14 +2833,12 @@ impl PluginsManager {
             manifest_format,
         )
         .await;
-        if manifest_format == PluginManifestFormat::Legacy {
-            apply_app_mcp_routing_policy(
-                &mut app_declarations,
-                &mut mcp_servers,
-                auth_mode,
-                /*plugin_active*/ true,
-            );
-        }
+        apply_app_mcp_routing_policy(
+            &mut app_declarations,
+            &mut mcp_servers,
+            auth_mode,
+            /*plugin_active*/ true,
+        );
         let apps = app_connector_ids_from_declarations(&app_declarations);
         let mut seen_app_connector_ids = HashSet::new();
         let mut app_category_by_id = HashMap::new();
@@ -2821,11 +2875,14 @@ impl PluginsManager {
         })
     }
 
+    /// Starts background tasks and sends marketplace upgrade warnings through the supplied channel.
     pub fn maybe_start_plugin_startup_tasks_for_config(
         self: &Arc<Self>,
         config: &PluginsConfigInput,
+        prefetch_discovery: bool,
         reload_config: ConfigLayerReload,
         on_effective_plugins_changed: Option<EffectivePluginsChangedCallback>,
+        upgrade_warnings: mpsc::UnboundedSender<String>,
     ) {
         if config.plugins_enabled {
             self.maybe_start_curated_repo_sync_for_config(
@@ -2849,6 +2906,7 @@ impl PluginsManager {
                 let config = config.clone();
                 let on_effective_plugins_changed = on_effective_plugins_changed.clone();
                 let runtime = tokio::runtime::Handle::current();
+                let task_warnings = upgrade_warnings.clone();
                 if let Err(err) = std::thread::Builder::new()
                     .name("plugins-marketplace-auto-upgrade".to_string())
                     .spawn(move || {
@@ -2876,10 +2934,16 @@ impl PluginsManager {
                                         error = %error.message,
                                         "failed to auto-upgrade configured marketplace"
                                     );
+                                    let _ = task_warnings.send(format!(
+                                        "Codex could not update marketplace `{}`: {}",
+                                        error.marketplace_name, error.message
+                                    ));
                                 }
                             }
                             Err(err) => {
                                 warn!("failed to auto-upgrade configured marketplaces: {err}");
+                                let _ = task_warnings
+                                    .send(format!("Codex could not update marketplaces: {err}"));
                             }
                         }
 
@@ -2896,6 +2960,8 @@ impl PluginsManager {
                     };
                     state.in_flight = false;
                     warn!("failed to start configured marketplace auto-upgrade task: {err}");
+                    let _ = upgrade_warnings
+                        .send(format!("Codex could not start marketplace updates: {err}"));
                 }
             }
             let config_for_remote_sync = config.clone();
@@ -2906,6 +2972,7 @@ impl PluginsManager {
                 manager.maybe_start_remote_plugin_caches_refresh(
                     &config_for_remote_sync,
                     auth.clone(),
+                    prefetch_discovery,
                     on_effective_plugins_changed.clone(),
                 );
                 manager.maybe_start_remote_installed_plugin_bundle_sync(
@@ -2913,30 +2980,32 @@ impl PluginsManager {
                     auth.clone(),
                     on_effective_plugins_changed,
                 );
+                if !prefetch_discovery {
+                    return;
+                }
+                let scopes_to_probe: &[RemotePluginScope] =
+                    if config_for_remote_sync.remote_plugin_enabled {
+                        &[RemotePluginScope::User, RemotePluginScope::Workspace]
+                    } else {
+                        &[RemotePluginScope::Workspace]
+                    };
                 let mut scopes = crate::remote::cached_remote_plugin_catalog_scopes(
                     manager.codex_home.as_path(),
                     &remote_plugin_service_config(&config_for_remote_sync),
                     auth.as_ref(),
+                    scopes_to_probe,
                 );
                 if config_for_remote_sync.remote_plugin_enabled {
                     scopes.insert(RemotePluginScope::Global);
-                } else {
-                    scopes.retain(|scope| *scope == RemotePluginScope::Workspace);
                 }
                 manager.maybe_start_remote_catalog_cache_refresh(
                     &config_for_remote_sync,
-                    auth,
+                    auth.clone(),
                     scopes,
                     RemoteCatalogCacheRefreshMode::Force,
                 );
-            });
-
-            let config_for_featured_plugins = config.clone();
-            let manager = Arc::clone(self);
-            tokio::spawn(async move {
-                let auth = manager.auth_manager.auth().await;
                 if let Err(err) = manager
-                    .featured_plugin_ids_for_config(&config_for_featured_plugins, auth.as_ref())
+                    .featured_plugin_ids_for_config(&config_for_remote_sync, auth.as_ref())
                     .await
                 {
                     warn!(
@@ -3383,7 +3452,9 @@ impl PluginsManager {
                         request.generation,
                         plugins,
                         request.auth.as_ref(),
-                        RemoteInstalledPluginsCachePublication::Refresh,
+                        RemoteInstalledPluginsCachePublication::Refresh(
+                            InstalledPluginDisplayAssets::Include,
+                        ),
                     ) else {
                         continue;
                     };

@@ -55,6 +55,7 @@ use crate::request_serialization::QueuedInitializedRequest;
 use crate::request_serialization::RequestSerializationQueueKey;
 use crate::request_serialization::RequestSerializationQueues;
 use crate::skills_watcher::SkillsWatcher;
+use crate::startup_warnings::StartupWarnings;
 use crate::thread_state::ConnectionCapabilities;
 use crate::thread_state::ThreadStateManager;
 use crate::transport::AppServerTransport;
@@ -72,6 +73,7 @@ use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::JSONRPCNotification;
 use codex_app_server_protocol::JSONRPCRequest;
 use codex_app_server_protocol::JSONRPCResponse;
+use codex_app_server_protocol::ThreadSampleCancelResponse;
 use codex_app_server_protocol::UserVerificationCancelResponse;
 use codex_app_server_protocol::experimental_required_message;
 use codex_arg0::Arg0DispatchPaths;
@@ -81,6 +83,7 @@ use codex_core::config::Config;
 use codex_core::config::ThreadStoreConfig;
 use codex_exec_server::EnvironmentManager;
 use codex_extension_api::TurnStartAdmission;
+use codex_features::Feature;
 use codex_feedback::CodexFeedback;
 use codex_goal_extension::GoalService;
 use codex_home::CodexHomeUserInstructionsProvider;
@@ -98,6 +101,7 @@ use codex_thread_store::QueueStore;
 use tokio::sync::Mutex;
 use tokio::sync::Semaphore;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::time::Duration;
 use tokio::time::timeout;
@@ -144,6 +148,7 @@ pub(crate) struct MessageProcessor {
     pub(crate) turn_admission: TurnAdmission,
     user_verification: Arc<crate::user_verification::Service>,
     outgoing: Arc<OutgoingMessageSender>,
+    startup_warnings: StartupWarnings,
     models_refresh_worker: ModelsRefreshWorker,
     turn_cost_worker: Option<TurnCostWorker>,
     skills_watcher: Arc<SkillsWatcher>,
@@ -248,6 +253,7 @@ impl ConnectionSessionState {
 }
 
 pub(crate) struct MessageProcessorArgs {
+    pub(crate) cloud_skill_provider: Option<Arc<dyn codex_skills_extension::SkillProvider>>,
     pub(crate) outgoing: Arc<OutgoingMessageSender>,
     pub(crate) analytics_events_client: AnalyticsEventsClient,
     pub(crate) arg0_paths: Arg0DispatchPaths,
@@ -260,6 +266,7 @@ pub(crate) struct MessageProcessorArgs {
     pub(crate) log_db: Option<LogDbLayer>,
     pub(crate) state_db: Option<StateDbHandle>,
     pub(crate) config_warnings: Vec<ConfigWarningNotification>,
+    pub(crate) startup_warnings_tx: mpsc::UnboundedSender<String>,
     pub(crate) session_source: SessionSource,
     pub(crate) auth_manager: Arc<AuthManager>,
     pub(crate) user_verification: Arc<crate::user_verification::Service>,
@@ -276,6 +283,7 @@ impl MessageProcessor {
     /// `Sender` so handlers can enqueue messages to be written to stdout.
     pub(crate) fn new(args: MessageProcessorArgs) -> Self {
         let MessageProcessorArgs {
+            cloud_skill_provider,
             outgoing,
             analytics_events_client,
             arg0_paths,
@@ -287,6 +295,7 @@ impl MessageProcessor {
             log_db,
             state_db,
             config_warnings,
+            startup_warnings_tx,
             session_source,
             auth_manager,
             user_verification,
@@ -357,6 +366,7 @@ impl MessageProcessor {
                         goal_service: Arc::clone(&goal_service),
                         environment_manager: Arc::clone(&environment_manager_for_extensions),
                         executor_skill_provider: Arc::clone(&executor_skill_provider),
+                        cloud_skill_provider: cloud_skill_provider.clone(),
                         git_attribution_base_url: config.chatgpt_base_url.clone(),
                         http_client_factory: config.http_client_factory(),
                         queue_service: queue_service.clone(),
@@ -468,15 +478,6 @@ impl MessageProcessor {
             state_db.clone(),
         );
         let git_processor = GitRequestProcessor::new();
-        let initialize_processor = InitializeRequestProcessor::new(
-            gateway_login_control,
-            outgoing.clone(),
-            analytics_events_client.clone(),
-            Arc::clone(&config),
-            config_warnings.clone(),
-            rpc_transport,
-            Arc::clone(&user_verification),
-        );
         let marketplace_processor =
             MarketplaceRequestProcessor::new(config_manager.clone(), Arc::clone(&thread_manager));
         let mcp_processor = McpRequestProcessor::new(
@@ -535,7 +536,7 @@ impl MessageProcessor {
             log_db,
             Arc::clone(&skills_watcher),
             turn_cost_worker.as_ref().map(TurnCostWorker::handle),
-            config_warnings,
+            config_warnings.clone(),
             sample_responses,
         );
         let turn_processor = TurnRequestProcessor::new(
@@ -567,10 +568,20 @@ impl MessageProcessor {
                 .plugins_manager()
                 .maybe_start_plugin_startup_tasks_for_config(
                     &config.plugins_config_input(),
+                    config.features.enabled(Feature::PluginDiscoveryPrefetch),
                     reload_config,
                     Some(on_effective_plugins_changed),
+                    startup_warnings_tx,
                 );
         }
+        let initialize_processor = InitializeRequestProcessor::new(
+            gateway_login_control,
+            outgoing.clone(),
+            analytics_events_client.clone(),
+            Arc::clone(&config),
+            rpc_transport,
+            Arc::clone(&user_verification),
+        );
         let external_agent_config_processor =
             ExternalAgentConfigRequestProcessor::new(ExternalAgentConfigRequestProcessorArgs {
                 outgoing: outgoing.clone(),
@@ -599,6 +610,9 @@ impl MessageProcessor {
             turn_admission,
             user_verification,
             outgoing,
+            startup_warnings: StartupWarnings {
+                config: config_warnings,
+            },
             models_refresh_worker,
             turn_cost_worker,
             skills_watcher,
@@ -817,8 +831,8 @@ impl MessageProcessor {
         &self,
         connection_id: ConnectionId,
     ) {
-        self.initialize_processor
-            .send_initialize_notifications_to_connection(connection_id)
+        self.startup_warnings
+            .send_config_to_connections(&self.outgoing, &[connection_id])
             .await;
     }
 
@@ -840,8 +854,8 @@ impl MessageProcessor {
     }
 
     pub(crate) async fn send_initialize_notifications(&self) {
-        self.initialize_processor
-            .send_initialize_notifications()
+        self.startup_warnings
+            .send_config_to_connections(&self.outgoing, &[])
             .await;
     }
 
@@ -1343,6 +1357,15 @@ impl MessageProcessor {
                 .thread_sample(params, Arc::clone(&session.rpc_gate), request_context)
                 .await
                 .map(|response| Some(response.into())),
+            ClientRequest::ThreadSampleCancel { params, .. } => {
+                self.outgoing
+                    .cancel_thread_sample_request(&ConnectionRequestId {
+                        connection_id,
+                        request_id: params.request_id,
+                    })
+                    .await;
+                Ok(Some(ThreadSampleCancelResponse {}.into()))
+            }
             ClientRequest::ThreadArchive { params, .. } => {
                 self.thread_processor
                     .thread_archive(request_id.clone(), params)
@@ -1457,6 +1480,9 @@ impl MessageProcessor {
             }
             ClientRequest::MemoryStatus { params, .. } => {
                 self.thread_processor.memory_status(params).await
+            }
+            ClientRequest::ThreadMemoryRead { params, .. } => {
+                self.thread_processor.thread_memory_read(params).await
             }
             ClientRequest::MemoryReset { .. } => self.thread_processor.memory_reset().await,
             ClientRequest::RolloutCompress { .. } => self.thread_processor.rollout_compress(),
@@ -1912,6 +1938,9 @@ impl MessageProcessor {
             }
             ClientRequest::FeedbackUpload { params, .. } => {
                 self.feedback_processor.feedback_upload(params).await
+            }
+            ClientRequest::FeedbackSave { params, .. } => {
+                self.feedback_processor.feedback_save(params).await
             }
         };
 

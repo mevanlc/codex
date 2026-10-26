@@ -135,7 +135,8 @@ async fn restrictive_launcher_uses_embedded_if_daemon_cannot_start() -> Result<(
             .kill_on_drop(true);
         let mut child = command.spawn()?;
         ensure!(
-            job.assign_and_resume_process(child.id().context("missing CLI pid")?)?,
+            job.assign_and_resume_process(child.id().context("missing CLI pid")?)?
+                .is_some(),
             "CLI job assignment failed"
         );
         let status = child.wait().await?;
@@ -179,7 +180,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
         home.path().join("config.toml"),
         format!(
             "model = \"gpt-5.6-terra\"\n\
-         features.bedrock_setup_wizard = true\ncli_auth_credentials_store = \"file\"\n\
+         cli_auth_credentials_store = \"file\"\n\
          suppress_unstable_features_warning = true\nanalytics.enabled = false\n\
          windows.sandbox = \"unelevated\"\n\
          tui.disable_paste_burst = true\n\
@@ -187,7 +188,7 @@ async fn daemon_startup(command: &str) -> Result<()> {
          notice.model_migrations.\"gpt-5.6-terra\" = \"gpt-6-sol\"\n\
          [projects.{}]\ntrust_level = \"{}\"\n",
             if command == "discovered" {
-                "tui.status_line=[\"model\",\"thread-id\",\"thread-name\"]"
+                "tui.status_line=[\"model\",\"thread-id\",\"thread-name\"]\nfeatures.daemon_auto_start=false"
             } else {
                 ""
             },

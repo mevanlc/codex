@@ -102,6 +102,7 @@ pub(crate) enum ApprovalAction {
     },
     McpToolCall {
         id: String,
+        environment_id: String,
         server: String,
         tool_name: String,
         arguments: Option<serde_json::Value>,
@@ -153,13 +154,29 @@ pub(crate) enum ApprovalCacheKey {
 }
 
 impl ApprovalAction {
-    pub(crate) fn permission_request_payload(&self) -> PermissionRequestPayload {
+    fn hook_environment_id(&self) -> &str {
         match self {
+            Self::ExecCommand { environment_id, .. }
+            | Self::WriteStdin { environment_id, .. }
+            | Self::ApplyPatch { environment_id, .. }
+            | Self::McpToolCall { environment_id, .. }
+            | Self::NetworkAccess { environment_id, .. }
+            | Self::RequestPermissions { environment_id, .. } => environment_id,
+        }
+    }
+
+    pub(crate) fn permission_request_payload(&self) -> PermissionRequestPayload {
+        let mut payload = match self {
             Self::ExecCommand {
                 hook_command,
                 justification,
+                cwd,
                 ..
-            } => PermissionRequestPayload::bash(hook_command.clone(), justification.clone()),
+            } => PermissionRequestPayload::bash(
+                hook_command.clone(),
+                justification.clone(),
+                cwd.clone(),
+            ),
             Self::WriteStdin {
                 id,
                 approval_id,
@@ -173,6 +190,7 @@ impl ApprovalAction {
                 additional_permissions_preapproved: _,
             } => PermissionRequestPayload {
                 tool_name: HookToolName::new("write_stdin"),
+                tool_cwd: Some(cwd.clone()),
                 tool_input: serde_json::json!({
                     "session_id": process_id,
                     "chars": input,
@@ -187,6 +205,7 @@ impl ApprovalAction {
             },
             Self::ApplyPatch { patch, .. } => PermissionRequestPayload {
                 tool_name: HookToolName::apply_patch(),
+                tool_cwd: None,
                 tool_input: serde_json::json!({ "command": patch }),
             },
             Self::McpToolCall {
@@ -195,6 +214,7 @@ impl ApprovalAction {
                 ..
             } => PermissionRequestPayload {
                 tool_name: hook_tool_name.clone(),
+                tool_cwd: None,
                 tool_input: arguments
                     .clone()
                     .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new())),
@@ -202,10 +222,16 @@ impl ApprovalAction {
             Self::NetworkAccess {
                 hook_command,
                 target,
+                cwd,
+                trigger,
                 ..
             } => PermissionRequestPayload::bash(
                 hook_command.clone(),
                 Some(format!("network-access {target}")),
+                trigger.as_ref().map_or_else(
+                    || PathUri::from_abs_path(cwd),
+                    |trigger| trigger.cwd.clone(),
+                ),
             ),
             Self::RequestPermissions {
                 reason,
@@ -213,12 +239,25 @@ impl ApprovalAction {
                 ..
             } => PermissionRequestPayload {
                 tool_name: HookToolName::new("request_permissions"),
+                tool_cwd: None,
                 tool_input: serde_json::json!({
                     "reason": reason,
                     "permissions": permissions,
                 }),
             },
+        };
+        // Command hooks run on the host. Keep remote paths in the action's
+        // original tool input, but never use them as the hook's top-level cwd.
+        if matches!(
+            self,
+            Self::ExecCommand { environment_id, .. }
+                | Self::WriteStdin { environment_id, .. }
+                | Self::NetworkAccess { environment_id, .. }
+                if environment_id != codex_exec_server::LOCAL_ENVIRONMENT_ID
+        ) {
+            payload.tool_cwd = None;
         }
+        payload
     }
 
     pub(crate) fn cache_keys(&self) -> Vec<ApprovalCacheKey> {
@@ -488,6 +527,7 @@ impl Session {
             &ctx.review_context,
             &permission_request_run_id,
             action.permission_request_payload(),
+            action.hook_environment_id(),
         )
         .await
         {
@@ -712,6 +752,7 @@ impl Session {
                         ExecApprovalKind::Command,
                         ctx.review_context.model_context(),
                         ctx.call_id.clone(),
+                        Some(&ctx.call_id),
                         /*approval_id*/ None,
                         Some(environment_id.clone()),
                         command.clone(),
@@ -742,6 +783,7 @@ impl Session {
                     ExecApprovalKind::WriteStdin,
                     ctx.review_context.model_context(),
                     id.clone(),
+                    Some(&ctx.call_id),
                     Some(approval_id.clone()),
                     Some(environment_id.clone()),
                     vec![
@@ -812,6 +854,7 @@ impl Session {
                 environment_id,
                 command,
                 cwd,
+                trigger,
                 ..
             } => {
                 self.request_command_approval(
@@ -819,6 +862,7 @@ impl Session {
                     ExecApprovalKind::Command,
                     ctx.review_context.model_context(),
                     ctx.call_id.clone(),
+                    trigger.as_ref().map(|trigger| trigger.call_id.as_str()),
                     /*approval_id*/ None,
                     Some(environment_id.clone()),
                     command.clone(),

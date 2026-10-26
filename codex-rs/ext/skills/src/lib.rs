@@ -1,5 +1,7 @@
 mod aliases;
 pub mod catalog;
+mod catalog_delta;
+mod catalog_observability;
 mod catalog_prompt;
 mod catalog_state;
 mod config;
@@ -44,6 +46,7 @@ pub use host_service::HostSkillsService;
 pub use host_snapshot::HostSkillsSnapshot;
 pub use invocation::detect_implicit_skill_invocation;
 pub use provider::ExecutorSkillProvider;
+pub use provider::FrozenCloudSkillProvider;
 pub use provider::HostSkillProvider;
 pub use provider::SkillProvider;
 pub use required::EnvironmentSkillRequirements;

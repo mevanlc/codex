@@ -49,9 +49,9 @@ pub use verified_answers::RenderedVerifiedAnswers;
 pub use verified_answers::render_verified_answer;
 pub use verified_answers::render_verified_answers;
 
-mod retained_assistant_context;
 mod retained_instructions;
 mod sender_user_messages;
+pub use retained_instructions::RetainedInstructionItem;
 pub use retained_instructions::retained_assistant_message;
 
 mod action;
@@ -77,6 +77,7 @@ pub use budget::request_token_bucket;
 pub use cursor::TranscriptCursor;
 pub use cursor::TranscriptMode;
 pub use cursor::TranscriptSelection;
+mod preparation;
 mod profile;
 pub use codex_protocol::TranscriptFormat;
 pub use composition::CollectedContext;
@@ -96,6 +97,8 @@ pub use node_repl::RenderedNodeReplEvidence;
 mod permissions;
 pub use images::TranscriptImageInput;
 pub use images::TranscriptImages;
+mod guardian_tool_descriptions;
+pub use guardian_tool_descriptions::GuardianToolDescriptions;
 mod trusted_skills;
 mod trusted_tool;
 pub use trusted_skills::TrustedSkills;
@@ -161,7 +164,7 @@ pub struct SectionInput<'a> {
     pub root_conversation: &'a [GuardianRootMessage],
     /// Bounded, role-labeled answers selected from the host-owned context snapshot.
     pub trusted_user_answers: &'a [String],
-    /// Exact action JSON and reason, already bounded by the requesting host.
+    /// Exact action JSON; sync composition bounds the reason and descriptions.
     pub planned_action: Option<&'a PlannedAction>,
     /// Sync-only restrictions resolved from the parent execution environment.
     pub permissions: Option<&'a PermissionContext>,
@@ -246,6 +249,8 @@ pub trait SectionContributor: Send + Sync {
 /// A section could not provide the evidence needed for a valid review context.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SectionError {
+    /// One native agent-message ID identifies different authors, recipients or content.
+    ConflictingAgentMessage,
     /// Evidence required by this contributor for the current input is missing.
     MissingRequiredEvidence { section: &'static str },
     /// A section cannot be delivered by the requested consumer.
@@ -257,6 +262,9 @@ pub enum SectionError {
 impl std::fmt::Display for SectionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ConflictingAgentMessage => {
+                formatter.write_str("conflicting native agent messages share an ID")
+            }
             Self::MissingRequiredEvidence { section } => {
                 write!(formatter, "missing required evidence for section {section}")
             }

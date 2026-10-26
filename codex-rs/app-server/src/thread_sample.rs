@@ -49,6 +49,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 const SAMPLE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -68,6 +69,7 @@ pub(crate) struct SampleTask {
     pub(crate) samples: Arc<SampleResponseRegistry>,
     pub(crate) params: ThreadSampleParams,
     pub(crate) trace: Option<W3cTraceContext>,
+    pub(crate) cancellation: CancellationToken,
 }
 
 pub(crate) async fn generate_sample(
@@ -109,6 +111,7 @@ impl SampleTask {
             samples,
             params,
             trace,
+            cancellation,
         } = self;
         let id = parent.startup_metadata().thread_id;
         if parent.agent_status().await == AgentStatus::Running {
@@ -120,10 +123,8 @@ impl SampleTask {
                 "sample source must be a persistent root thread",
             ));
         }
-        let revision = parent
-            .conversation_history_snapshot()
-            .await
-            .history_version();
+        let parent_history = parent.conversation_history_snapshot().await;
+        let revision = parent_history.history_version();
         parent
             .flush_rollout()
             .await
@@ -139,7 +140,11 @@ impl SampleTask {
             ThreadHistoryMode::Legacy => build_legacy_api_turns_from_rollout_items(&history.items)
                 .last()
                 .is_some_and(|turn| {
-                    turn.id == params.expected_turn_id && turn.status == TurnStatus::Completed
+                    turn.id == params.expected_turn_id
+                        && matches!(
+                            turn.status,
+                            TurnStatus::Completed | TurnStatus::Failed | TurnStatus::Interrupted
+                        )
                 }),
             ThreadHistoryMode::Paginated => store
                 .list_turns(ListTurnsParams {
@@ -156,12 +161,17 @@ impl SampleTask {
                 .first()
                 .is_some_and(|turn| {
                     turn.turn_id == params.expected_turn_id
-                        && turn.status == StoredTurnStatus::Completed
+                        && matches!(
+                            turn.status,
+                            StoredTurnStatus::Completed
+                                | StoredTurnStatus::Failed
+                                | StoredTurnStatus::Interrupted
+                        )
                 }),
         };
         if !matches_source {
             return Err(invalid_request(
-                "sample source turn is no longer the latest completed turn",
+                "sample source turn must be the latest finished turn",
             ));
         }
         let (mut options, settings) = Box::pin(async {
@@ -188,13 +198,31 @@ impl SampleTask {
         options
             .thread_extension_init
             .insert(codex_core::compact::AutoCompactionDisabled);
+        if params.disable_mcp
+            && model.use_responses_lite
+            && parent_history
+                .items()
+                .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }))
+        {
+            options
+                .thread_extension_init
+                .insert(codex_core::McpServersDisabled);
+        }
         options.thread_extension_init.insert(SampleThread);
         let effort = params.effort.filter(|_| {
             model.supports_reasoning_effort_updates && options.config.model_provider.is_openai()
         });
         options.session_source = Some(SessionSource::Custom("thread_sample".to_string()));
-        options.thread_source = Some(ThreadSource::Feature("thread_sample".to_string()));
+        options.thread_source = Some(
+            params
+                .thread_source
+                .map(Into::into)
+                .unwrap_or_else(|| ThreadSource::Feature("thread_sample".to_string())),
+        );
         options.parent_trace = trace.clone();
+        if cancellation.is_cancelled() {
+            return Err(internal_error("sample canceled"));
+        }
         if Instant::now() >= deadline {
             return Err(internal_error("sample timed out"));
         }
@@ -236,6 +264,7 @@ impl SampleTask {
                 turn_trigger: params.turn_trigger,
                 ..Default::default()
             })
+            .with_responses_metadata(params.responsesapi_client_metadata)
             .with_trace(trace);
             if !matches!(
                 fork.thread
@@ -280,6 +309,7 @@ impl SampleTask {
         };
         let result = tokio::select! {
             biased;
+            _ = cancellation.cancelled() => Err(internal_error("sample canceled")),
             _ = tokio::time::sleep_until(deadline) => Err(internal_error("sample timed out")),
             result = sample => result,
         };

@@ -10,34 +10,11 @@ use crate::bottom_pane::textarea::TextAreaState;
 
 use super::shell_mode::ShellFollowUp;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum PromptPrefix {
-    #[default]
-    None,
-    Shell,
-    Slash,
-}
-
-impl PromptPrefix {
-    pub(super) fn text(self) -> &'static str {
-        match self {
-            Self::None => "",
-            Self::Shell => "!",
-            Self::Slash => "/",
-        }
-    }
-
-    pub(super) fn len(self) -> usize {
-        self.text().len()
-    }
-}
-
 pub(super) struct DraftState {
     pub(super) textarea: TextArea,
     pub(super) textarea_state: RefCell<TextAreaState>,
-    pub(super) prompt_prefix: PromptPrefix,
+    pub(super) is_bash_mode: bool,
     pub(super) shell_follow_up: ShellFollowUp,
-    pub(super) slash_command_element_id: Option<u64>,
     pub(super) pending_pastes: Vec<(String, String)>,
     pub(super) input_enabled: bool,
     pub(super) input_disabled_placeholder: Option<String>,
@@ -52,9 +29,8 @@ impl DraftState {
         Self {
             textarea: TextArea::new(),
             textarea_state: RefCell::new(TextAreaState::default()),
-            prompt_prefix: PromptPrefix::None,
+            is_bash_mode: false,
             shell_follow_up: ShellFollowUp::Disabled,
-            slash_command_element_id: None,
             pending_pastes: Vec::new(),
             input_enabled: true,
             input_disabled_placeholder: None,
@@ -65,17 +41,14 @@ impl DraftState {
         }
     }
 
-    pub(super) fn set_prompt_prefix(&mut self, prompt_prefix: PromptPrefix) {
-        self.prompt_prefix = prompt_prefix;
+    pub(super) fn enter_shell_mode(&mut self) {
+        self.is_bash_mode = true;
         self.shell_follow_up = ShellFollowUp::Disabled;
     }
 
-    pub(super) fn enter_shell_mode(&mut self) {
-        self.set_prompt_prefix(PromptPrefix::Shell);
-    }
-
     pub(super) fn leave_shell_mode(&mut self) {
-        self.set_prompt_prefix(PromptPrefix::None);
+        self.is_bash_mode = false;
+        self.shell_follow_up = ShellFollowUp::Disabled;
     }
 }
 
