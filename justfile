@@ -46,6 +46,11 @@ code-mode-host *args:
 assemble-codex-package *args:
     {{ python }} {{ justfile_directory() }}/scripts/build_codex_package.py {args}
 
+# Build and install a complete fork package into ~/.local/share/mevanlc-codex.
+build-and-install-fork profile="lite":
+    {{ python }} "{{ justfile_directory() }}/scripts/build_codex_package.py" --cargo-profile {args} --package-dir "{{ justfile_directory() }}/dist/codex-local" --archive-output "{{ justfile_directory() }}/dist/codex-local.zip" --force
+    cargo run --profile {args} -p codex-fork-installer -- --archive "{{ justfile_directory() }}/dist/codex-local.zip"
+
 # Build the CLI and run the app-server test client
 app-server-test-client *args:
     cargo build -p codex-cli

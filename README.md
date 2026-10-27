@@ -12,7 +12,7 @@ This fork maintains a build of Codex CLI that runs natively on Android via [Term
 
 - **Cross-platform fork releases** — GitHub-hosted runners build Linux, macOS, and Windows for amd64 and arm64, while the self-hosted A1 runner builds `aarch64-linux-android`
 - **Android code-mode / JS REPL** — Android builds link a prebuilt `librusty_v8` and ship `codex-code-mode-host` alongside `codex`
-- **`install-fork.sh`** — one build-and-install script for macOS, Linux, and Termux, with Termux auto-detection and target-dir pruning
+- **Local source installs** — `just build-and-install-fork` builds and installs a complete managed package; `build-and-install.sh` also supports loose-binary installs with Termux auto-detection and target-dir pruning
 - **`[tui].primary_accent`** — replace Codex's cyan accent with a color of your choosing
 - **`[tui].chatbox_placeholder_tips`** — turn off the rotating composer tips
 - **File mention settings** — optionally preserve the `@` prefix and complete explicit paths
@@ -268,13 +268,30 @@ The response status is `notPending` if the input was already consumed, was alrea
 
 ## Building
 
-`codex-rs/scripts/install-fork.sh` builds `codex` and `codex-code-mode-host` and installs both into `~/.local/bin`:
+Build this checkout and install it into the managed
+`~/.local/share/mevanlc-codex/` layout:
+
+```shell
+just build-and-install-fork          # lite profile (default)
+just build-and-install-fork release  # optimized
+```
+
+The command builds a complete package, including `codex-code-mode-host` and
+platform resources, then runs the fork installer on it. Commands in
+`~/.local/bin` select the new CLI package; previous releases are retained. The
+staged package and archive are replaced under `dist/codex-local` and
+`dist/codex-local.zip` on each run. Local archive installs are pinned against
+automatic updates. This uses the version in `codex-rs/Cargo.toml` without
+modifying it.
+
+For loose-binary installs, `codex-rs/scripts/build-and-install.sh` builds
+`codex` and `codex-code-mode-host` and copies both into `~/.local/bin`:
 
 ```shell
 git clone https://github.com/mevanlc/codex.git
 cd codex
-./codex-rs/scripts/install-fork.sh               # lite profile: fast, unoptimized
-./codex-rs/scripts/install-fork.sh -p release    # optimized
+./codex-rs/scripts/build-and-install.sh               # lite profile: fast, unoptimized
+./codex-rs/scripts/build-and-install.sh -p release    # optimized
 ```
 
 The script stamps a version derived from the newest `rust-v*` tag reachable from `HEAD` (restoring `Cargo.toml` on exit), re-signs the binaries on macOS, and warns if `~/.local/bin/codex` is not what `codex` actually resolves to on `PATH`.
