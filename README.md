@@ -41,20 +41,26 @@ Everything else behaves like upstream Codex.
 Install the newest complete package available for your platform from
 [mevanlc/codex releases](https://github.com/mevanlc/codex/releases) with
 `codex-fork-installer`, a single self-contained program published for every
-platform. Download it and run it; it needs no Python, Bash, `gh`, or `zstd`.
+platform. `install-fork.sh` and `install-fork.ps1` detect your platform, download
+the newest published `codex-fork-installer-<target>` binary, verify its SHA-256
+digest, and run it (needing no Python, `gh`, or `zstd`).
 
 macOS, Linux, and Android/Termux (`pkg install curl` if needed):
 
 ```shell
-curl -fsSLo codex-fork-installer https://github.com/mevanlc/codex/releases/latest/download/codex-fork-installer-<target>
-chmod +x codex-fork-installer && ./codex-fork-installer && rm codex-fork-installer
+curl -fsSL https://raw.githubusercontent.com/mevanlc/codex/main/install-fork.sh | sh
 ```
 
-PowerShell 7 or Windows PowerShell 5.1 (replace `x86_64` with `aarch64` on Arm):
+PowerShell 7 or Windows PowerShell 5.1:
 
 ```powershell
-&{(iwr -useb -pa -ou($t=new-temporaryfile)https://github.com/mevanlc/codex/releases/latest/download/codex-fork-installer-x86_64-pc-windows-msvc.exe)|%{saps -n -wait $t};rm $t}
+irm https://raw.githubusercontent.com/mevanlc/codex/main/install-fork.ps1 | iex
 ```
+
+Pass installer flags with `sh -s -- <flags>` (for example, `... | sh -s -- --list-available`)
+or by running `./install-fork.sh <flags>` / `.\install-fork.ps1 <flags>` directly.
+You can also download `codex-fork-installer-<target>` directly from the releases
+page or with `gh release download -R mevanlc/codex -p 'codex-fork-installer-<target>*'`:
 
 | Platform | `<target>` |
 | --- | --- |
@@ -63,11 +69,8 @@ PowerShell 7 or Windows PowerShell 5.1 (replace `x86_64` with `aarch64` on Arm):
 | Android/Termux | `aarch64-linux-android` |
 | Windows Arm / x86-64 | `aarch64-pc-windows-msvc` / `x86_64-pc-windows-msvc` (assets end in `.exe`) |
 
-`gh release download -R mevanlc/codex -p 'codex-fork-installer-<target>*'` also
-works. Command-line downloads are normally not quarantined; if you download with a
+Command-line downloads are normally not quarantined; if you download with a
 browser instead, macOS Gatekeeper and Windows SmartScreen may ask before running it.
-While a new release is still building, `latest/download` can briefly miss your
-platform; retry, or pick an earlier release on the releases page.
 
 Add `~/.local/bin` to `PATH` (also on Windows). After the first install,
 `codex update` and the daemon updater download and run the newest release's
