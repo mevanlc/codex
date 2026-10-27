@@ -110,6 +110,31 @@ impl TerminalPermissions {
         }
     }
 
+    /// User shells bypass launch policy, but need fresh stdin approval only when
+    /// their actual authority exceeds the current environment's baseline.
+    pub(crate) fn for_user_shell(environment: &TurnEnvironment, turn: &TurnContext) -> Self {
+        let mut permissions = Self::for_launch(
+            environment,
+            turn,
+            TerminalSandboxSource::Native,
+            SandboxPermissions::UseDefault,
+            None,
+            None,
+        );
+        if permissions.policy.sandbox.permissions != PermissionProfile::Disabled
+            || permissions.policy.environment_network.is_some()
+            || permissions
+                .policy
+                .controller_network
+                .as_ref()
+                .is_some_and(NetworkProxySpec::enabled)
+            || permissions.policy.controller_proxy
+        {
+            permissions.launch_permissions = SandboxPermissions::RequireEscalated;
+        }
+        permissions
+    }
+
     pub(crate) fn with_filesystem_escalation(mut self) -> Self {
         self.filesystem_escalated = true;
         self

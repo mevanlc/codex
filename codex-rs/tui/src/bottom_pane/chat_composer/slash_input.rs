@@ -25,7 +25,7 @@ use super::ChatComposer;
 use super::InputResult;
 use super::QueuedInputAction;
 use super::parent_owned_command_is_allowed;
-use super::shell_mode::ShellFollowUp;
+use super::shell_mode::ShellInvocationMode;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SlashValidation {
@@ -198,13 +198,13 @@ impl<'a> SlashInput<'a> {
 pub(super) fn queued_input_action(
     prepared_text: &str,
     defer_slash_validation: bool,
-    shell_follow_up: ShellFollowUp,
+    shell_invocation_mode: ShellInvocationMode,
 ) -> QueuedInputAction {
     if defer_slash_validation && prepared_text.starts_with('/') {
         QueuedInputAction::ParseSlash
     } else if prepared_text.starts_with('!') {
         QueuedInputAction::RunShell {
-            follow_up: shell_follow_up,
+            mode: shell_invocation_mode,
         }
     } else {
         QueuedInputAction::Plain

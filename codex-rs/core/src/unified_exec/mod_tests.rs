@@ -140,10 +140,12 @@ async fn exec_command_with_tty(
             plugin_metrics_sidecar: None,
             call_id: context.call_id.clone(),
             process_id,
+            source: codex_protocol::protocol::ExecCommandSource::UnifiedExecStartup,
             cwd: cwd.clone().into(),
             initial_exec_command_active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             hook_command: cmd.to_string(),
             tty,
+            stdin_open: tty,
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             permissions: TerminalPermissions::for_launch(
                 turn.initial_environments
@@ -352,6 +354,7 @@ async fn unified_exec_persists_across_requests() -> anyhow::Result<()> {
     assert_eq!(
         session.list_background_terminals().await,
         vec![BackgroundTerminalInfo {
+            source: codex_protocol::protocol::ExecCommandSource::UnifiedExecStartup,
             item_id: "call".to_string(),
             process_id: process_id.to_string(),
             command: "bash -i".to_string(),
@@ -612,10 +615,12 @@ async fn terminating_initial_exec_command_rechecks_initial_response_state() -> a
             plugin_metrics_sidecar: None,
             call_id: "call".to_string(),
             process_id,
+            source: codex_protocol::protocol::ExecCommandSource::UnifiedExecStartup,
             cwd: cwd.into(),
             initial_exec_command_active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             hook_command: "sleep 60".to_string(),
             tty: true,
+            stdin_open: true,
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             permissions: TerminalPermissions::for_launch(
                 turn.initial_environments
@@ -702,10 +707,12 @@ async fn terminating_during_stdin_poll_returns_exited_response(
             plugin_metrics_sidecar: None,
             call_id: "call".to_string(),
             process_id,
+            source: codex_protocol::protocol::ExecCommandSource::UnifiedExecStartup,
             cwd: cwd.into(),
             initial_exec_command_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             hook_command: "sleep 60".to_string(),
             tty: true,
+            stdin_open: true,
             environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             permissions: TerminalPermissions::for_launch(
                 turn.initial_environments
@@ -1106,5 +1113,258 @@ async fn stdin_approval_observes_strict_review_enabled_while_queued() -> anyhow:
             if reason.contains("NUL byte")
     ));
     assert!(session.terminate_background_terminal(process_id).await);
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn user_background_shell_uses_shared_terminal_with_pipe_input() -> anyhow::Result<()> {
+    let (session, turn, _events) =
+        crate::session::tests::make_session_and_context_with_auth_and_config_and_rx(
+            codex_login::CodexAuth::from_api_key("Test API Key"),
+            Vec::new(),
+            |config| {
+                config
+                    .features
+                    .enable(codex_features::Feature::WriteStdinApproval)
+                    .unwrap();
+                config
+                    .permissions
+                    .set_permission_profile(codex_protocol::models::PermissionProfile::Disabled)
+                    .unwrap();
+            },
+        )
+        .await;
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    crate::tasks::execute_user_shell_command_with_background(
+        Arc::clone(&session),
+        Arc::clone(&turn),
+        "read -r line; printf 'received:%s\\n' \"$line\"".to_string(),
+        None,
+        cancellation.clone(),
+        crate::tasks::UserShellCommandMode::StandaloneTurn,
+        true,
+    )
+    .await;
+    let manager = &session.services.unified_exec_manager;
+    let terminals = manager.list_processes().await;
+    assert_eq!(terminals.len(), 1);
+    assert_eq!(
+        terminals[0].source,
+        codex_protocol::protocol::ExecCommandSource::UserShell
+    );
+    let process_id: i32 = terminals[0].process_id.parse()?;
+    cancellation.cancel(); // Handoff makes process lifetime independent of the launch turn.
+    let output = tokio::time::timeout(
+        Duration::from_secs(5),
+        write_stdin(&session, &turn, process_id, "hello\n", 1_000),
+    )
+    .await;
+    manager.terminate_all_processes().await;
+    let output = output??;
+    assert!(
+        output.raw_output.text.contains("received:hello"),
+        "{output:?}"
+    );
+    assert_eq!(output.exit_code, Some(0));
+    assert!(manager.list_processes().await.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn user_background_shell_stop_cleans_shared_store() {
+    let (session, turn) = test_session_and_turn().await;
+    crate::tasks::execute_user_shell_command_with_background(
+        Arc::clone(&session),
+        turn,
+        "sleep 60".to_string(),
+        None,
+        tokio_util::sync::CancellationToken::new(),
+        crate::tasks::UserShellCommandMode::StandaloneTurn,
+        true,
+    )
+    .await;
+    assert_eq!(session.list_background_terminals().await.len(), 1);
+    session.close_unified_exec_processes().await;
+    assert!(session.list_background_terminals().await.is_empty());
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn user_background_shell_cancelled_launch_releases_id() {
+    let (session, turn) = test_session_and_turn().await;
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    cancellation.cancel();
+    crate::tasks::execute_user_shell_command_with_background(
+        Arc::clone(&session),
+        turn,
+        "sleep 60".to_string(),
+        None,
+        cancellation,
+        crate::tasks::UserShellCommandMode::StandaloneTurn,
+        true,
+    )
+    .await;
+    let store = session
+        .services
+        .unified_exec_manager
+        .process_store
+        .lock()
+        .await;
+    assert!(store.processes.is_empty());
+    assert!(store.reserved_process_ids.is_empty());
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn user_background_shell_stdin_retains_full_access_authority() -> anyhow::Result<()> {
+    let (session, turn, _events) =
+        crate::session::tests::make_session_and_context_with_auth_and_config_and_rx(
+            codex_login::CodexAuth::from_api_key("Test API Key"),
+            Vec::new(),
+            |config| {
+                config
+                    .features
+                    .enable(codex_features::Feature::WriteStdinApproval)
+                    .unwrap();
+                config
+                    .permissions
+                    .set_permission_profile(codex_protocol::models::PermissionProfile::read_only())
+                    .unwrap();
+                config.permissions.approval_policy = crate::config::Constrained::allow_any(
+                    codex_protocol::protocol::AskForApproval::OnRequest,
+                );
+            },
+        )
+        .await;
+    crate::tasks::execute_user_shell_command_with_background(
+        Arc::clone(&session),
+        Arc::clone(&turn),
+        "cat".to_string(),
+        None,
+        tokio_util::sync::CancellationToken::new(),
+        crate::tasks::UserShellCommandMode::StandaloneTurn,
+        true,
+    )
+    .await;
+    let manager = &session.services.unified_exec_manager;
+    let context = UnifiedExecContext::new(
+        Arc::clone(&session),
+        crate::session::step_context::StepContext::for_test(turn),
+        tokio_util::sync::CancellationToken::new(),
+        "stdin".to_string(),
+    );
+    let review = {
+        let store = manager.process_store.lock().await;
+        let entry = store.processes.values().next().expect("user terminal");
+        assert!(entry.stdin_approval(&context, "", false)?.is_none());
+        entry.stdin_approval(&context, "new input\n", false)?
+    };
+    manager.terminate_all_processes().await;
+    let (action, reason) = review.expect("full-access input needs review");
+    assert!(matches!(
+        action,
+        crate::tools::sandboxing::ApprovalAction::WriteStdin {
+            sandbox_permissions: SandboxPermissions::RequireEscalated,
+            ..
+        }
+    ));
+    assert!(reason.contains("outside the sandbox"));
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn user_background_shell_immediate_exit_keeps_user_history() -> anyhow::Result<()> {
+    let (session, turn, events) = crate::session::tests::make_session_and_context_with_rx().await;
+    crate::tasks::execute_user_shell_command_with_background(
+        Arc::clone(&session),
+        Arc::clone(&turn),
+        "printf hello".to_string(),
+        None,
+        tokio_util::sync::CancellationToken::new(),
+        crate::tasks::UserShellCommandMode::StandaloneTurn,
+        true,
+    )
+    .await;
+    let ended = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let codex_protocol::protocol::EventMsg::ExecCommandEnd(ended) =
+                events.recv().await.unwrap().msg
+            {
+                break ended;
+            }
+        }
+    })
+    .await?;
+    assert_eq!(
+        ended.source,
+        codex_protocol::protocol::ExecCommandSource::UserShell
+    );
+    assert!(ended.process_id.is_some());
+    assert_eq!(ended.exit_code, 0);
+    assert_eq!(ended.aggregated_output, "hello");
+    assert!(session.list_background_terminals().await.is_empty());
+    let history = session.clone_history().await;
+    let records = history
+        .annotated_items()
+        .iter()
+        .map(|entry| serde_json::to_string(&entry.item).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(records.contains("Started in background"));
+    assert!(records.contains("hello"));
+    assert!(!records.contains("function_call"));
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn user_background_shell_launch_failure_leaves_no_registered_process() -> anyhow::Result<()> {
+    let (session, turn) = test_session_and_turn().await;
+    let temp = tempfile::tempdir()?;
+    let command = vec![
+        "/bin/sh".to_string(),
+        "-c".to_string(),
+        "echo unreachable".to_string(),
+    ];
+    let request = test_exec_request(
+        &turn,
+        command.clone(),
+        AbsolutePathBuf::try_from(temp.path().join("missing"))?,
+        shell_env(),
+    );
+    let environment = turn
+        .initial_environments
+        .local()
+        .expect("local environment");
+    let permissions = TerminalPermissions::for_launch(
+        environment,
+        &turn,
+        TerminalSandboxSource::Native,
+        SandboxPermissions::RequireEscalated,
+        None,
+        None,
+    );
+    let manager = &session.services.unified_exec_manager;
+    let result = manager
+        .start_user_shell(
+            Arc::clone(&session),
+            Arc::clone(&turn),
+            request,
+            command,
+            "echo unreachable".to_string(),
+            None,
+            permissions,
+            &environment.environment,
+            environment.selection.environment_id.clone(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await;
+    assert!(result.is_err());
+    let store = manager.process_store.lock().await;
+    assert!(store.processes.is_empty());
+    // The test manager intentionally retains numeric IDs to keep them monotonic.
     Ok(())
 }

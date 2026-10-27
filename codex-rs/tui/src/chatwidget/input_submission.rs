@@ -1,6 +1,7 @@
 //! User-message and shell-prompt submission behavior for `ChatWidget`.
 
 use super::*;
+use crate::bottom_pane::ShellInvocationMode;
 use codex_app_server_protocol::ImageReference;
 use codex_utils_path_uri::LegacyAppPathString;
 
@@ -63,16 +64,28 @@ impl ChatWidget {
         drain
     }
 
-    pub(super) fn submit_queued_shell_prompt(&mut self, user_message: UserMessage) -> QueueDrain {
-        match user_message.text.strip_prefix('!') {
-            Some(command) => {
-                let history_text = user_message.text.clone();
-                self.submit_shell_command_with_history(command, &history_text)
-            }
-            None => {
-                self.submit_user_message(user_message);
-                QueueDrain::Stop
-            }
+    pub(super) fn submit_shell_prompt_with_mode(
+        &mut self,
+        user_message: UserMessage,
+        mode: ShellInvocationMode,
+    ) -> QueueDrain {
+        let policy = if mode == ShellInvocationMode::Background {
+            ShellEscapePolicy::Background
+        } else {
+            ShellEscapePolicy::Allow
+        };
+        if self
+            .submit_user_message_with_history_and_shell_escape_policy(
+                user_message,
+                UserMessageHistoryRecord::UserMessageText,
+                policy,
+                UserMessageSource::Prompt,
+            )
+            .0
+        {
+            QueueDrain::Stop
+        } else {
+            QueueDrain::Continue
         }
     }
 
@@ -158,6 +171,9 @@ impl ChatWidget {
                         user_message,
                         match shell_escape_policy {
                             ShellEscapePolicy::Allow => QueuedInputAction::Plain,
+                            ShellEscapePolicy::Background => QueuedInputAction::RunShell {
+                                mode: ShellInvocationMode::Background,
+                            },
                             ShellEscapePolicy::Disallow => QueuedInputAction::Literal,
                         },
                     )
@@ -229,14 +245,27 @@ impl ChatWidget {
         let mut items: Vec<UserInput> = Vec::new();
 
         // Special-case: "!cmd" executes a local shell command instead of sending to the model.
-        if shell_escape_policy == ShellEscapePolicy::Allow
+        if shell_escape_policy != ShellEscapePolicy::Disallow
             && let Some(stripped) = text.strip_prefix('!')
         {
-            let app_command = match self.submit_shell_command_with_history(stripped, &text) {
-                QueueDrain::Continue => None,
-                QueueDrain::Stop => Some(AppCommand::run_user_shell_command(
-                    stripped.trim().to_string(),
-                )),
+            let app_command = if shell_escape_policy == ShellEscapePolicy::Background
+                && !stripped.trim().is_empty()
+            {
+                let command = AppCommand::RunUserBackgroundShellCommand {
+                    command: stripped.trim().to_string(),
+                };
+                let accepted = self.submit_op(command.clone());
+                if accepted {
+                    self.append_message_history_entry(text);
+                }
+                accepted.then_some(command)
+            } else {
+                match self.submit_shell_command_with_history(stripped, &text) {
+                    QueueDrain::Continue => None,
+                    QueueDrain::Stop => Some(AppCommand::run_user_shell_command(
+                        stripped.trim().to_string(),
+                    )),
+                }
             };
             return (app_command.is_some(), app_command);
         }

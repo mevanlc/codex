@@ -1,6 +1,6 @@
 use super::helpers::drain_insert_history_transcript;
 use super::*;
-use crate::bottom_pane::ShellFollowUp;
+use crate::bottom_pane::ShellInvocationMode;
 use crate::bottom_pane::slash_commands::ServiceTierCommand;
 use pretty_assertions::assert_eq;
 use serial_test::serial;
@@ -71,7 +71,7 @@ fn queue_shell_input(chat: &mut ChatWidget, text: &str) {
     chat.queue_user_message_with_options(
         UserMessage::from(text),
         QueuedInputAction::RunShell {
-            follow_up: ShellFollowUp::Disabled,
+            mode: ShellInvocationMode::Normal,
         },
         Vec::new(),
     );
@@ -136,7 +136,7 @@ async fn queued_armed_bang_shell_prioritizes_automatic_follow_up() {
     chat.queue_user_message_with_options(
         UserMessage::from("!make check"),
         QueuedInputAction::RunShell {
-            follow_up: ShellFollowUp::Enabled,
+            mode: ShellInvocationMode::FollowUp,
         },
         Vec::new(),
     );
@@ -428,7 +428,7 @@ async fn queued_bang_shell_dispatches_after_active_turn() {
             .unwrap()
             .action,
         QueuedInputAction::RunShell {
-            follow_up: ShellFollowUp::Disabled,
+            mode: ShellInvocationMode::Normal,
         }
     );
     assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
@@ -4015,4 +4015,35 @@ async fn owned_copy_guard_defers_queued_input_until_released() {
         chat.maybe_send_next_queued_input();
         assert!(chat.input_queue.queued_user_messages.is_empty());
     }
+}
+
+#[tokio::test]
+async fn background_bang_shell_does_not_enqueue_agent_follow_up() {
+    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(None).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.bottom_pane
+        .set_composer_text("!sleep 60".to_string(), Vec::new(), Vec::new());
+    for _ in 0..2 {
+        chat.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    }
+    submit_current_composer(&mut chat);
+    assert_matches!(op_rx.try_recv(), Ok(Op::RunUserBackgroundShellCommand { command }) if command == "sleep 60");
+    assert!(chat.queued_user_message_texts().is_empty());
+    assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
+}
+
+#[tokio::test]
+async fn queued_background_shell_retains_invocation_mode() {
+    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(None).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.queue_user_message_with_options(
+        UserMessage::from("!sleep 60"),
+        QueuedInputAction::RunShell {
+            mode: ShellInvocationMode::Background,
+        },
+        Vec::new(),
+    );
+    chat.maybe_send_next_queued_input();
+    assert_matches!(op_rx.try_recv(), Ok(Op::RunUserBackgroundShellCommand { command }) if command == "sleep 60");
+    assert!(chat.queued_user_message_texts().is_empty());
 }

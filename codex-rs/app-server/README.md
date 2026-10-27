@@ -629,3 +629,19 @@ and out-of-scope item IDs return invalid params (`-32602`) with
 Omitted or null cursors preserve normal first-page behavior. Continue anchored
 pages with the returned opaque string `nextCursor`; response fields and
 `backwardsCursor` semantics are unchanged.
+
+### User background shell commands
+
+`thread/backgroundTerminals/start` accepts `{ threadId, command }` and acknowledges
+with `{}` after scheduling the launch. Like `thread/shellCommand` (`!` in the TUI),
+it evaluates shell syntax on the app-server host with full access and excludes the
+managed network proxy. It does not invoke the model.
+
+Command lifecycle events use `source: "userShell"` and include the managed
+`processId`. The same ID works with `write_stdin` and the background-terminal
+list/terminate/clean methods. List entries retain their launch `source` even when
+an agent later interacts with the terminal. Agent stdin uses the normal configured
+permission checks against the terminal's full-access launch authority.
+
+These commands have no overall timeout and survive turn completion. Process exit,
+explicit termination, and normal session cleanup determine their lifetime.

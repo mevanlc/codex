@@ -24,7 +24,6 @@ use crate::session::spawn_review_thread;
 use crate::tasks::CompactTask;
 use crate::tasks::UserShellCommandMode;
 use crate::tasks::UserShellCommandTask;
-use crate::tasks::execute_user_shell_command;
 use crate::thread_manager::AgentTreeShutdownFailure;
 use crate::thread_manager::thread_store_error_kind;
 use codex_protocol::error::CodexErr;
@@ -105,18 +104,29 @@ pub async fn run_user_shell_command(
     command: String,
     timeout_ms: Option<u64>,
 ) {
+    run_user_shell_command_with_background(sess, sub_id, command, timeout_ms, false).await;
+}
+
+async fn run_user_shell_command_with_background(
+    sess: &Arc<Session>,
+    sub_id: String,
+    command: String,
+    timeout_ms: Option<u64>,
+    background: bool,
+) {
     if let Some((turn_context, cancellation_token)) =
         sess.active_turn_context_and_cancellation_token().await
     {
         let session = Arc::clone(sess);
         tokio::spawn(async move {
-            execute_user_shell_command(
+            crate::tasks::execute_user_shell_command_with_background(
                 session,
                 turn_context,
                 command,
                 timeout_ms,
                 cancellation_token,
                 UserShellCommandMode::ActiveTurnAuxiliary,
+                background,
             )
             .await;
         });
@@ -129,7 +139,7 @@ pub async fn run_user_shell_command(
     sess.spawn_task(
         turn_context,
         Vec::new(),
-        UserShellCommandTask::new(command, timeout_ms),
+        UserShellCommandTask::new(command, timeout_ms).with_background(background),
     )
     .await;
 }
@@ -700,6 +710,17 @@ pub(super) async fn submission_loop(
                 }
                 Op::SetThreadMemoryMode { mode } => {
                     set_thread_memory_mode(&sess, sub.id.clone(), mode).await;
+                    false
+                }
+                Op::RunUserBackgroundShellCommand { command } => {
+                    run_user_shell_command_with_background(
+                        &sess,
+                        sub.id.clone(),
+                        command,
+                        None,
+                        true,
+                    )
+                    .await;
                     false
                 }
                 Op::RunUserShellCommand {

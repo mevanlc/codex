@@ -32,9 +32,16 @@ impl ChatWidget {
         };
         let (_command, parsed_cmd) = command_execution_command_and_parsed(command, command_actions);
         self.flush_answer_stream_with_separator();
-        if is_unified_exec_source(*source) {
-            if *source == ExecCommandSource::UnifiedExecStartup {
-                self.track_unified_exec_process_begin(id, process_id.as_deref(), command);
+        if is_unified_exec_source(*source)
+            || (*source == ExecCommandSource::UserShell && process_id.is_some())
+        {
+            if *source == ExecCommandSource::UnifiedExecStartup
+                || *source == ExecCommandSource::UserShell
+            {
+                self.track_managed_process_begin(id, process_id.as_deref(), command, *source);
+                if *source == ExecCommandSource::UserShell {
+                    return;
+                }
             }
             if !self.bottom_pane.is_task_running() {
                 return;
@@ -142,7 +149,9 @@ impl ChatWidget {
         else {
             return;
         };
-        if is_unified_exec_source(*source) {
+        if is_unified_exec_source(*source)
+            || (*source == ExecCommandSource::UserShell && process_id.is_some())
+        {
             if let Some(process_id) = process_id.as_deref()
                 && self
                     .unified_exec_wait_streak
@@ -152,7 +161,7 @@ impl ChatWidget {
                 self.flush_unified_exec_wait_streak();
             }
             self.track_unified_exec_process_end(id, process_id.as_deref());
-            if !self.bottom_pane.is_task_running() {
+            if !self.bottom_pane.is_task_running() && *source != ExecCommandSource::UserShell {
                 return;
             }
         }
@@ -163,11 +172,27 @@ impl ChatWidget {
         );
     }
 
+    #[cfg(test)]
     pub(super) fn track_unified_exec_process_begin(
         &mut self,
         call_id: &str,
         process_id: Option<&str>,
         command: &str,
+    ) {
+        self.track_managed_process_begin(
+            call_id,
+            process_id,
+            command,
+            ExecCommandSource::UnifiedExecStartup,
+        );
+    }
+
+    pub(super) fn track_managed_process_begin(
+        &mut self,
+        call_id: &str,
+        process_id: Option<&str>,
+        command: &str,
+        source: ExecCommandSource,
     ) {
         let key = process_id.unwrap_or(call_id).to_string();
         let command = split_command_string(command);
@@ -179,12 +204,14 @@ impl ChatWidget {
         {
             existing.call_id = call_id.to_string();
             existing.command_display = command_display;
+            existing.source = source;
             existing.recent_chunks.clear();
         } else {
             self.unified_exec_processes.push(UnifiedExecProcessSummary {
                 key,
                 call_id: call_id.to_string(),
                 command_display,
+                source,
                 recent_chunks: Vec::new(),
             });
         }
@@ -333,7 +360,7 @@ impl ChatWidget {
         let ThreadItemPayload::CommandExecution {
             id,
             command,
-            process_id: _,
+            process_id,
             source,
             status,
             command_actions,
@@ -369,7 +396,7 @@ impl ChatWidget {
         let parsed = self.annotate_skill_reads_in_parsed_cmd(parsed);
         let is_unified_exec_interaction =
             matches!(source, ExecCommandSource::UnifiedExecInteraction);
-        let is_user_shell = source == ExecCommandSource::UserShell;
+        let is_user_shell = source == ExecCommandSource::UserShell && process_id.is_none();
         // Completion-only replay has no begin event to join adjacent exploration. Extend only
         // a finished, compatible group; an unrelated running group must retain orphan routing.
         if let Some(cell) = self

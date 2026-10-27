@@ -16,7 +16,7 @@ This fork maintains a build of Codex CLI that runs natively on Android via [Term
 - **`[tui].primary_accent`** — replace Codex's cyan accent with a color of your choosing
 - **`[tui].chatbox_placeholder_tips`** — turn off the rotating composer tips
 - **File mention settings** — optionally preserve the `@` prefix and complete explicit paths
-- **Shell follow-ups** — press Tab in `!` mode to start an agent turn after the command finishes
+- **Shell invocation modes** — press Tab in `!` mode to cycle normal execution, agent follow-up, and managed background execution
 - **`--x-no-mcp`** — disable every MCP server and orchestrator MCP access for one invocation
 - **Retractable steer messages** — pull a still-pending steer back into the composer; backed by a new `turn/retract` app-server method
 - **Context usage on resume and fork** — restore the saved context fullness before the next turn, including paginated forks and turns that crossed a compaction checkpoint with their identity saved only in the following turn context
@@ -216,9 +216,13 @@ file_mentions_allow_explicit_paths = true
 
 The unified mention picker offers `Filesystem` for the ordinary file-search scope and `Filesystem (All)` for hidden and ignored entries. `All Results` continues to combine plugins with only the ordinary filesystem scope; expanded filesystem matches appear only under `Filesystem (All)`.
 
-### Shell command follow-ups
+### Shell invocation modes
 
-While composing a `!` shell command, press Tab to toggle an automatic follow-up on or off. With the follow-up on, Enter runs the command as usual, then starts an agent turn after the command exits. The agent receives the command result and is instructed to investigate and fix failures, or explain a successful result and relevant next steps. The toggle applies only to the current shell command and requires no configuration.
+While composing a `!` shell command, press Tab to cycle **normal → follow-up → background → normal**, then Enter to run it. The selected mode applies only to the current command and requires no configuration.
+
+Normal runs the command as usual. Follow-up starts an agent turn after the command exits; the agent receives the result and is instructed to investigate and fix failures, or explain the result and relevant next steps.
+
+Background launches the command into the same terminal manager used by agent commands and immediately returns control. `/ps` lists it with a `user` marker; `/stop` stops it along with other managed terminals. The agent can poll its output or send stdin through the normal terminal permission checks. User commands retain `!`'s full access and local-host shell behavior. Background commands have no overall timeout and remain managed until they exit, are stopped, or the backend cleans up the session; completing an agent turn does not stop them. Starting or completing one does not automatically start an agent turn.
 
 ### Disable all MCPs for an invocation
 

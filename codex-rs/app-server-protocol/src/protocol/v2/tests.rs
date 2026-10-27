@@ -144,6 +144,7 @@ fn thread_background_terminals_list_response_round_trips_foreign_paths() {
     ] {
         let response = ThreadBackgroundTerminalsListResponse {
             data: vec![ThreadBackgroundTerminal {
+                source: Default::default(),
                 item_id: "item_123".to_string(),
                 process_id: "42".to_string(),
                 command: "run server".to_string(),
@@ -158,6 +159,7 @@ fn thread_background_terminals_list_response_round_trips_foreign_paths() {
         };
         let expected = json!({
             "data": [{
+                "source": "agent",
                 "itemId": "item_123",
                 "processId": "42",
                 "command": "run server",

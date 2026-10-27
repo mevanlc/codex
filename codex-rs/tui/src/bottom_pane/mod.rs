@@ -269,8 +269,7 @@ pub(crate) use chat_composer::InputResult;
 pub(crate) use chat_composer::QueuedInputAction;
 pub(crate) use chat_composer::RestrictedInputMode;
 pub(crate) use chat_composer::SHELL_FOLLOW_UP_PROMPT;
-#[cfg(test)]
-pub(crate) use chat_composer::ShellFollowUp;
+pub(crate) use chat_composer::ShellInvocationMode;
 pub(crate) use chat_composer_history::HistoryEntry;
 pub(crate) use textarea::KillBufferSnapshot;
 

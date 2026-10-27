@@ -67,7 +67,9 @@ pub(crate) use regular::RegularTask;
 pub(crate) use review::ReviewTask;
 pub(crate) use user_shell::UserShellCommandMode;
 pub(crate) use user_shell::UserShellCommandTask;
+#[cfg(test)]
 pub(crate) use user_shell::execute_user_shell_command;
+pub(crate) use user_shell::execute_user_shell_command_with_background;
 
 pub(crate) const GRACEFULL_INTERRUPTION_TIMEOUT_MS: u64 = 100;
 const TASK_COMPACT_METRIC: &str = "codex.task.compact";

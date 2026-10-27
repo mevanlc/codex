@@ -592,7 +592,7 @@ impl ChatWidget {
                 self.open_pets_picker();
             }
             SlashCommand::Ps => {
-                self.add_ps_output();
+                self.submit_op(AppCommand::ListBackgroundTerminals { show: true });
             }
             SlashCommand::Stop => {
                 self.clean_background_terminals();

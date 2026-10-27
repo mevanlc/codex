@@ -92,6 +92,7 @@ int main(void) {
 
     def test_android_requires_its_own_ripgrep_build(self) -> None:
         from codex_package.ripgrep import fetch_rg
+
         with self.assertRaisesRegex(ValueError, "NDK-built ripgrep"):
             fetch_rg(TARGET_SPECS["aarch64-linux-android"])
 
@@ -158,9 +159,15 @@ int main(void) {
                 for name, digest in actual_manifest["sha256"].items():
                     self.assertEqual(hashlib.sha256(actual[name]).hexdigest(), digest)
 
-    def test_macos_and_android_packages_preserve_prebuilt_resource_binaries(self) -> None:
+    def test_macos_and_android_packages_preserve_prebuilt_resource_binaries(
+        self,
+    ) -> None:
         for variant_name in ("codex", "codex-app-server"):
-            for target in ("aarch64-apple-darwin", "x86_64-apple-darwin", "aarch64-linux-android"):
+            for target in (
+                "aarch64-apple-darwin",
+                "x86_64-apple-darwin",
+                "aarch64-linux-android",
+            ):
                 with self.subTest(variant=variant_name, target=target):
                     with tempfile.TemporaryDirectory() as temp_dir:
                         root = Path(temp_dir)

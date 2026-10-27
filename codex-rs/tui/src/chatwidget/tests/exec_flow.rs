@@ -897,6 +897,7 @@ async fn unified_exec_wait_status_header_updates_on_late_command_display() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.on_task_started();
     chat.unified_exec_processes.push(UnifiedExecProcessSummary {
+        source: ExecCommandSource::UnifiedExecStartup,
         key: "proc-1".to_string(),
         call_id: "call-1".to_string(),
         command_display: "sleep 5".to_string(),
@@ -1990,4 +1991,31 @@ async fn apply_patch_request_omits_diff_summary_from_modal() -> anyhow::Result<(
     assert!(!contents.contains("+line two"));
 
     Ok(())
+}
+
+#[tokio::test]
+async fn user_background_shell_rehydrates_ps_provenance() {
+    let (mut chat, mut rx, _) = make_chatwidget_manual(None).await;
+    chat.reconcile_background_terminals(vec![
+        codex_app_server_protocol::ThreadBackgroundTerminal {
+            source: ExecCommandSource::UserShell,
+            item_id: "user-call".into(),
+            process_id: "123".into(),
+            command: "sleep 60".into(),
+            cwd: codex_utils_path_uri::LegacyAppPathString::from_string("/tmp"),
+            os_pid: None,
+            cpu_percent: None,
+            rss_kb: None,
+        },
+    ]);
+    assert_eq!(chat.unified_exec_processes.len(), 1);
+    chat.add_ps_output();
+    let output = drain_insert_history(&mut rx)
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(output.contains("[user] sleep 60"), "{output}");
+    chat.reconcile_background_terminals(Vec::new());
+    assert!(chat.unified_exec_processes.is_empty());
 }

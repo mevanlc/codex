@@ -1009,6 +1009,37 @@ impl ThreadRequestProcessor {
         ))
     }
 
+    pub(crate) async fn thread_background_terminals_start(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: ThreadBackgroundTerminalsStartParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let command = params.command.trim().to_string();
+        if command.is_empty() {
+            return Err(invalid_request("command must not be empty"));
+        }
+        let (_, thread) = self.load_thread(&params.thread_id).await?;
+        ensure_direct_input_allowed(thread.as_ref()).await?;
+        if self
+            .thread_manager
+            .environment_manager()
+            .try_local_environment()
+            .is_none()
+        {
+            return Err(internal_error("local environment is not configured"));
+        }
+        self.submit_core_op(
+            request_id,
+            thread.as_ref(),
+            Op::RunUserBackgroundShellCommand { command },
+        )
+        .await
+        .map_err(|err| {
+            internal_error(format!("failed to start background shell command: {err}"))
+        })?;
+        Ok(Some(ThreadBackgroundTerminalsStartResponse {}.into()))
+    }
+
     pub(crate) async fn thread_shell_command(
         &self,
         request_id: &ConnectionRequestId,
@@ -2593,6 +2624,7 @@ impl ThreadRequestProcessor {
             .await
             .into_iter()
             .map(|terminal| ThreadBackgroundTerminal {
+                source: terminal.source.into(),
                 item_id: terminal.item_id,
                 process_id: terminal.process_id,
                 command: terminal.command,

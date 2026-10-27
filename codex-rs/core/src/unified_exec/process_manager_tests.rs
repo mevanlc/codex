@@ -655,10 +655,12 @@ async fn pruning_does_not_evict_live_process_while_exited_process_is_finalizing(
                 plugin_metrics_sidecar: None,
                 call_id: format!("call-{process_id}"),
                 process_id,
+                source: codex_protocol::protocol::ExecCommandSource::UnifiedExecStartup,
                 cwd: cwd.clone(),
                 initial_exec_command_active: Arc::new(AtomicBool::new(false)),
                 hook_command: format!("command-{process_id}"),
                 tty: false,
+                stdin_open: false,
                 environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
                 permissions: super::super::TerminalPermissions::for_launch(
                     turn.initial_environments

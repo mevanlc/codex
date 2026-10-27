@@ -755,6 +755,8 @@ impl App {
         self.app_event_tx
             .send(AppEvent::ResetTranscriptForThreadSwitch);
         self.replay_thread_snapshot(snapshot, resume_restored_queue);
+        self.chat_widget
+            .submit_op(AppCommand::ListBackgroundTerminals { show: false });
         if let Some(thread_id) = self.chat_widget.thread_id()
             && let Some(active) = self
                 .chat_widget

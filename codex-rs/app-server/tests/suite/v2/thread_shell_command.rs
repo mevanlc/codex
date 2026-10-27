@@ -629,3 +629,100 @@ async fn wait_for_command_execution_output_delta(
         }
     }
 }
+
+#[tokio::test]
+#[cfg(unix)]
+async fn user_background_shell_is_listed_after_launch_turn_and_stoppable() -> Result<()> {
+    let tmp = TempDir::new()?;
+    let server = create_mock_responses_server_sequence(vec![]).await;
+    MockResponsesConfig::new(&server.uri()).write(tmp.path())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(tmp.path())
+        .without_auto_env()
+        .build_initialized()
+        .await?;
+    let ThreadStartResponse { thread, .. } = mcp
+        .request(|request_id| ClientRequest::ThreadStart {
+            request_id,
+            params: ThreadStartParams::default(),
+        })
+        .await?;
+    let _: codex_app_server_protocol::ThreadBackgroundTerminalsStartResponse = mcp
+        .request(|request_id| ClientRequest::ThreadBackgroundTerminalsStart {
+            request_id,
+            params: codex_app_server_protocol::ThreadBackgroundTerminalsStartParams {
+                thread_id: thread.id.clone(),
+                command: "sleep 60".to_string(),
+            },
+        })
+        .await?;
+    let started = wait_for_command_execution_started(&mut mcp, None).await?;
+    let ThreadItemPayload::CommandExecution {
+        source, process_id, ..
+    } = started.item.payload
+    else {
+        unreachable!()
+    };
+    assert_eq!(source, CommandExecutionSource::UserShell);
+    let process_id = process_id.expect("managed process ID");
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+    let listed: codex_app_server_protocol::ThreadBackgroundTerminalsListResponse = mcp
+        .request(|request_id| ClientRequest::ThreadBackgroundTerminalsList {
+            request_id,
+            params: codex_app_server_protocol::ThreadBackgroundTerminalsListParams {
+                thread_id: thread.id.clone(),
+                cursor: None,
+                limit: None,
+            },
+        })
+        .await?;
+    assert_eq!(listed.data.len(), 1);
+    assert_eq!(listed.data[0].process_id, process_id);
+    assert_eq!(listed.data[0].source, CommandExecutionSource::UserShell);
+    let _: codex_app_server_protocol::ThreadResumeResponse = mcp
+        .request(|request_id| ClientRequest::ThreadResume {
+            request_id,
+            params: codex_app_server_protocol::ThreadResumeParams {
+                thread_id: thread.id.clone(),
+                ..Default::default()
+            },
+        })
+        .await?;
+    let reattached: codex_app_server_protocol::ThreadBackgroundTerminalsListResponse = mcp
+        .request(|request_id| ClientRequest::ThreadBackgroundTerminalsList {
+            request_id,
+            params: codex_app_server_protocol::ThreadBackgroundTerminalsListParams {
+                thread_id: thread.id.clone(),
+                cursor: None,
+                limit: None,
+            },
+        })
+        .await?;
+    assert_eq!(reattached.data.len(), 1);
+    assert_eq!(reattached.data[0].process_id, process_id);
+    assert_eq!(reattached.data[0].source, CommandExecutionSource::UserShell);
+    let _: codex_app_server_protocol::ThreadBackgroundTerminalsCleanResponse = mcp
+        .request(|request_id| ClientRequest::ThreadBackgroundTerminalsClean {
+            request_id,
+            params: codex_app_server_protocol::ThreadBackgroundTerminalsCleanParams {
+                thread_id: thread.id.clone(),
+            },
+        })
+        .await?;
+    let listed: codex_app_server_protocol::ThreadBackgroundTerminalsListResponse = mcp
+        .request(|request_id| ClientRequest::ThreadBackgroundTerminalsList {
+            request_id,
+            params: codex_app_server_protocol::ThreadBackgroundTerminalsListParams {
+                thread_id: thread.id.clone(),
+                cursor: None,
+                limit: None,
+            },
+        })
+        .await?;
+    assert!(listed.data.is_empty());
+    Ok(())
+}

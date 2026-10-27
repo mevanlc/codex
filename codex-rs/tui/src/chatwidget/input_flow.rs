@@ -88,7 +88,7 @@ impl ChatWidget {
             InputResult::SubmittedShell {
                 text,
                 text_elements,
-                follow_up,
+                mode,
             } => {
                 let user_message = self.user_message_from_submission(text, text_elements);
                 let should_submit_now = self.is_session_configured()
@@ -99,17 +99,15 @@ impl ChatWidget {
                     self.reasoning_header = None;
                     self.reasoning_summary_parts.clear();
                     self.set_status_header(String::from("Working"));
-                    let accepted = self.submit_user_message_with_history_record(
-                        user_message,
-                        UserMessageHistoryRecord::UserMessageText,
-                    );
-                    if accepted && follow_up.is_enabled() {
+                    let accepted =
+                        self.submit_shell_prompt_with_mode(user_message, mode) == QueueDrain::Stop;
+                    if accepted && mode.requests_follow_up() {
                         self.enqueue_shell_follow_up();
                     }
                 } else {
                     self.queue_user_message_with_options(
                         user_message,
-                        QueuedInputAction::RunShell { follow_up },
+                        QueuedInputAction::RunShell { mode },
                         Vec::new(),
                     );
                 }
@@ -370,10 +368,11 @@ impl ChatWidget {
                         break;
                     }
                 }
-                QueuedInputAction::RunShell { follow_up } => {
-                    let drain = self.submit_queued_shell_prompt(queued_message.into_user_message());
+                QueuedInputAction::RunShell { mode } => {
+                    let drain = self
+                        .submit_shell_prompt_with_mode(queued_message.into_user_message(), mode);
                     if drain == QueueDrain::Stop {
-                        if follow_up.is_enabled() {
+                        if mode.requests_follow_up() {
                             self.enqueue_shell_follow_up();
                         }
                         submitted_follow_up = self.is_user_turn_pending_or_running();

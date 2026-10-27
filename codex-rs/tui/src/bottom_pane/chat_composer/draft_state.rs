@@ -8,13 +8,13 @@ use crate::bottom_pane::paste_burst::PasteBurst;
 use crate::bottom_pane::textarea::TextArea;
 use crate::bottom_pane::textarea::TextAreaState;
 
-use super::shell_mode::ShellFollowUp;
+use super::shell_mode::ShellInvocationMode;
 
 pub(super) struct DraftState {
     pub(super) textarea: TextArea,
     pub(super) textarea_state: RefCell<TextAreaState>,
     pub(super) is_bash_mode: bool,
-    pub(super) shell_follow_up: ShellFollowUp,
+    pub(super) shell_invocation_mode: ShellInvocationMode,
     pub(super) pending_pastes: Vec<(String, String)>,
     pub(super) input_enabled: bool,
     pub(super) input_disabled_placeholder: Option<String>,
@@ -30,7 +30,7 @@ impl DraftState {
             textarea: TextArea::new(),
             textarea_state: RefCell::new(TextAreaState::default()),
             is_bash_mode: false,
-            shell_follow_up: ShellFollowUp::Disabled,
+            shell_invocation_mode: ShellInvocationMode::Normal,
             pending_pastes: Vec::new(),
             input_enabled: true,
             input_disabled_placeholder: None,
@@ -43,12 +43,12 @@ impl DraftState {
 
     pub(super) fn enter_shell_mode(&mut self) {
         self.is_bash_mode = true;
-        self.shell_follow_up = ShellFollowUp::Disabled;
+        self.shell_invocation_mode = ShellInvocationMode::Normal;
     }
 
     pub(super) fn leave_shell_mode(&mut self) {
         self.is_bash_mode = false;
-        self.shell_follow_up = ShellFollowUp::Disabled;
+        self.shell_invocation_mode = ShellInvocationMode::Normal;
     }
 }
 

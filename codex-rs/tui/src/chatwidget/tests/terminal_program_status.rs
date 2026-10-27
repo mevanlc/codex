@@ -42,6 +42,7 @@ async fn session_status_follows_existing_lifecycle_state() {
     states.push(chat.desired_program_status());
 
     chat.unified_exec_processes.push(UnifiedExecProcessSummary {
+        source: ExecCommandSource::UnifiedExecStartup,
         key: "background-process".to_string(),
         call_id: "background-call".to_string(),
         command_display: "sleep 5".to_string(),

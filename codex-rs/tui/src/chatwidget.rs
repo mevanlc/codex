@@ -1523,12 +1523,38 @@ impl ChatWidget {
         ));
     }
 
+    pub(crate) fn reconcile_background_terminals(
+        &mut self,
+        terminals: Vec<codex_app_server_protocol::ThreadBackgroundTerminal>,
+    ) {
+        let mut previous = std::mem::take(&mut self.unified_exec_processes);
+        for terminal in terminals {
+            let recent_chunks = previous
+                .iter_mut()
+                .find(|entry| entry.key == terminal.process_id)
+                .map(|entry| std::mem::take(&mut entry.recent_chunks))
+                .unwrap_or_default();
+            self.unified_exec_processes.push(UnifiedExecProcessSummary {
+                key: terminal.process_id,
+                call_id: terminal.item_id,
+                command_display: terminal.command,
+                source: terminal.source,
+                recent_chunks,
+            });
+        }
+        self.sync_unified_exec_footer();
+    }
+
     pub(crate) fn add_ps_output(&mut self) {
         let processes = self
             .unified_exec_processes
             .iter()
             .map(|process| history_cell::UnifiedExecProcessDetails {
-                command_display: process.command_display.clone(),
+                command_display: if process.source == ExecCommandSource::UserShell {
+                    format!("[user] {}", process.command_display)
+                } else {
+                    process.command_display.clone()
+                },
                 recent_chunks: process.recent_chunks.clone(),
             })
             .collect();
@@ -1942,6 +1968,7 @@ impl ChatWidget {
             AppCommand::Compact
                 | AppCommand::Review { .. }
                 | AppCommand::RunUserShellCommand { .. }
+                | AppCommand::RunUserBackgroundShellCommand { .. }
         ) {
             self.transcript.last_status_copy_targets = None;
             self.input_queue.user_turn_pending_start = true;

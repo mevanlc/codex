@@ -667,6 +667,30 @@
             },
             "method": {
               "enum": [
+                "thread/backgroundTerminals/start"
+              ],
+              "title": "Thread/backgroundTerminals/startRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadBackgroundTerminalsStartParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/backgroundTerminals/startRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "thread/shellCommand"
               ],
               "title": "Thread/shellCommandRequestMethod",
@@ -21776,6 +21800,29 @@
           "threadId"
         ],
         "title": "ThreadAttachmentUpdatedNotification",
+        "type": "object"
+      },
+      "ThreadBackgroundTerminalsStartParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "command": {
+            "description": "User-entered shell syntax, run on the local host with full access like `!`. The managed terminal runs until it exits or is stopped; there is no overall timeout.",
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command",
+          "threadId"
+        ],
+        "title": "ThreadBackgroundTerminalsStartParams",
+        "type": "object"
+      },
+      "ThreadBackgroundTerminalsStartResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "title": "ThreadBackgroundTerminalsStartResponse",
         "type": "object"
       },
       "ThreadClosedNotification": {

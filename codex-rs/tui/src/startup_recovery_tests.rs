@@ -165,9 +165,10 @@ async fn recovery_keeps_buffered_input_on_exit_or_queued_submission() {
 
 #[tokio::test]
 async fn recovery_keeps_actual_submitted_shell_text() {
-    for follow_up in [
-        crate::bottom_pane::ShellFollowUp::Disabled,
-        crate::bottom_pane::ShellFollowUp::Enabled,
+    for mode in [
+        crate::bottom_pane::ShellInvocationMode::Normal,
+        crate::bottom_pane::ShellInvocationMode::FollowUp,
+        crate::bottom_pane::ShellInvocationMode::Background,
     ] {
         scope(async {
             remember(snapshot("!echo draft"));
@@ -175,7 +176,7 @@ async fn recovery_keeps_actual_submitted_shell_text() {
             submitted(&InputResult::SubmittedShell {
                 text: "!echo edited".into(),
                 text_elements: Vec::new(),
-                follow_up,
+                mode,
             });
             refresh_after_handoff(|| panic!("new edits must not replace submitted shell text"));
             assert_eq!(take_unsent_text(), Some("!echo edited".to_string()));

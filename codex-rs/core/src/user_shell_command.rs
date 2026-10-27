@@ -46,3 +46,15 @@ pub fn user_shell_command_record_item(
 #[cfg(test)]
 #[path = "user_shell_command_tests.rs"]
 mod tests;
+
+/// A managed terminal started by the user, available to subsequent model turns.
+pub(crate) fn user_background_shell_started_record(command: &str, process_id: i32) -> ResponseItem {
+    codex_context_fragments::RenderedFragment::new(
+        "user",
+        codex_context_fragments::AnnotatedContent::from_parts(
+            codex_protocol::models::input_text(format!("<user_shell_command>\n<command>\n{command}\n</command>\n<result>\nStarted in background. Terminal session ID: {process_id}. Use write_stdin to poll output or send input.\n</result>\n</user_shell_command>")),
+            codex_protocol::models::ContentItemKind("shell.user_command".to_string()),
+            codex_protocol::models::ContentItemMetadata::harness(),
+        ),
+    ).into()
+}

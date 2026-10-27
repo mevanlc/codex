@@ -87,6 +87,7 @@ mod background_terminal_pagination_tests {
         let cwd = if cfg!(windows) { r"C:\tmp" } else { "/tmp" };
 
         ThreadBackgroundTerminal {
+            source: Default::default(),
             item_id: format!("item-{process_id}"),
             process_id: process_id.to_string(),
             command: format!("command-{process_id}"),

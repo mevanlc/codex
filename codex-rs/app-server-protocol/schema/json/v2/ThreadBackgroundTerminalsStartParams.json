@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "command": {
+      "description": "User-entered shell syntax, run on the local host with full access like `!`. The managed terminal runs until it exits or is stopped; there is no overall timeout.",
+      "type": "string"
+    },
+    "threadId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command",
+    "threadId"
+  ],
+  "title": "ThreadBackgroundTerminalsStartParams",
+  "type": "object"
+}

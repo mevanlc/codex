@@ -5185,6 +5185,25 @@ class ThreadAttachmentUpdatedNotification(BaseModel):
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
+class ThreadBackgroundTerminalsStartParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    command: Annotated[
+        str,
+        Field(
+            description="User-entered shell syntax, run on the local host with full access like `!`. The managed terminal runs until it exits or is stopped; there is no overall timeout."
+        ),
+    ]
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadBackgroundTerminalsStartResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+
+
 class ThreadClosedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -7205,6 +7224,18 @@ class ThreadCompactStartRequest(BaseModel):
         Literal["thread/compact/start"], Field(title="Thread/compact/startRequestMethod")
     ]
     params: ThreadCompactStartParams
+
+
+class ThreadBackgroundTerminalsStartRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["thread/backgroundTerminals/start"],
+        Field(title="Thread/backgroundTerminals/startRequestMethod"),
+    ]
+    params: ThreadBackgroundTerminalsStartParams
 
 
 class ThreadShellCommandRequest(BaseModel):
@@ -13050,6 +13081,7 @@ class ClientRequest(
         | ThreadSectionMoveRequest
         | ThreadUnarchiveRequest
         | ThreadCompactStartRequest
+        | ThreadBackgroundTerminalsStartRequest
         | ThreadShellCommandRequest
         | ThreadApproveGuardianDeniedActionRequest
         | ThreadRevertRequest
@@ -13159,6 +13191,7 @@ class ClientRequest(
         | ThreadSectionMoveRequest
         | ThreadUnarchiveRequest
         | ThreadCompactStartRequest
+        | ThreadBackgroundTerminalsStartRequest
         | ThreadShellCommandRequest
         | ThreadApproveGuardianDeniedActionRequest
         | ThreadRevertRequest

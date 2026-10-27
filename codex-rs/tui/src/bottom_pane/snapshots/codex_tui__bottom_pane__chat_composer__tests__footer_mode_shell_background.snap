@@ -1,0 +1,14 @@
+---
+source: tui/src/bottom_pane/chat_composer.rs
+assertion_line: 5407
+expression: terminal.backend()
+---
+"                                                                                                    "
+"! sleep 60                                                                                          "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                      Shell mode · background · Tab to change mode  "

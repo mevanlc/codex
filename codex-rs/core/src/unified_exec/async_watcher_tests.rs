@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use super::Buffer;
 use super::Emitter;
+use super::ProcessEventContext;
 use super::TRAILING_OUTPUT_GRACE;
 use super::spawn_exit_watcher;
 use super::start_streaming_output;
@@ -96,12 +97,12 @@ async fn completed_output_preserves_bytes_before_subscription(
     .await;
     assert_eq!(model_output.to_bytes(), b"early\n");
 
-    start_streaming_output(&process, &context);
+    start_streaming_output(&process, &ProcessEventContext::from(&context));
     #[allow(deprecated)]
     let cwd = context.step_context.turn.cwd.clone().into();
     spawn_exit_watcher(
         Arc::clone(&process),
-        &context,
+        &ProcessEventContext::from(&context),
         vec!["proof".to_string()],
         cwd,
         /*process_id*/ 123,
@@ -147,7 +148,7 @@ async fn streaming_output_preserves_multibyte_characters_across_chunks() -> anyh
         rx_event,
         context,
     } = streaming_output_harness().await?;
-    start_streaming_output(&process, &context);
+    start_streaming_output(&process, &ProcessEventContext::from(&context));
     let output_drained = process.output_drained_notify();
     let drained = output_drained.notified();
     tokio::pin!(drained);
@@ -195,7 +196,7 @@ async fn streaming_output_finishes_on_close_without_waiting_for_grace() -> anyho
         context,
         ..
     } = streaming_output_harness().await?;
-    start_streaming_output(&process, &context);
+    start_streaming_output(&process, &ProcessEventContext::from(&context));
     let output_drained = process.output_drained_notify();
     let drained = output_drained.notified();
     tokio::pin!(drained);
@@ -240,7 +241,7 @@ async fn streaming_output_keeps_grace_as_fallback_without_close() -> anyhow::Res
         rx_event,
         context,
     } = streaming_output_harness().await?;
-    start_streaming_output(&process, &context);
+    start_streaming_output(&process, &ProcessEventContext::from(&context));
     let output_drained = process.output_drained_notify();
     let drained = output_drained.notified();
     tokio::pin!(drained);
@@ -293,7 +294,7 @@ async fn exit_watcher_waits_for_late_network_denial_before_classifying_end() -> 
         mut context,
         rx_event,
     } = streaming_output_harness().await?;
-    start_streaming_output(&process, &context);
+    start_streaming_output(&process, &ProcessEventContext::from(&context));
 
     tokio::time::pause();
     let process_for_late_denial = Arc::clone(&process);
@@ -317,7 +318,7 @@ async fn exit_watcher_waits_for_late_network_denial_before_classifying_end() -> 
     };
     spawn_exit_watcher(
         Arc::clone(&process),
-        &context,
+        &ProcessEventContext::from(&context),
         vec!["proof".to_string()],
         cwd,
         /*process_id*/ 123,

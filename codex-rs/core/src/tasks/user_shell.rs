@@ -60,6 +60,7 @@ pub(crate) enum UserShellCommandMode {
 pub(crate) struct UserShellCommandTask {
     command: String,
     timeout_ms: Option<u64>,
+    background: bool,
 }
 
 impl UserShellCommandTask {
@@ -67,7 +68,12 @@ impl UserShellCommandTask {
         Self {
             command,
             timeout_ms,
+            background: false,
         }
+    }
+    pub(crate) fn with_background(mut self, background: bool) -> Self {
+        self.background = background;
+        self
     }
 }
 
@@ -87,19 +93,21 @@ impl SessionTask for UserShellCommandTask {
         _input: Vec<TurnInput>,
         cancellation_token: CancellationToken,
     ) -> SessionTaskResult {
-        execute_user_shell_command(
+        execute_user_shell_command_with_background(
             session,
             turn_context,
             self.command.clone(),
             self.timeout_ms,
             cancellation_token,
             UserShellCommandMode::StandaloneTurn,
+            self.background,
         )
         .await;
         Ok(None)
     }
 }
 
+#[cfg(test)]
 pub(crate) async fn execute_user_shell_command(
     session: Arc<Session>,
     turn_context: Arc<TurnContext>,
@@ -107,6 +115,28 @@ pub(crate) async fn execute_user_shell_command(
     timeout_ms: Option<u64>,
     cancellation_token: CancellationToken,
     mode: UserShellCommandMode,
+) {
+    execute_user_shell_command_with_background(
+        session,
+        turn_context,
+        command,
+        timeout_ms,
+        cancellation_token,
+        mode,
+        false,
+    )
+    .await;
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn execute_user_shell_command_with_background(
+    session: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    command: String,
+    timeout_ms: Option<u64>,
+    cancellation_token: CancellationToken,
+    mode: UserShellCommandMode,
+    background: bool,
 ) {
     session
         .services
@@ -185,28 +215,30 @@ pub(crate) async fn execute_user_shell_command(
     let raw_command = command;
 
     let parsed_cmd = parse_command(&display_command);
-    session
-        .emit_turn_item_started(
-            turn_context.as_ref(),
-            &TurnItem::CommandExecution(CommandExecutionItem {
-                model_context: None,
-                sandbox_type: None,
-                id: call_id.clone(),
-                plugin_id: None,
-                script_path: None,
-                process_id: None,
-                command: display_command.clone(),
-                cwd: cwd.clone().into(),
-                parsed_cmd: parsed_cmd.clone(),
-                source: ExecCommandSource::UserShell,
-                interaction_input: None,
-                status: CommandExecutionStatus::InProgress,
-                aggregated_output: None,
-                exit_code: None,
-                duration: None,
-            }),
-        )
-        .await;
+    if !background {
+        session
+            .emit_turn_item_started(
+                turn_context.as_ref(),
+                &TurnItem::CommandExecution(CommandExecutionItem {
+                    model_context: None,
+                    sandbox_type: None,
+                    id: call_id.clone(),
+                    plugin_id: None,
+                    script_path: None,
+                    process_id: None,
+                    command: display_command.clone(),
+                    cwd: cwd.clone().into(),
+                    parsed_cmd: parsed_cmd.clone(),
+                    source: ExecCommandSource::UserShell,
+                    interaction_input: None,
+                    status: CommandExecutionStatus::InProgress,
+                    aggregated_output: None,
+                    exit_code: None,
+                    duration: None,
+                }),
+            )
+            .await;
+    }
 
     let permission_profile = PermissionProfile::Disabled;
     let exec_env = ExecRequest {
@@ -233,6 +265,49 @@ pub(crate) async fn execute_user_shell_command(
         exec_server_managed_network: None,
         exec_server_network_proxy: None,
     };
+
+    if background {
+        let permissions = crate::unified_exec::TerminalPermissions::for_user_shell(
+            turn_environment,
+            &turn_context,
+        );
+        let result = session
+            .services
+            .unified_exec_manager
+            .start_user_shell(
+                Arc::clone(&session),
+                Arc::clone(&turn_context),
+                exec_env,
+                display_command,
+                raw_command.clone(),
+                shell_snapshot,
+                permissions,
+                &turn_environment.environment,
+                turn_environment.selection.environment_id.clone(),
+                cancellation_token,
+            )
+            .await;
+        if let Err(err) = result {
+            let message = format!("failed to launch background command: {err}");
+            let output = ExecToolCallOutput {
+                exit_code: -1,
+                stdout: StreamOutput::new(String::new()),
+                stderr: StreamOutput::new(message.clone()),
+                aggregated_output: StreamOutput::new(message.clone()),
+                duration: Duration::ZERO,
+                timed_out: false,
+            };
+            let record = user_shell_command_record_item(&raw_command, &output, &turn_context);
+            session
+                .record_conversation_items(&turn_context, turn_context.model_info(), &[record])
+                .await;
+            session
+                .ensure_rollout_materialized(PersistContext::Standard)
+                .await;
+            send_user_shell_error(&session, &turn_context, &message).await;
+        }
+        return;
+    }
 
     let stdout_stream = Some(StdoutStream {
         sub_id: turn_context.sub_id.clone(),

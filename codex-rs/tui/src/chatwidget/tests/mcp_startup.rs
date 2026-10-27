@@ -1,6 +1,6 @@
 use super::helpers::drain_insert_history_transcript as drain_insert_history;
 use super::*;
-use crate::bottom_pane::ShellFollowUp;
+use crate::bottom_pane::ShellInvocationMode;
 use pretty_assertions::assert_eq;
 
 fn notify_mcp_status(chat: &mut ChatWidget, name: &str, status: McpServerStartupState) {
@@ -460,7 +460,7 @@ async fn pending_mcp_startup_does_not_unblock_foreground_shell() {
     chat.queue_user_message_with_options(
         "!echo hi".into(),
         QueuedInputAction::RunShell {
-            follow_up: ShellFollowUp::Disabled,
+            mode: ShellInvocationMode::Normal,
         },
         Vec::new(),
     );

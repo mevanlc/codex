@@ -755,6 +755,11 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadCompactStartResponse,
     },
+    ThreadBackgroundTerminalsStart => "thread/backgroundTerminals/start" {
+        params: v2::ThreadBackgroundTerminalsStartParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadBackgroundTerminalsStartResponse,
+    },
     ThreadShellCommand => "thread/shellCommand" {
         params: v2::ThreadShellCommandParams,
         serialization: thread_id(params.thread_id),

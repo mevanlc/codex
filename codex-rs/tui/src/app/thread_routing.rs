@@ -861,6 +861,27 @@ impl App {
                 self.chat_widget.accept_realtime_speech(*delivery_id);
                 Ok(true)
             }
+            AppCommand::ListBackgroundTerminals { show } => {
+                match app_server.thread_background_terminals_list(thread_id).await {
+                    Ok(terminals) => {
+                        self.chat_widget.reconcile_background_terminals(terminals);
+                        if *show {
+                            self.chat_widget.add_ps_output();
+                        }
+                    }
+                    Err(err) if !show => {
+                        tracing::debug!(%err, "could not refresh background terminals")
+                    }
+                    Err(err) => return Err(err),
+                }
+                Ok(true)
+            }
+            AppCommand::RunUserBackgroundShellCommand { command } => {
+                app_server
+                    .thread_background_terminals_start(thread_id, command.to_string())
+                    .await?;
+                Ok(true)
+            }
             AppCommand::RunUserShellCommand { command } => {
                 app_server
                     .thread_shell_command(thread_id, command.to_string())

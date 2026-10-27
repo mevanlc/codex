@@ -57,6 +57,7 @@ pub(super) struct UserMessageHistoryOverride {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ShellEscapePolicy {
+    Background,
     Allow,
     Disallow,
 }

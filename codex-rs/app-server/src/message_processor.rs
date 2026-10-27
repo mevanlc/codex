@@ -1027,6 +1027,7 @@ impl MessageProcessor {
             | ClientRequest::ReviewStart { .. }
             | ClientRequest::ThreadCompactStart { .. }
             | ClientRequest::ThreadShellCommand { .. }
+            | ClientRequest::ThreadBackgroundTerminalsStart { .. }
             | ClientRequest::ThreadQueueStart { .. }
             | ClientRequest::ThreadRealtimeStart { .. } => {
                 (Some(self.turn_admission.admit()?), true)
@@ -1573,6 +1574,11 @@ impl MessageProcessor {
             }
             ClientRequest::ThreadItemsRead { params, .. } => {
                 self.thread_processor.thread_items_read(params).await
+            }
+            ClientRequest::ThreadBackgroundTerminalsStart { params, .. } => {
+                self.thread_processor
+                    .thread_background_terminals_start(&request_id, params)
+                    .await
             }
             ClientRequest::ThreadShellCommand { params, .. } => {
                 self.thread_processor

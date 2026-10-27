@@ -4514,6 +4514,22 @@
       ],
       "type": "object"
     },
+    "ThreadBackgroundTerminalsStartParams": {
+      "properties": {
+        "command": {
+          "description": "User-entered shell syntax, run on the local host with full access like `!`. The managed terminal runs until it exits or is stopped; there is no overall timeout.",
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "command",
+        "threadId"
+      ],
+      "type": "object"
+    },
     "ThreadCompactStartParams": {
       "properties": {
         "threadId": {
@@ -6765,6 +6781,30 @@
         "params"
       ],
       "title": "Thread/compact/startRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "thread/backgroundTerminals/start"
+          ],
+          "title": "Thread/backgroundTerminals/startRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadBackgroundTerminalsStartParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Thread/backgroundTerminals/startRequest",
       "type": "object"
     },
     {

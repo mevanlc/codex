@@ -898,6 +898,10 @@ pub enum Op {
     /// Request to shut down codex instance.
     Shutdown,
 
+    /// Start a user-authorized command in the shared background terminal manager.
+    #[debug("RunUserBackgroundShellCommand")]
+    RunUserBackgroundShellCommand { command: String },
+
     /// Execute a user-initiated one-off shell command (triggered by "!cmd").
     ///
     /// The command string is executed using the user's default shell and may
@@ -1111,6 +1115,7 @@ impl Op {
             Self::Review { .. } => "review",
             Self::ApproveGuardianDeniedAction { .. } => "approve_guardian_denied_action",
             Self::Shutdown => "shutdown",
+            Self::RunUserBackgroundShellCommand { .. } => "run_user_background_shell_command",
             Self::RunUserShellCommand { .. } => "run_user_shell_command",
         }
     }

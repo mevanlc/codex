@@ -1782,6 +1782,46 @@ impl AppServerSession {
         Ok(())
     }
 
+    pub(crate) async fn thread_background_terminals_list(
+        &mut self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<codex_app_server_protocol::ThreadBackgroundTerminal>> {
+        let mut data = Vec::new();
+        let mut cursor = None;
+        loop {
+            let request_id = self.next_request_id();
+            let response: codex_app_server_protocol::ThreadBackgroundTerminalsListResponse = self
+                .client
+                .request_typed(ClientRequest::ThreadBackgroundTerminalsList {
+                    request_id,
+                    params: codex_app_server_protocol::ThreadBackgroundTerminalsListParams {
+                        thread_id: thread_id.to_string(),
+                        cursor,
+                        limit: None,
+                    },
+                })
+                .await?;
+            data.extend(response.data);
+            cursor = response.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        Ok(data)
+    }
+
+    pub(crate) async fn thread_background_terminals_start(
+        &mut self,
+        thread_id: ThreadId,
+        command: String,
+    ) -> Result<()> {
+        let request_id = self.next_request_id();
+        let _: codex_app_server_protocol::ThreadBackgroundTerminalsStartResponse = self.client.request_typed(
+            ClientRequest::ThreadBackgroundTerminalsStart { request_id, params: codex_app_server_protocol::ThreadBackgroundTerminalsStartParams { thread_id: thread_id.to_string(), command } }
+        ).await.wrap_err("Failed to start background shell command; if unsupported, update the Codex app server")?;
+        Ok(())
+    }
+
     pub(crate) async fn thread_shell_command(
         &mut self,
         thread_id: ThreadId,

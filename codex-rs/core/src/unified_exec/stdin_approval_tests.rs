@@ -309,3 +309,63 @@ async fn enabling_windows_sandbox_respects_the_launch_backend(
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn user_shell_permissions_compare_actual_authority_with_baseline() -> anyhow::Result<()> {
+    let (_session, turn) = make_session_and_context().await;
+    let mut environment = turn
+        .initial_environments
+        .local()
+        .expect("local environment")
+        .clone();
+    environment.config_mut().permission_profile =
+        PermissionProfileSnapshot::legacy(PermissionProfile::Disabled);
+    let permissions = TerminalPermissions::for_user_shell(&environment, &turn);
+    let current = TerminalPolicy::capture(&environment, &turn, TerminalSandboxSource::Native, None);
+    assert_eq!(
+        permissions.review_requirement(&current, &PermissionProfile::Disabled),
+        Ok(SandboxPermissions::UseDefault)
+    );
+
+    environment.config_mut().permission_profile =
+        PermissionProfileSnapshot::legacy(PermissionProfile::read_only());
+    let current = TerminalPolicy::capture(&environment, &turn, TerminalSandboxSource::Native, None);
+    assert_eq!(
+        permissions.review_requirement(&current, environment.permission_profile()),
+        Ok(SandboxPermissions::RequireEscalated)
+    );
+    let permissions = TerminalPermissions::for_user_shell(&environment, &turn);
+    assert_eq!(
+        permissions.review_requirement(&current, environment.permission_profile()),
+        Ok(SandboxPermissions::RequireEscalated)
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn user_shell_proxy_bypass_requires_stdin_review() -> anyhow::Result<()> {
+    let (_session, mut turn) = make_session_and_context().await;
+    let mut environment = turn
+        .initial_environments
+        .local()
+        .expect("local environment")
+        .clone();
+    environment.config_mut().permission_profile =
+        PermissionProfileSnapshot::legacy(PermissionProfile::Disabled);
+    Arc::make_mut(&mut turn.config).permissions.network =
+        Some(NetworkProxySpec::from_config_and_constraints(
+            NetworkProxyConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            None,
+            &PermissionProfile::Disabled,
+        )?);
+    let permissions = TerminalPermissions::for_user_shell(&environment, &turn);
+    let current = TerminalPolicy::capture(&environment, &turn, TerminalSandboxSource::Native, None);
+    assert_eq!(
+        permissions.review_requirement(&current, environment.permission_profile()),
+        Ok(SandboxPermissions::RequireEscalated)
+    );
+    Ok(())
+}

@@ -227,6 +227,7 @@ struct OutOfBandElicitations {
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct BackgroundTerminalInfo {
+    pub source: codex_protocol::protocol::ExecCommandSource,
     pub item_id: String,
     pub process_id: String,
     pub command: String,

@@ -31,6 +31,40 @@ use codex_protocol::protocol::ExecCommandSource;
 use codex_protocol::protocol::ExecOutputStream;
 use codex_utils_path_uri::PathUri;
 
+/// Event and persistence context shared by agent and user managed processes.
+#[derive(Clone)]
+pub(super) struct ProcessEventContext {
+    pub session: Arc<Session>,
+    pub turn: Arc<TurnContext>,
+    pub model_info: Arc<ModelInfo>,
+    pub call_id: String,
+    pub model_context: Option<codex_protocol::items::ModelInvocationContext>,
+    pub user_command: Option<String>,
+}
+
+impl ProcessEventContext {
+    pub fn source(&self) -> ExecCommandSource {
+        if self.user_command.is_some() {
+            ExecCommandSource::UserShell
+        } else {
+            ExecCommandSource::UnifiedExecStartup
+        }
+    }
+}
+
+impl From<&UnifiedExecContext> for ProcessEventContext {
+    fn from(context: &UnifiedExecContext) -> Self {
+        Self {
+            session: Arc::clone(&context.session),
+            turn: Arc::clone(&context.step_context.turn),
+            model_info: Arc::clone(&context.step_context.settings.model_info),
+            call_id: context.call_id.clone(),
+            model_context: Some(context.step_context.model_context()),
+            user_command: None,
+        }
+    }
+}
+
 pub(crate) const TRAILING_OUTPUT_GRACE: Duration = Duration::from_millis(100);
 
 /// Upper bound for a single ExecCommandOutputDelta chunk emitted by unified exec.
@@ -54,7 +88,7 @@ struct Buffer<const MAX_BYTES: usize = UNIFIED_EXEC_OUTPUT_DELTA_MAX_BYTES> {
 }
 
 /// Spawn a background task that emits ExecCommandOutputDelta events on UTF‑8 boundaries.
-pub(crate) fn start_streaming_output(process: &UnifiedExecProcess, context: &UnifiedExecContext) {
+pub(crate) fn start_streaming_output(process: &UnifiedExecProcess, context: &ProcessEventContext) {
     let mut receiver = process.output_receiver();
     let output_drained = process.output_drained_notify();
     let exit_token = process.cancellation_token();
@@ -67,7 +101,7 @@ pub(crate) fn start_streaming_output(process: &UnifiedExecProcess, context: &Uni
     let emitter = Emitter {
         remaining_deltas: MAX_EXEC_OUTPUT_DELTAS_PER_CALL,
         session: Arc::clone(&context.session),
-        turn: Arc::clone(&context.step_context.turn),
+        turn: Arc::clone(&context.turn),
         call_id: context.call_id.clone(),
     };
 
@@ -157,7 +191,7 @@ pub(crate) fn start_streaming_output(process: &UnifiedExecProcess, context: &Uni
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_exit_watcher(
     process: Arc<UnifiedExecProcess>,
-    context: &UnifiedExecContext,
+    context: &ProcessEventContext,
     command: Vec<String>,
     cwd: PathUri,
     process_id: i32,
@@ -168,9 +202,10 @@ pub(crate) fn spawn_exit_watcher(
     plugin_metrics_sidecar: Option<SharedPluginMetricsSidecar>,
 ) {
     let session_ref = Arc::clone(&context.session);
-    let turn_ref = Arc::clone(&context.step_context.turn);
-    let model_info = Arc::clone(&context.step_context.settings.model_info);
-    let model_context = context.step_context.model_context();
+    let turn_ref = Arc::clone(&context.turn);
+    let model_info = Arc::clone(&context.model_info);
+    let user_command = context.user_command.clone();
+    let model_context = context.model_context.clone();
     let call_id = context.call_id.clone();
     let exit_token = process.cancellation_token();
     let output_drained = process.output_drained_notify();
@@ -191,6 +226,52 @@ pub(crate) fn spawn_exit_watcher(
         let plugin_metrics_sidecar = plugin_metrics_sidecar
             .as_ref()
             .and_then(take_plugin_metrics_sidecar);
+        if let Some(raw_command) = user_command {
+            let mut aggregated_output =
+                resolve_aggregated_output(&output_buffer, String::new()).await;
+            if let Some(message) = process.failure_message() {
+                if !aggregated_output.is_empty() {
+                    aggregated_output.push('\n');
+                }
+                aggregated_output.push_str(&message);
+            }
+            let output = ExecToolCallOutput {
+                exit_code: process.exit_code().unwrap_or(-1),
+                stdout: StreamOutput::new(aggregated_output.clone()),
+                stderr: StreamOutput::new(String::new()),
+                aggregated_output: StreamOutput::new(aggregated_output),
+                duration,
+                timed_out: process.timed_out(),
+            };
+            let record = crate::user_shell_command::user_shell_command_record_item(
+                &raw_command,
+                &output,
+                &turn_ref,
+            );
+            session_ref
+                .record_conversation_items(&turn_ref, &model_info, &[record])
+                .await;
+            let emitter = ToolEmitter::unified_exec(
+                &command,
+                cwd,
+                ExecCommandSource::UserShell,
+                Some(process_id.to_string()),
+                None,
+            );
+            emitter
+                .emit(
+                    ToolEventCtx::new(&session_ref, &turn_ref, &model_info, &call_id, None),
+                    ToolEventStage::Success {
+                        output,
+                        applied_patch_delta: None,
+                    },
+                )
+                .await;
+            if let Err(err) = session_ref.flush_rollout().await {
+                tracing::warn!(%err, "failed to persist user background command completion");
+            }
+            return;
+        }
         if let Some(message) = process.failure_message() {
             drop(plugin_metrics_sidecar);
             emit_failed_exec_end_for_unified_exec(
@@ -212,15 +293,17 @@ pub(crate) fn spawn_exit_watcher(
         } else {
             let exit_code = process.exit_code().unwrap_or(-1);
             let timed_out = process.timed_out();
-            finish_and_track_measurements(
-                plugin_metrics_sidecar,
-                exit_code,
-                &session_ref,
-                &turn_ref,
-                &model_context,
-                &call_id,
-            )
-            .await;
+            if let Some(model_context) = model_context.as_ref() {
+                finish_and_track_measurements(
+                    plugin_metrics_sidecar,
+                    exit_code,
+                    &session_ref,
+                    &turn_ref,
+                    model_context,
+                    &call_id,
+                )
+                .await;
+            }
             emit_exec_end_for_unified_exec(
                 process.sandbox_type(),
                 session_ref,

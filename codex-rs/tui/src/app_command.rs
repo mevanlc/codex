@@ -113,6 +113,12 @@ pub(crate) enum AppCommand {
         delivery_id: u64,
         text: RealtimeSpeechText,
     },
+    ListBackgroundTerminals {
+        show: bool,
+    },
+    RunUserBackgroundShellCommand {
+        command: String,
+    },
     RunUserShellCommand {
         command: String,
     },

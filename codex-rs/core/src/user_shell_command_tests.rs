@@ -1,4 +1,14 @@
 use super::*;
+
+#[test]
+fn background_launch_record_keeps_shell_context_attribution() {
+    let record = user_background_shell_started_record("sleep 60", 123);
+    assert!(crate::context::is_guardian_context_message(&record));
+    assert!(!crate::context::is_user_authorization_message(&record));
+    let serialized = serde_json::to_string(&record).expect("serialize launch record");
+    assert!(serialized.contains("Terminal session ID: 123"));
+    assert!(serialized.contains("shell.user_command"));
+}
 use crate::context::ContextualUserFragment;
 use crate::context::UserShellCommand;
 use crate::session::tests::make_session_and_context;

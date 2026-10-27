@@ -13,8 +13,10 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use super::async_watcher::ProcessEventContext;
 use super::oneshot::Completion;
 use super::process::OutputDrainPolicy;
+use codex_async_utils::OrCancelExt;
 
 use crate::codex_thread::BackgroundTerminalInfo;
 use crate::exec_env::CODEX_PERMISSION_PROFILE_ENV_VAR;
@@ -92,6 +94,30 @@ use codex_tools::ToolName;
 use codex_utils_head_tail_buffer::HeadTailBuffer;
 use codex_utils_output_truncation::approx_tokens_from_byte_count;
 use codex_utils_path_uri::PathUri;
+
+/// Owns an in-progress user launch until registration hands it to the manager.
+struct UserLaunchGuard {
+    session: Arc<crate::session::session::Session>,
+    process_id: Option<i32>,
+    process: Option<Arc<UnifiedExecProcess>>,
+}
+
+impl Drop for UserLaunchGuard {
+    fn drop(&mut self) {
+        let Some(process_id) = self.process_id else {
+            return;
+        };
+        if let Some(process) = &self.process {
+            process.terminate();
+        }
+        let session = Arc::clone(&self.session);
+        tokio::spawn(async move {
+            let manager = &session.services.unified_exec_manager;
+            manager.terminate_process(process_id).await;
+            manager.release_process_id(process_id).await;
+        });
+    }
+}
 
 const UNIFIED_EXEC_ENV: [(&str, &str); 10] = [
     ("NO_COLOR", "1"),
@@ -269,6 +295,7 @@ struct PreparedProcessHandles {
     tool_cwd: Option<PathUri>,
     process_id: i32,
     tty: bool,
+    stdin_open: bool,
 }
 
 struct InitialExecCommandGuard {
@@ -506,6 +533,136 @@ impl UnifiedExecProcessManager {
         }
     }
 
+    /// Starts a prepared, user-authorized local command in the ordinary terminal store.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn start_user_shell(
+        &self,
+        session: Arc<crate::session::session::Session>,
+        turn: Arc<crate::session::turn_context::TurnContext>,
+        request: ExecRequest,
+        display_command: Vec<String>,
+        raw_command: String,
+        shell_snapshot: Option<Arc<crate::shell_snapshot::ShellSnapshotFile>>,
+        permissions: super::TerminalPermissions,
+        environment: &codex_exec_server::Environment,
+        environment_id: String,
+        cancellation_token: CancellationToken,
+    ) -> Result<(), UnifiedExecError> {
+        if cancellation_token.is_cancelled() {
+            return Err(UnifiedExecError::process_failed(
+                "command aborted by user".to_string(),
+            ));
+        }
+        let process_id = self.allocate_process_id().await;
+        let mut launch_guard = UserLaunchGuard {
+            session: Arc::clone(&session),
+            process_id: Some(process_id),
+            process: None,
+        };
+        let spawned = self
+            .open_session_with_stdin(
+                process_id,
+                &request,
+                None,
+                codex_sandboxing::WindowsSandboxProxySettingsMode::Reconcile,
+                None,
+                false,
+                true,
+                environment,
+            )
+            .or_cancel(&cancellation_token)
+            .await;
+        let process = match spawned {
+            Ok(Ok(mut process)) => {
+                process._shell_snapshot = shell_snapshot;
+                Arc::new(process)
+            }
+            other => {
+                self.release_process_id(process_id).await;
+                launch_guard.process_id = None;
+                return Err(match other {
+                    Ok(Err(err)) => err,
+                    _ => UnifiedExecError::process_failed("command aborted by user".to_string()),
+                });
+            }
+        };
+        launch_guard.process = Some(Arc::clone(&process));
+        if cancellation_token.is_cancelled() {
+            return Err(UnifiedExecError::process_failed(
+                "command aborted by user".to_string(),
+            ));
+        }
+        let context = ProcessEventContext {
+            model_info: Arc::clone(turn.model_info()),
+            session,
+            turn,
+            call_id: Uuid::new_v4().to_string(),
+            model_context: None,
+            user_command: Some(raw_command.clone()),
+        };
+        let emitter = ToolEmitter::unified_exec(
+            &display_command,
+            request.cwd.clone(),
+            context.source(),
+            Some(process_id.to_string()),
+            None,
+        );
+        emitter
+            .emit(
+                ToolEventCtx::new(
+                    &context.session,
+                    &context.turn,
+                    &context.model_info,
+                    &context.call_id,
+                    None,
+                ),
+                ToolEventStage::Begin,
+            )
+            .await;
+        let record = crate::user_shell_command::user_background_shell_started_record(
+            &raw_command,
+            process_id,
+        );
+        context
+            .session
+            .record_conversation_items(&context.turn, &context.model_info, &[record])
+            .await;
+        context
+            .session
+            .ensure_rollout_materialized(codex_thread_store::PersistContext::Standard)
+            .await;
+        start_streaming_output(&process, &context);
+        let output_buffer = Arc::clone(&process.output_handles().output_buffer);
+        self.store_process(
+            Arc::clone(&process),
+            &context,
+            &display_command,
+            raw_command,
+            request.cwd,
+            environment_id,
+            permissions,
+            None,
+            Instant::now(),
+            process_id,
+            false,
+            true,
+            None,
+            None,
+            None,
+            output_buffer,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await;
+        process.output_handles().collection_finished.cancel();
+        if cancellation_token.is_cancelled() {
+            return Err(UnifiedExecError::process_failed(
+                "command aborted by user".to_string(),
+            ));
+        }
+        launch_guard.process_id = None;
+        Ok(())
+    }
+
     #[tracing::instrument(
         name = "unified_exec.exec_command",
         level = "info",
@@ -617,7 +774,8 @@ impl UnifiedExecProcessManager {
             } else {
                 None
             };
-        start_streaming_output(&process, context);
+        let event_context = ProcessEventContext::from(context);
+        start_streaming_output(&process, &event_context);
         let start = Instant::now();
         // Persist live sessions and remote output that remains pollable after an early exit.
         let process_stored = (!process.has_exited() && process.exit_code().is_none())
@@ -636,7 +794,7 @@ impl UnifiedExecProcessManager {
             initial_exec_command_guard.active = Some(Arc::clone(&initial_exec_command_active));
             self.store_process(
                 Arc::clone(&process),
-                context,
+                &event_context,
                 &request.command,
                 request.hook_command.clone(),
                 cwd.clone(),
@@ -645,6 +803,7 @@ impl UnifiedExecProcessManager {
                 plugin_attribution.clone(),
                 start,
                 request.process_id,
+                request.tty,
                 request.tty,
                 deferred_network_approval.clone(),
                 network_denial_monitor,
@@ -1002,6 +1161,7 @@ impl UnifiedExecProcessManager {
             tool_cwd,
             process_id,
             tty,
+            stdin_open,
             ..
         } = self
             .prepare_process_handles(process_id, locked_process)
@@ -1019,12 +1179,10 @@ impl UnifiedExecProcessManager {
             process.has_exited() && output.drain_policy == OutputDrainPolicy::WaitForOutputClosure;
         // A write racing with remote exit still collects the final output.
         if !request.input.is_empty() && !remote_exited {
-            if !tty {
-                if request.input == INTERRUPT {
-                    process.interrupt().await?;
-                } else {
-                    return Err(UnifiedExecError::StdinClosed);
-                }
+            if !tty && request.input == INTERRUPT {
+                process.interrupt().await?;
+            } else if !stdin_open {
+                return Err(UnifiedExecError::StdinClosed);
             } else {
                 match process.write(request.input.as_bytes()).await {
                     Ok(()) => {
@@ -1241,6 +1399,7 @@ impl UnifiedExecProcessManager {
                 .then(|| entry.cwd.clone()),
             process_id: entry.process_id,
             tty: entry.tty,
+            stdin_open: entry.stdin_open,
         })
     }
 
@@ -1248,7 +1407,7 @@ impl UnifiedExecProcessManager {
     async fn store_process(
         &self,
         process: Arc<UnifiedExecProcess>,
-        context: &UnifiedExecContext,
+        context: &ProcessEventContext,
         command: &[String],
         hook_command: String,
         cwd: PathUri,
@@ -1258,6 +1417,7 @@ impl UnifiedExecProcessManager {
         started_at: Instant,
         process_id: i32,
         tty: bool,
+        stdin_open: bool,
         network_approval: Option<DeferredNetworkApproval>,
         network_denial_monitor: Option<tokio::task::JoinHandle<()>>,
         metrics_sidecar: Option<PluginMetricsSidecar>,
@@ -1271,10 +1431,12 @@ impl UnifiedExecProcessManager {
             plugin_metrics_sidecar: plugin_metrics_sidecar.clone(),
             call_id: context.call_id.clone(),
             process_id,
+            source: context.source(),
             cwd: cwd.clone(),
             initial_exec_command_active,
             hook_command,
             tty,
+            stdin_open,
             environment_id,
             permissions,
             network_approval,
@@ -1373,15 +1535,41 @@ impl UnifiedExecProcessManager {
         tty: bool,
         environment: &codex_exec_server::Environment,
     ) -> Result<UnifiedExecProcess, UnifiedExecError> {
+        self.open_session_with_stdin(
+            process_id,
+            request,
+            tool_ctx,
+            windows_sandbox_proxy_settings_mode,
+            network_policy_decider,
+            tty,
+            tty,
+            environment,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn open_session_with_stdin(
+        &self,
+        process_id: i32,
+        request: &ExecRequest,
+        tool_ctx: Option<&ToolCtx>,
+        windows_sandbox_proxy_settings_mode: codex_sandboxing::WindowsSandboxProxySettingsMode,
+        network_policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
+        tty: bool,
+        stdin_open: bool,
+        environment: &codex_exec_server::Environment,
+    ) -> Result<UnifiedExecProcess, UnifiedExecError> {
         if environment.is_remote() || request.exec_server_shell_snapshot.is_some() {
             let backend = environment.get_exec_backend();
-            let params = exec_server_params_for_request(
+            let mut params = exec_server_params_for_request(
                 process_id,
                 request,
                 tool_ctx,
                 windows_sandbox_proxy_settings_mode,
                 tty,
             );
+            params.pipe_stdin = stdin_open && !tty;
             // Sandbox retries can reuse the public ID for a new executor process.
             tracing::event!(
                 name: "codex.unified_exec.process_start_requested",
@@ -1471,7 +1659,7 @@ impl UnifiedExecProcessManager {
             sandbox: request.sandbox,
             windows_sandbox,
             tty,
-            stdin_open: tty,
+            stdin_open,
             inherited_fds: codex_utils_pty::ChildFds::Inherited(&[]),
         })
         .await;
@@ -1891,6 +2079,7 @@ impl UnifiedExecProcessManager {
         entries
             .into_iter()
             .map(|entry| BackgroundTerminalInfo {
+                source: entry.source,
                 item_id: entry.call_id.clone(),
                 process_id: entry.process_id.to_string(),
                 command: entry.hook_command.clone(),

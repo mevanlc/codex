@@ -6,36 +6,41 @@ use ratatui::text::Line;
 /// Prompt submitted automatically after an armed user shell command finishes.
 pub(crate) const SHELL_FOLLOW_UP_PROMPT: &str = "Review the shell command result above. If it failed, investigate the failure(s). If the fixes are compatible with any work in progress and do not conflict with the goals of the session, then fix the failures; otherwise, just explain the results and any relevant next steps.";
 
+/// Invocation selected for this shell draft. Tab advances only on key presses.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum ShellFollowUp {
+pub(crate) enum ShellInvocationMode {
     #[default]
-    Disabled,
-    Enabled,
+    Normal,
+    FollowUp,
+    Background,
 }
 
-impl ShellFollowUp {
-    pub(super) fn toggle(&mut self) {
+impl ShellInvocationMode {
+    pub(super) fn cycle(&mut self) {
         *self = match self {
-            Self::Disabled => Self::Enabled,
-            Self::Enabled => Self::Disabled,
+            Self::Normal => Self::FollowUp,
+            Self::FollowUp => Self::Background,
+            Self::Background => Self::Normal,
         };
     }
 
-    pub(crate) fn is_enabled(self) -> bool {
-        self == Self::Enabled
+    pub(crate) fn requests_follow_up(self) -> bool {
+        self == Self::FollowUp
     }
 
     pub(super) fn footer_line(self) -> Line<'static> {
         let state = match self {
-            Self::Disabled => "off".dim(),
-            Self::Enabled => "on".green(),
+            Self::Normal => "normal".dim(),
+            Self::FollowUp => "follow-up".green(),
+            Self::Background => "background".green(),
         };
         vec![
             "Shell mode".light_red(),
             " · ".dim(),
-            "Tab".cyan(),
-            " follow-up ".dim(),
             state,
+            " · ".dim(),
+            "Tab".cyan(),
+            " to change mode".dim(),
         ]
         .into()
     }

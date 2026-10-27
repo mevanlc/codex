@@ -129,7 +129,8 @@
 //! Multiline pastes continue blockquote prefixes.
 //! `Enter` submits immediately. `Tab` requests queuing while a task is running; if no task is
 //! running, `Tab` submits just like Enter so input is never dropped. In `!` shell mode, `Tab`
-//! instead toggles an automatic agent follow-up after the command finishes.
+//! cycles normal execution, an automatic agent follow-up, and managed background execution.
+//! Enter submits the selected mode; held-key repeat events do not cycle it.
 //! Submit and queue bindings act only on fresh key presses; repeated events are consumed so a held
 //! key cannot dispatch a preserved draft after another input layer closes.
 //! Vim Replace shares Insert's composer actions; only textarea editing differs.
@@ -421,7 +422,7 @@ use self::popup_state::ActivePopup;
 use self::popup_state::DismissedToken;
 use self::popup_state::PopupState;
 pub(crate) use self::shell_mode::SHELL_FOLLOW_UP_PROMPT;
-pub(crate) use self::shell_mode::ShellFollowUp;
+pub(crate) use self::shell_mode::ShellInvocationMode;
 use self::slash_input::SlashInput;
 use self::slash_input::SlashValidation;
 use self::slash_input::SubmissionValidation;
@@ -480,7 +481,7 @@ pub enum InputResult {
     SubmittedShell {
         text: String,
         text_elements: Vec<TextElement>,
-        follow_up: ShellFollowUp,
+        mode: ShellInvocationMode,
     },
     Queued {
         text: String,
@@ -568,7 +569,7 @@ pub enum QueuedInputAction {
     Literal,
     ParseSlash,
     RunShell {
-        follow_up: ShellFollowUp,
+        mode: ShellInvocationMode,
     },
 }
 
@@ -3275,7 +3276,7 @@ impl ChatComposer {
             return result;
         }
         let was_bash_mode = self.draft.is_bash_mode;
-        let shell_follow_up = self.draft.shell_follow_up;
+        let shell_invocation_mode = self.draft.shell_invocation_mode;
         if should_queue {
             if let Some(pasted) = self.draft.paste_burst.flush_before_modified_input() {
                 self.apply_paste(pasted);
@@ -3311,7 +3312,11 @@ impl ChatComposer {
                 let action = if text.starts_with('!') && !visible_shell_command {
                     QueuedInputAction::Literal
                 } else {
-                    slash_input::queued_input_action(&text, defer_slash_validation, shell_follow_up)
+                    slash_input::queued_input_action(
+                        &text,
+                        defer_slash_validation,
+                        shell_invocation_mode,
+                    )
                 };
                 let (text, text_elements, pending_pastes) = if action == QueuedInputAction::Literal
                 {
@@ -3381,7 +3386,7 @@ impl ChatComposer {
                     InputResult::SubmittedShell {
                         text,
                         text_elements,
-                        follow_up: shell_follow_up,
+                        mode: shell_invocation_mode,
                     }
                 } else {
                     InputResult::Submitted {
@@ -3642,7 +3647,7 @@ impl ChatComposer {
             return (InputResult::None, true);
         }
         if self.draft.is_bash_mode && key_hint::plain(KeyCode::Tab).is_press(key_event) {
-            self.draft.shell_follow_up.toggle();
+            self.draft.shell_invocation_mode.cycle();
             return (InputResult::None, true);
         }
         if self.queue_keys.is_pressed(key_event)
@@ -3711,7 +3716,7 @@ impl ChatComposer {
 
     fn shell_mode_footer_line(&self) -> Option<Line<'static>> {
         self.is_bang_shell_command()
-            .then(|| self.draft.shell_follow_up.footer_line())
+            .then(|| self.draft.shell_invocation_mode.footer_line())
     }
 
     /// Handles keys that mutate the textarea, including paste-burst detection.
@@ -10065,7 +10070,7 @@ mod tests {
                     assert_eq!(
                         action,
                         QueuedInputAction::RunShell {
-                            follow_up: ShellFollowUp::Enabled,
+                            mode: ShellInvocationMode::FollowUp,
                         }
                     );
                 }
@@ -10338,15 +10343,39 @@ mod tests {
             composer.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
 
         assert_eq!(result, InputResult::None);
-        assert_eq!(composer.draft.shell_follow_up, ShellFollowUp::Enabled);
+        assert_eq!(
+            composer.draft.shell_invocation_mode,
+            ShellInvocationMode::FollowUp
+        );
         assert_eq!(composer.current_text(), "!ls");
 
         let (result, _needs_redraw) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
 
         assert_eq!(result, InputResult::None);
-        assert_eq!(composer.draft.shell_follow_up, ShellFollowUp::Disabled);
+        assert_eq!(
+            composer.draft.shell_invocation_mode,
+            ShellInvocationMode::Background
+        );
         assert_eq!(composer.current_text(), "!ls");
+    }
+
+    #[test]
+    fn third_shell_tab_returns_to_normal() {
+        let (mut composer, _rx) = new_test_composer();
+        composer.set_text_content("!echo hi".to_string(), Vec::new(), Vec::new());
+        for _ in 0..3 {
+            composer.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        }
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(
+            result,
+            InputResult::SubmittedShell {
+                mode: ShellInvocationMode::Normal,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -10374,7 +10403,7 @@ mod tests {
             result,
             InputResult::SubmittedShell {
                 ref text,
-                follow_up: ShellFollowUp::Disabled,
+                mode: ShellInvocationMode::Normal,
                 ..
             } if text == "!/diff"
         ));
@@ -11374,7 +11403,7 @@ mod tests {
             result,
             InputResult::SubmittedShell {
                 ref text,
-                follow_up: ShellFollowUp::Disabled,
+                mode: ShellInvocationMode::Normal,
                 ..
             } if text == "!git"
         ));

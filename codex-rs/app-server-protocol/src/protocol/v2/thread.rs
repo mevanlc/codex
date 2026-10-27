@@ -1194,6 +1194,21 @@ pub struct ThreadCompactStartResponse {}
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
+pub struct ThreadBackgroundTerminalsStartParams {
+    pub thread_id: String,
+    /// User-entered shell syntax, run on the local host with full access like `!`.
+    /// The managed terminal runs until it exits or is stopped; there is no overall timeout.
+    pub command: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadBackgroundTerminalsStartResponse {}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
 pub struct ThreadShellCommandParams {
     pub thread_id: String,
     /// Shell command string evaluated by the thread's configured shell.
@@ -1257,6 +1272,9 @@ pub struct ThreadBackgroundTerminalsListParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadBackgroundTerminal {
+    /// Who launched the terminal, independently of later agent interactions.
+    #[serde(default)]
+    pub source: super::CommandExecutionSource,
     pub item_id: String,
     pub process_id: String,
     pub command: String,
