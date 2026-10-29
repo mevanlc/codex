@@ -4,6 +4,7 @@
 //! in the status line at the bottom of the terminal. Users can:
 //!
 //! - **Select items**: Toggle which information is displayed
+//! - **Brief forms**: Cycle supported items through off, full, and brief
 //! - **Reorder items**: Use left/right arrows to change display order
 //! - **Preview changes**: See a live preview of the configured status line
 //!
@@ -34,6 +35,7 @@ use crate::bottom_pane::CancellationEvent;
 use crate::bottom_pane::bottom_pane_view::BottomPaneView;
 use crate::bottom_pane::multi_select_picker::MultiSelectItem;
 use crate::bottom_pane::multi_select_picker::MultiSelectPicker;
+use crate::bottom_pane::multi_select_picker::MultiSelectState;
 use crate::bottom_pane::status_surface_preview::StatusSurfacePreviewData;
 use crate::bottom_pane::status_surface_preview::StatusSurfacePreviewItem;
 use crate::keymap::ListKeymap;
@@ -158,18 +160,60 @@ pub(crate) enum StatusLineItem {
 
     /// Latest checklist task progress from `update_plan` (if available).
     TaskProgress,
+
+    /// Model name without a leading GPT separator prefix.
+    #[strum(to_string = "model-brief")]
+    ModelNameBrief,
+    /// Brief model name and reasoning level, with the processing tier unchanged.
+    ModelWithReasoningBrief,
+    /// First two characters of the reasoning label.
+    ReasoningBrief,
+    /// Context remaining with an abbreviated label.
+    ContextRemainingBrief,
+    /// Secondary usage limit with an abbreviated weekly label.
+    WeeklyLimitBrief,
+    /// Machine hostname without its final dotted suffix.
+    HostnameBrief,
 }
 
 impl StatusLineItem {
+    pub(crate) fn full_form(self) -> Self {
+        match self {
+            Self::ModelNameBrief => Self::ModelName,
+            Self::ModelWithReasoningBrief => Self::ModelWithReasoning,
+            Self::ReasoningBrief => Self::Reasoning,
+            Self::ContextRemainingBrief => Self::ContextRemaining,
+            Self::WeeklyLimitBrief => Self::WeeklyLimit,
+            Self::HostnameBrief => Self::Hostname,
+            item => item,
+        }
+    }
+
+    pub(crate) fn brief_form(self) -> Option<Self> {
+        match self.full_form() {
+            Self::ModelName => Some(Self::ModelNameBrief),
+            Self::ModelWithReasoning => Some(Self::ModelWithReasoningBrief),
+            Self::Reasoning => Some(Self::ReasoningBrief),
+            Self::ContextRemaining => Some(Self::ContextRemainingBrief),
+            Self::WeeklyLimit => Some(Self::WeeklyLimitBrief),
+            Self::Hostname => Some(Self::HostnameBrief),
+            _ => None,
+        }
+    }
+
     /// User-visible description shown in the popup.
     pub(crate) fn description(self) -> &'static str {
         match self {
-            StatusLineItem::ModelName => "Current model name",
-            StatusLineItem::ModelWithReasoning => "Current model name with reasoning level",
-            StatusLineItem::Reasoning => "Current reasoning level",
+            StatusLineItem::ModelName | StatusLineItem::ModelNameBrief => "Current model name",
+            StatusLineItem::ModelWithReasoning | StatusLineItem::ModelWithReasoningBrief => {
+                "Current model name with reasoning level"
+            }
+            StatusLineItem::Reasoning | StatusLineItem::ReasoningBrief => "Current reasoning level",
             StatusLineItem::CurrentDir => "Current working directory",
             StatusLineItem::ProjectRoot => "Project name (omitted when unavailable)",
-            StatusLineItem::Hostname => "Current machine hostname (omitted when unavailable)",
+            StatusLineItem::Hostname | StatusLineItem::HostnameBrief => {
+                "Current machine hostname (omitted when unavailable)"
+            }
             StatusLineItem::GitBranch => "Current Git branch (omitted when unavailable)",
             StatusLineItem::PullRequestNumber => {
                 "Open pull request number for the current branch (omitted when unavailable)"
@@ -180,7 +224,7 @@ impl StatusLineItem {
             StatusLineItem::Status => "Compact session run-state text (Ready, Working, Thinking)",
             StatusLineItem::Permissions => "Active permission profile or sandbox mode",
             StatusLineItem::ApprovalMode => "Active command approval mode",
-            StatusLineItem::ContextRemaining => {
+            StatusLineItem::ContextRemaining | StatusLineItem::ContextRemainingBrief => {
                 "Percentage of context window remaining (omitted when unknown)"
             }
             StatusLineItem::ContextUsed => {
@@ -189,7 +233,7 @@ impl StatusLineItem {
             StatusLineItem::FiveHourLimit => {
                 "Remaining usage on the primary usage limit (omitted when unavailable)"
             }
-            StatusLineItem::WeeklyLimit => {
+            StatusLineItem::WeeklyLimit | StatusLineItem::WeeklyLimitBrief => {
                 "Remaining usage on the secondary usage limit (omitted when unavailable)"
             }
             StatusLineItem::CodexVersion => "Codex application version",
@@ -255,6 +299,16 @@ impl StatusLineItem {
             StatusLineItem::ThreadTitle => StatusSurfacePreviewItem::ThreadTitle,
             StatusLineItem::WorkspaceHeadline => StatusSurfacePreviewItem::WorkspaceHeadline,
             StatusLineItem::TaskProgress => StatusSurfacePreviewItem::TaskProgress,
+            StatusLineItem::ModelNameBrief => StatusSurfacePreviewItem::ModelBrief,
+            StatusLineItem::ModelWithReasoningBrief => {
+                StatusSurfacePreviewItem::ModelWithReasoningBrief
+            }
+            StatusLineItem::ReasoningBrief => StatusSurfacePreviewItem::ReasoningBrief,
+            StatusLineItem::ContextRemainingBrief => {
+                StatusSurfacePreviewItem::ContextRemainingBrief
+            }
+            StatusLineItem::WeeklyLimitBrief => StatusSurfacePreviewItem::WeeklyLimitBrief,
+            StatusLineItem::HostnameBrief => StatusSurfacePreviewItem::HostnameBrief,
         }
     }
 }
@@ -283,7 +337,8 @@ impl StatusLineSetupView {
     /// * `app_event_tx` - Event sender for dispatching configuration changes
     ///
     /// Items from `status_line_items` are shown first (in order) and marked as
-    /// enabled. Remaining items are appended and marked as disabled.
+    /// full or brief. Each full/brief pair occupies one row; its first configured
+    /// occurrence determines the form and position. Remaining items are appended disabled.
     pub(crate) fn new(
         status_line_items: Option<&[String]>,
         use_theme_colors: bool,
@@ -296,7 +351,8 @@ impl StatusLineSetupView {
             id: STATUS_LINE_USE_THEME_COLORS_ITEM_ID.to_string(),
             name: "Use theme colors".to_string(),
             description: Some("Apply colors from the active /theme".to_string()),
-            enabled: use_theme_colors,
+            state: use_theme_colors.into(),
+            brief_id: None,
             orderable: false,
             section_break_after: true,
         }];
@@ -306,7 +362,7 @@ impl StatusLineSetupView {
                 let Ok(item) = id.parse::<StatusLineItem>() else {
                     continue;
                 };
-                let item_id = item.to_string();
+                let item_id = item.full_form().to_string();
                 if !used_ids.insert(item_id.clone()) {
                     continue;
                 }
@@ -320,7 +376,7 @@ impl StatusLineSetupView {
 
         for item in StatusLineItem::iter() {
             let item_id = item.to_string();
-            if used_ids.contains(&item_id) {
+            if item != item.full_form() || used_ids.contains(&item_id) {
                 continue;
             }
             items.push(Self::status_line_select_item(
@@ -333,7 +389,7 @@ impl StatusLineSetupView {
         Self {
             picker: MultiSelectPicker::builder(
                 "Configure Status Line".to_string(),
-                Some("Select which items to display in the status line.".to_string()),
+                Some("Select items: [ ] off, [x] on, [b] brief (when available).".to_string()),
                 app_event_tx,
             )
             .list_keymap(list_keymap)
@@ -343,13 +399,13 @@ impl StatusLineSetupView {
                 let use_theme_colors = items
                     .iter()
                     .find(|item| item.id == STATUS_LINE_USE_THEME_COLORS_ITEM_ID)
-                    .map(|item| item.enabled)
+                    .map(MultiSelectItem::is_enabled)
                     .unwrap_or(true);
                 preview_data.status_line_for_items(
                     items
                         .iter()
-                        .filter(|item| item.enabled)
-                        .filter_map(|item| item.id.parse::<StatusLineItem>().ok()),
+                        .filter_map(MultiSelectItem::selected_id)
+                        .filter_map(|id| id.parse::<StatusLineItem>().ok()),
                     use_theme_colors,
                 )
             })
@@ -379,21 +435,27 @@ impl StatusLineSetupView {
         enabled: bool,
         preview_data: &StatusSurfacePreviewData,
     ) -> MultiSelectItem {
-        let default_name = item.to_string();
-        let default_description = item.description();
-        let (name, description) = match item {
+        let full = item.full_form();
+        let default_name = full.to_string();
+        let default_description = full.description();
+        let (name, description) = match full {
             StatusLineItem::FiveHourLimit | StatusLineItem::WeeklyLimit => (
-                preview_data.rate_limit_item_name(item.preview_item(), &default_name),
-                preview_data.rate_limit_item_description(item.preview_item(), default_description),
+                preview_data.rate_limit_item_name(full.preview_item(), &default_name),
+                preview_data.rate_limit_item_description(full.preview_item(), default_description),
             ),
             _ => (default_name, default_description.to_string()),
         };
 
         MultiSelectItem {
-            id: item.to_string(),
+            id: full.to_string(),
             name,
             description: Some(description),
-            enabled,
+            state: if enabled && item != full {
+                MultiSelectState::Brief
+            } else {
+                enabled.into()
+            },
+            brief_id: full.brief_form().map(|item| item.to_string()),
             orderable: true,
             section_break_after: false,
         }
@@ -445,6 +507,118 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use crate::app_event::AppEvent;
+
+    #[test]
+    fn brief_ids_round_trip_and_pair_with_full_forms() {
+        for (id, full) in [
+            ("model-brief", StatusLineItem::ModelName),
+            (
+                "model-with-reasoning-brief",
+                StatusLineItem::ModelWithReasoning,
+            ),
+            ("reasoning-brief", StatusLineItem::Reasoning),
+            ("context-remaining-brief", StatusLineItem::ContextRemaining),
+            ("weekly-limit-brief", StatusLineItem::WeeklyLimit),
+            ("hostname-brief", StatusLineItem::Hostname),
+        ] {
+            let brief = id.parse::<StatusLineItem>().unwrap();
+            assert_eq!(brief.to_string(), id);
+            assert_eq!(brief.full_form(), full);
+            assert_eq!(full.brief_form(), Some(brief));
+        }
+        assert_eq!(StatusLineItem::CurrentDir.brief_form(), None);
+    }
+
+    #[test]
+    fn picker_cycles_full_brief_off_and_saves_selected_ids() {
+        use crossterm::event::{KeyCode, KeyEvent};
+
+        let (tx, mut rx) = unbounded_channel();
+        let mut view = StatusLineSetupView::new(
+            Some(&["model-with-reasoning".into()]),
+            true,
+            StatusSurfacePreviewData::default(),
+            AppEventSender::new(tx),
+            crate::keymap::RuntimeKeymap::defaults().list,
+        );
+        view.handle_key_event(KeyEvent::from(KeyCode::Down));
+        let mut frames = Vec::new();
+        for marker in ["[x]", "[b]", "[ ]", "[x]", "[b]"] {
+            let frame = render_lines(&view, 100);
+            assert!(frame.contains(&format!("{marker} model-with-reasoning")));
+            assert!(!frame.contains("model-with-reasoning-brief"));
+            frames.push(
+                frame
+                    .lines()
+                    .map(str::trim_end)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
+            if marker == "[b]" {
+                assert!(frame.contains("5.2-codex me"));
+            }
+            if frames.len() < 5 {
+                view.handle_key_event(KeyEvent::from(KeyCode::Char(' ')));
+            }
+        }
+        insta::assert_snapshot!(frames[..3].join("\n\n"));
+        // Move the brief row down one slot, then enable the model row.
+        view.handle_key_event(KeyEvent::from(KeyCode::Right));
+        view.handle_key_event(KeyEvent::from(KeyCode::Up));
+        view.handle_key_event(KeyEvent::from(KeyCode::Char(' ')));
+        view.handle_key_event(KeyEvent::from(KeyCode::Enter));
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            AppEvent::StatusLineSetup { items, use_theme_colors: true }
+                if items == [StatusLineItem::ModelName, StatusLineItem::ModelWithReasoningBrief]
+        ));
+    }
+
+    #[test]
+    fn picker_uses_first_form_and_position_and_cancel_only_emits_cancel() {
+        use crossterm::event::{KeyCode, KeyEvent};
+
+        for cancel in [false, true] {
+            let (tx, mut rx) = unbounded_channel();
+            let mut view = StatusLineSetupView::new(
+                Some(&[
+                    "hostname-brief".into(),
+                    "model-name".into(),
+                    "hostname".into(),
+                    "model-brief".into(),
+                ]),
+                false,
+                StatusSurfacePreviewData::default(),
+                AppEventSender::new(tx),
+                crate::keymap::RuntimeKeymap::defaults().list,
+            );
+            let frame = render_lines(&view, 100);
+            assert!(frame.contains("[b] hostname"));
+            assert!(frame.contains("[x] model "));
+            assert_eq!(frame.matches("machine hostname").count(), 1);
+            assert!(!frame.contains("hostname-brief"));
+            view.handle_key_event(KeyEvent::from(if cancel {
+                KeyCode::Esc
+            } else {
+                KeyCode::Enter
+            }));
+            match rx.try_recv().unwrap() {
+                AppEvent::StatusLineSetupCancelled if cancel => {}
+                AppEvent::StatusLineSetup {
+                    items,
+                    use_theme_colors,
+                } if !cancel => {
+                    assert_eq!(
+                        items,
+                        [StatusLineItem::HostnameBrief, StatusLineItem::ModelName]
+                    );
+                    assert!(!use_theme_colors);
+                }
+                event => panic!("unexpected event: {event:?}"),
+            }
+            assert!(rx.try_recv().is_err());
+        }
+    }
 
     #[test]
     fn context_used_accepts_context_usage_legacy_id() {
@@ -576,7 +750,8 @@ mod tests {
                 id: StatusLineItem::ModelName.to_string(),
                 name: String::new(),
                 description: None,
-                enabled: true,
+                state: MultiSelectState::On,
+                brief_id: None,
                 orderable: true,
                 section_break_after: false,
             },
@@ -584,7 +759,8 @@ mod tests {
                 id: StatusLineItem::CurrentDir.to_string(),
                 name: String::new(),
                 description: None,
-                enabled: true,
+                state: MultiSelectState::On,
+                brief_id: None,
                 orderable: true,
                 section_break_after: false,
             },
@@ -614,7 +790,8 @@ mod tests {
                 id: StatusLineItem::ModelName.to_string(),
                 name: String::new(),
                 description: None,
-                enabled: true,
+                state: MultiSelectState::On,
+                brief_id: None,
                 orderable: true,
                 section_break_after: false,
             },
@@ -622,7 +799,8 @@ mod tests {
                 id: StatusLineItem::GitBranch.to_string(),
                 name: String::new(),
                 description: None,
-                enabled: true,
+                state: MultiSelectState::On,
+                brief_id: None,
                 orderable: true,
                 section_break_after: false,
             },
@@ -658,7 +836,8 @@ mod tests {
                 id: StatusLineItem::ModelName.to_string(),
                 name: String::new(),
                 description: None,
-                enabled: true,
+                state: MultiSelectState::On,
+                brief_id: None,
                 orderable: true,
                 section_break_after: false,
             },
@@ -666,7 +845,8 @@ mod tests {
                 id: StatusLineItem::ThreadTitle.to_string(),
                 name: String::new(),
                 description: None,
-                enabled: true,
+                state: MultiSelectState::On,
+                brief_id: None,
                 orderable: true,
                 section_break_after: false,
             },
@@ -795,7 +975,7 @@ mod tests {
                         line.push_str(symbol);
                     }
                 }
-                line
+                line.trim_end().to_string()
             })
             .collect::<Vec<_>>()
             .join("\n")

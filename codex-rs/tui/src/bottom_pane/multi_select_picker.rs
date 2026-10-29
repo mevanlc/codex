@@ -1,10 +1,10 @@
 //! Multi-select picker widget for selecting multiple items from a list.
 //!
 //! This module provides a fuzzy-searchable, scrollable picker that allows users
-//! to toggle multiple items on/off. It supports:
+//! to toggle multiple items on/off, optionally cycling through a brief form. It supports:
 //!
 //! - **Fuzzy search**: Type to filter items by name
-//! - **Toggle selection**: Space to toggle items on/off
+//! - **Toggle selection**: Space to toggle items on/off, or off/full/brief when supported
 //! - **Required selection**: Optional nonempty confirmation; cancellation always remains available
 //! - **Reordering**: Optional left/right arrow support to reorder items
 //! - **Live preview**: Optional callback to show a preview of current selections
@@ -25,7 +25,8 @@
 //!         id: "a".into(),
 //!         name: "Item A".into(),
 //!         description: None,
-//!         enabled: true,
+//!         state: MultiSelectState::On,
+//!         brief_id: None,
 //!         orderable: true,
 //!         section_break_after: false,
 //!     },
@@ -33,7 +34,8 @@
 //!         id: "b".into(),
 //!         name: "Item B".into(),
 //!         description: None,
-//!         enabled: false,
+//!         state: MultiSelectState::Off,
+//!         brief_id: None,
 //!         orderable: true,
 //!         section_break_after: false,
 //!     },
@@ -112,12 +114,26 @@ pub type CancelCallback = Box<dyn Fn(&AppEventSender) + Send + Sync>;
 /// Returns `None` to hide the preview area.
 pub type PreviewCallback = Box<dyn Fn(&[MultiSelectItem]) -> Option<Line<'static>> + Send + Sync>;
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum MultiSelectState {
+    #[default]
+    Off,
+    On,
+    Brief,
+}
+
+impl From<bool> for MultiSelectState {
+    fn from(enabled: bool) -> Self {
+        if enabled { Self::On } else { Self::Off }
+    }
+}
+
 /// A single selectable item in the multi-select picker.
 ///
 /// Each item has a unique identifier, display name, optional description,
-/// and an enabled/disabled state that can be toggled by the user.
+/// and a selection state that can be cycled by the user.
 pub(crate) struct MultiSelectItem {
-    /// Unique identifier returned in the confirm callback when this item is enabled.
+    /// Identifier returned in the confirm callback when this item is fully enabled.
     pub id: String,
 
     /// Display name shown in the picker list. Will be truncated if too long.
@@ -126,8 +142,11 @@ pub(crate) struct MultiSelectItem {
     /// Optional description shown alongside the name (dimmed).
     pub description: Option<String>,
 
-    /// Whether this item is currently selected/enabled.
-    pub enabled: bool,
+    /// Current selection; the brief state requires a `brief_id`.
+    pub state: MultiSelectState,
+
+    /// Optional ID selected by the third, brief state.
+    pub brief_id: Option<String>,
 
     /// Whether this item can be moved when ordering is enabled.
     pub orderable: bool,
@@ -142,10 +161,33 @@ impl Default for MultiSelectItem {
             id: String::new(),
             name: String::new(),
             description: None,
-            enabled: false,
+            state: MultiSelectState::Off,
+            brief_id: None,
             orderable: true,
             section_break_after: false,
         }
+    }
+}
+
+impl MultiSelectItem {
+    pub(crate) fn selected_id(&self) -> Option<&str> {
+        match self.state {
+            MultiSelectState::Off => None,
+            MultiSelectState::On => Some(&self.id),
+            MultiSelectState::Brief => self.brief_id.as_deref(),
+        }
+    }
+
+    pub(crate) fn is_enabled(&self) -> bool {
+        self.selected_id().is_some()
+    }
+
+    fn cycle(&mut self) {
+        self.state = match self.state {
+            MultiSelectState::Off => MultiSelectState::On,
+            MultiSelectState::On if self.brief_id.is_some() => MultiSelectState::Brief,
+            MultiSelectState::On | MultiSelectState::Brief => MultiSelectState::Off,
+        };
     }
 }
 
@@ -306,7 +348,7 @@ impl MultiSelectPicker {
     /// Builds the display rows for all currently visible (filtered) items.
     ///
     /// Each row shows: `› [x] Item Name` where `›` indicates cursor position
-    /// and `[x]` or `[ ]` indicates enabled/disabled state.
+    /// and `[x]`, `[b]`, or `[ ]` indicates full, brief, or disabled state.
     fn build_rows(&self) -> BuiltRows {
         let mut rows = Vec::new();
         let mut visible_to_row = Vec::with_capacity(self.filtered_indices.len());
@@ -317,7 +359,11 @@ impl MultiSelectPicker {
             visible_to_row.push(rows.len());
             let is_selected = self.state.selected_idx == Some(visible_idx);
             let prefix = if is_selected { '›' } else { ' ' };
-            let marker = if item.enabled { 'x' } else { ' ' };
+            let marker = match item.state {
+                MultiSelectState::Off => ' ',
+                MultiSelectState::On => 'x',
+                MultiSelectState::Brief => 'b',
+            };
             let item_name = truncate_text(&item.name, ITEM_NAME_TRUNCATE_LEN);
             let name = format!("{prefix} [{marker}] {item_name}");
             rows.push(GenericDisplayRow {
@@ -353,7 +399,7 @@ impl MultiSelectPicker {
         }
     }
 
-    /// Toggles the enabled state of the currently selected item.
+    /// Cycles the selected item through off/on, or off/on/brief when supported.
     ///
     /// Updates the preview line and invokes the `on_change` callback if set.
     fn toggle_selected(&mut self) {
@@ -367,7 +413,7 @@ impl MultiSelectPicker {
             return;
         };
 
-        item.enabled = !item.enabled;
+        item.cycle();
         self.update_preview_line();
         if let Some(on_change) = &self.on_change {
             on_change(&self.items, &self.app_event_tx);
@@ -379,7 +425,8 @@ impl MultiSelectPicker {
     /// Collects the IDs of all enabled items and passes them to the
     /// `on_confirm` callback. Does nothing if already complete.
     fn confirm_selection(&mut self) {
-        if self.complete || (self.require_selection && !self.items.iter().any(|item| item.enabled))
+        if self.complete
+            || (self.require_selection && !self.items.iter().any(MultiSelectItem::is_enabled))
         {
             return;
         }
@@ -389,8 +436,8 @@ impl MultiSelectPicker {
             let selected_ids: Vec<String> = self
                 .items
                 .iter()
-                .filter(|item| item.enabled)
-                .map(|item| item.id.clone())
+                .filter_map(MultiSelectItem::selected_id)
+                .map(str::to_string)
                 .collect();
             on_confirm(&selected_ids, &self.app_event_tx);
         }
@@ -875,6 +922,15 @@ mod tests {
         .build()
     }
 
+    #[test]
+    fn binary_rows_keep_toggling_on_and_off() {
+        let mut picker = test_picker(vec![item("ordinary", true, false)]);
+        for expected in [Some("ordinary"), None, Some("ordinary"), None] {
+            picker.handle_key_event(KeyCode::Char(' ').into());
+            assert_eq!(picker.items[0].selected_id(), expected);
+        }
+    }
+
     fn item(id: &str, orderable: bool, section_break_after: bool) -> MultiSelectItem {
         MultiSelectItem {
             id: id.to_string(),
@@ -1085,7 +1141,7 @@ mod tests {
             picker
                 .items
                 .iter()
-                .filter(|item| item.enabled)
+                .filter(|item| item.is_enabled())
                 .map(|item| item.id.as_str())
                 .collect::<Vec<_>>(),
             ["field-11"]
@@ -1107,7 +1163,7 @@ mod tests {
                     id: format!("field-{index}"),
                     name: format!("Field {index}"),
                     description: Some("Status detail".to_string()),
-                    enabled: index == 0,
+                    state: (index == 0).into(),
                     section_break_after: index == 0,
                     ..Default::default()
                 })
@@ -1118,7 +1174,7 @@ mod tests {
             Some(Line::from(
                 items
                     .iter()
-                    .filter(|item| item.enabled)
+                    .filter(|item| item.is_enabled())
                     .map(|item| item.name.as_str())
                     .collect::<Vec<_>>()
                     .join(" · "),

@@ -37,14 +37,18 @@ impl StatusLineAccent {
     fn for_item(item: StatusLineItem) -> Self {
         match item {
             StatusLineItem::ModelName
+            | StatusLineItem::ModelNameBrief
             | StatusLineItem::ModelWithReasoning
-            | StatusLineItem::Reasoning => Self::Model,
+            | StatusLineItem::ModelWithReasoningBrief
+            | StatusLineItem::Reasoning
+            | StatusLineItem::ReasoningBrief => Self::Model,
             StatusLineItem::CurrentDir | StatusLineItem::ProjectRoot => Self::Path,
             StatusLineItem::GitBranch
             | StatusLineItem::PullRequestNumber
             | StatusLineItem::BranchChanges => Self::Branch,
             StatusLineItem::Status => Self::State,
             StatusLineItem::ContextRemaining
+            | StatusLineItem::ContextRemainingBrief
             | StatusLineItem::ContextUsed
             | StatusLineItem::ContextWindowSize
             | StatusLineItem::UsedTokens
@@ -52,10 +56,13 @@ impl StatusLineAccent {
             | StatusLineItem::TotalOutputTokens
             | StatusLineItem::ThreadCredits
             | StatusLineItem::EstimatedThreadCost => Self::Usage,
-            StatusLineItem::FiveHourLimit | StatusLineItem::WeeklyLimit => Self::Limit,
-            StatusLineItem::CodexVersion | StatusLineItem::Hostname | StatusLineItem::SessionId => {
-                Self::Metadata
-            }
+            StatusLineItem::FiveHourLimit
+            | StatusLineItem::WeeklyLimit
+            | StatusLineItem::WeeklyLimitBrief => Self::Limit,
+            StatusLineItem::CodexVersion
+            | StatusLineItem::Hostname
+            | StatusLineItem::HostnameBrief
+            | StatusLineItem::SessionId => Self::Metadata,
             StatusLineItem::FastMode | StatusLineItem::Daybreak | StatusLineItem::RawOutput => {
                 Self::Mode
             }

@@ -1,0 +1,56 @@
+---
+source: tui/src/bottom_pane/status_line_setup.rs
+expression: "frames[..3].join(\"\\n\\n\")"
+---
+
+  Configure Status Line
+  Select items: [ ] off, [x] on, [b] brief (when available).
+
+  Type to search
+
+  [x] Use theme colors      Apply colors from the active /theme
+  ───────────────────────
+› [x] model-with-reasoning  Current model name with reasoning level
+  [ ] model                 Current model name
+  [ ] reasoning             Current reasoning level
+  [ ] current-dir           Current working directory
+  [ ] project-name          Project name (omitted when unavailable)
+  [ ] hostname              Current machine hostname (omitted when unavailable)
+↓
+  gpt-5.2-codex medium
+  space toggle · ←/→ reorder · enter save · esc cancel
+
+
+  Configure Status Line
+  Select items: [ ] off, [x] on, [b] brief (when available).
+
+  Type to search
+
+  [x] Use theme colors      Apply colors from the active /theme
+  ───────────────────────
+› [b] model-with-reasoning  Current model name with reasoning level
+  [ ] model                 Current model name
+  [ ] reasoning             Current reasoning level
+  [ ] current-dir           Current working directory
+  [ ] project-name          Project name (omitted when unavailable)
+  [ ] hostname              Current machine hostname (omitted when unavailable)
+↓
+  5.2-codex me
+  space toggle · ←/→ reorder · enter save · esc cancel
+
+
+  Configure Status Line
+  Select items: [ ] off, [x] on, [b] brief (when available).
+
+  Type to search
+
+  [x] Use theme colors      Apply colors from the active /theme
+  ───────────────────────
+› [ ] model-with-reasoning  Current model name with reasoning level
+  [ ] model                 Current model name
+  [ ] reasoning             Current reasoning level
+  [ ] current-dir           Current working directory
+  [ ] project-name          Project name (omitted when unavailable)
+  [ ] hostname              Current machine hostname (omitted when unavailable)
+↓
+  space toggle · ←/→ reorder · enter save · esc cancel

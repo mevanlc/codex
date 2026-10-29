@@ -26,6 +26,37 @@ fn rendered_history(events: Vec<AppEvent>) -> String {
 }
 
 #[tokio::test]
+async fn brief_status_line_ids_work_in_commands_config_and_presets() {
+    let (mut chat, mut events, _ops) = make_chatwidget_manual(Some("gpt-5.5")).await;
+    let ids = [
+        "model-with-reasoning-brief",
+        "context-remaining-brief",
+        "weekly-limit-brief",
+        "hostname-brief",
+        "model-brief",
+        "reasoning-brief",
+        "model",
+    ]
+    .map(str::to_string)
+    .to_vec();
+    let arguments = ids.join(" ");
+    let result = dispatch_inline(&mut chat, &mut events, SlashCommand::Statusline, &arguments);
+    assert_eq!(rendered_history(result), "");
+    assert_eq!(chat.local_settings.tui.status_line, Some(ids.clone()));
+    assert_eq!(
+        chat.current_status_line_quick_dial().unwrap().input,
+        format!("/statusline {arguments} --colors")
+    );
+    let items = ids.iter().map(|id| id.parse().unwrap()).collect();
+    chat.setup_status_line(items, true);
+    assert_eq!(chat.config_panel_tui.status_line, Some(ids));
+    let text = status_line_text(&chat).unwrap();
+    let segments = text.split(" · ").collect::<Vec<_>>();
+    assert!(segments.contains(&"5.5"));
+    assert!(segments.contains(&chat.model_display_name()));
+}
+
+#[tokio::test]
 async fn inline_status_surface_commands_are_session_only_and_atomic() {
     let (mut chat, mut events, _ops) = make_chatwidget_manual(Some("gpt-5.5")).await;
     let saved_tui = chat.config_panel_tui.clone();

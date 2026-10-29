@@ -229,12 +229,15 @@ impl ChatWidget {
                 .map(|number| MultiSelectItem {
                     id: number.to_string(),
                     name: format!("Input {number}"),
-                    enabled: current.as_ref().is_none_or(|channels| {
-                        channels
-                            .as_slice()
-                            .iter()
-                            .any(|channel| channel.get() == number)
-                    }),
+                    state: current
+                        .as_ref()
+                        .is_none_or(|channels| {
+                            channels
+                                .as_slice()
+                                .iter()
+                                .any(|channel| channel.get() == number)
+                        })
+                        .into(),
                     ..Default::default()
                 })
                 .collect(),
@@ -243,7 +246,7 @@ impl ChatWidget {
         .on_preview(|items| {
             items
                 .iter()
-                .all(|item| !item.enabled)
+                .all(|item| !item.is_enabled())
                 .then(|| "Select at least one input channel.".red().into())
         })
         .on_confirm(move |ids, tx| {

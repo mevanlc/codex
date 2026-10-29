@@ -306,19 +306,13 @@ impl TerminalTitleSetupView {
             .enable_ordering()
             .on_preview(move |items| {
                 let items = parse_terminal_title_items(
-                    items
-                        .iter()
-                        .filter(|item| item.enabled)
-                        .map(|item| item.id.as_str()),
+                    items.iter().filter_map(MultiSelectItem::selected_id),
                 )?;
                 preview_line_for_title_items(&items, &preview_data)
             })
             .on_change(|items, app_event| {
                 let Some(items) = parse_terminal_title_items(
-                    items
-                        .iter()
-                        .filter(|item| item.enabled)
-                        .map(|item| item.id.as_str()),
+                    items.iter().filter_map(MultiSelectItem::selected_id),
                 ) else {
                     return;
                 };
@@ -359,7 +353,8 @@ impl TerminalTitleSetupView {
             id: item.to_string(),
             name,
             description: Some(description),
-            enabled,
+            state: enabled.into(),
+            brief_id: None,
             orderable: true,
             section_break_after: false,
         }

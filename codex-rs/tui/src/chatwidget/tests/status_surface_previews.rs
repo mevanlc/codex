@@ -82,6 +82,114 @@ fn status_line_popup_snapshot(chat: &mut ChatWidget) -> String {
     )))
 }
 
+#[tokio::test]
+async fn brief_status_line_preview_matches_footer_text_and_styles() {
+    let (mut chat, _rx, _ops) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    set_fast_mode_test_catalog(&mut chat);
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::XHigh));
+    chat.set_service_tier(Some(ServiceTier::Fast.request_value().to_string()));
+    cache_rate_limit_snapshot(&mut chat);
+
+    assert_eq!(
+        chat.status_line_value_for_item(StatusLineItem::ModelNameBrief),
+        Some("5.4".into())
+    );
+    assert_eq!(
+        chat.status_line_value_for_item(StatusLineItem::ReasoningBrief),
+        Some("xh".into())
+    );
+    assert_eq!(
+        chat.status_line_value_for_item(StatusLineItem::ModelWithReasoningBrief),
+        Some("5.4 xh fast".into())
+    );
+    assert_eq!(
+        chat.status_line_value_for_item(StatusLineItem::WeeklyLimitBrief),
+        Some("7d 50% left".into())
+    );
+
+    let pairs = [
+        StatusLineItem::ModelName,
+        StatusLineItem::ModelWithReasoning,
+        StatusLineItem::Reasoning,
+        StatusLineItem::ContextRemaining,
+        StatusLineItem::WeeklyLimit,
+        StatusLineItem::Hostname,
+    ];
+    let context = chat
+        .status_line_value_for_item(StatusLineItem::ContextRemaining)
+        .unwrap();
+    assert_eq!(
+        chat.status_line_value_for_item(StatusLineItem::ContextRemainingBrief),
+        Some(context.replacen("Context", "ctx", 1))
+    );
+    let preview = chat.status_surface_preview_data();
+    for use_colors in [false, true] {
+        for full in pairs {
+            let brief = full.brief_form().unwrap();
+            let value = chat.status_line_value_for_item(brief).unwrap();
+            let line = preview.status_line_for_items([brief], use_colors).unwrap();
+            let footer = crate::bottom_pane::status_line_from_segments(
+                [(brief, value)],
+                use_colors,
+                chat.thread_id,
+            )
+            .unwrap();
+            assert_eq!(line, footer);
+            let full_line = preview.status_line_for_items([full], use_colors).unwrap();
+            assert_eq!(line.spans[0].style, full_line.spans[0].style);
+        }
+    }
+    // The picker displays the full rate-limit name even in brief mode.
+    chat.local_settings.tui.status_line = Some(vec!["weekly-limit-brief".into()]);
+    insta::assert_snapshot!(status_line_popup_snapshot(&mut chat));
+}
+
+#[tokio::test]
+async fn brief_status_line_preserves_custom_model_names_and_missing_data() {
+    let (mut chat, _rx, _ops) = make_chatwidget_manual(Some("custom-slug")).await;
+    let mut preset = get_available_model(&chat, "gpt-5.5");
+    preset.model = "custom-slug".into();
+    preset.display_name = "GPT_Custom Model Name".into();
+    chat.model_catalog = Arc::new(ModelCatalog::new(vec![preset]));
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
+    assert_eq!(
+        chat.status_line_value_for_item(StatusLineItem::ModelWithReasoningBrief),
+        Some("Custom Model Name hi".into())
+    );
+    chat.set_token_info(None);
+    assert_eq!(
+        chat.status_line_value_for_item(StatusLineItem::ContextRemainingBrief),
+        None
+    );
+    assert_eq!(
+        chat.status_line_value_for_item(StatusLineItem::WeeklyLimitBrief),
+        None
+    );
+
+    cache_rate_limit_snapshot(&mut chat);
+    for (minutes, label) in [(None, "secondary usage"), (Some(30 * 24 * 60), "monthly")] {
+        chat.rate_limit_snapshots_by_limit_id
+            .get_mut("codex")
+            .unwrap()
+            .secondary
+            .as_mut()
+            .unwrap()
+            .window_minutes = minutes;
+        assert_eq!(
+            chat.status_line_value_for_item(StatusLineItem::WeeklyLimitBrief),
+            Some(format!("{label} 50% left"))
+        );
+    }
+    chat.rate_limit_snapshots_by_limit_id
+        .get_mut("codex")
+        .unwrap()
+        .secondary = None;
+    assert_eq!(
+        status_preview_line_option(&mut chat, &[StatusLineItem::WeeklyLimitBrief]),
+        None
+    );
+}
+
 fn terminal_title_popup_snapshot(chat: &mut ChatWidget) -> String {
     chat.open_terminal_title_setup();
     normalize_snapshot_paths(strip_osc8_for_snapshot(&render_bottom_popup(

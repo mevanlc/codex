@@ -21,6 +21,7 @@ This fork maintains a build of Codex CLI that runs natively on Android via [Term
 - **Retractable steer messages** — pull a still-pending steer back into the composer; backed by a new `turn/retract` app-server method
 - **Context usage on resume and fork** — restore the saved context fullness before the next turn, including paginated forks and turns that crossed a compaction checkpoint with their identity saved only in the following turn context
 - **Unrestricted reasoning shortcuts** — the reasoning hotkeys step all the way into Max and Ultra
+- **Brief statusline components** — selected components cycle through off, full, and brief in `/statusline`
 - **Platform fixes** — `SHELL`-based shell detection on Android, vendored OpenSSL, fork-aware update checks
 
 Everything else behaves like upstream Codex.
@@ -262,6 +263,26 @@ The response status is `notPending` if the input was already consumed, was alrea
 ### Reasoning shortcuts reach Max and Ultra
 
 `Alt+.` / `Shift+Up` and `Alt+,` / `Shift+Down` step the active model's reasoning effort. Upstream now allows these shortcuts to reach Max, but still requires `/model → … → More reasoning…` for Ultra. This fork walks the full list of efforts the model advertises, with Max and Ultra last. Plan mode's Ultra concurrency warning still applies.
+
+### Brief statusline components
+
+In `/statusline`, Space cycles supported rows through `[ ]` off, `[x]` full, and
+`[b]` brief. Other rows toggle on/off. Brief choices keep their position and save
+as independent IDs in the shared `[tui].status_line` list in `config.toml`:
+
+| Brief ID | Display change |
+| --- | --- |
+| `model-brief` | Remove a leading `GPT-`, `GPT_`, or `GPT `, ignoring case |
+| `reasoning-brief` | Show the first two characters of the effort label |
+| `model-with-reasoning-brief` | Apply both changes above; keep the processing tier |
+| `context-remaining-brief` | `Context 75% left` becomes `ctx 75% left` |
+| `weekly-limit-brief` | `weekly 82% left` becomes `7d 82% left`; other limit labels stay as displayed |
+| `hostname-brief` | Remove only the last dotted suffix: `host.example.com` becomes `host.example` |
+
+The IDs also work in `/statusline` arguments and presets. If a manually edited
+list includes both forms, both render; opening and saving the picker keeps only
+the first occurrence of each pair, using its form and position. Cancelling leaves
+the list unchanged.
 
 ### Platform fixes
 

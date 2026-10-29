@@ -377,6 +377,7 @@ impl ChatWidget {
             for item in [
                 StatusSurfacePreviewItem::FiveHourLimit,
                 StatusSurfacePreviewItem::WeeklyLimit,
+                StatusSurfacePreviewItem::WeeklyLimitBrief,
             ] {
                 if self.status_surface_preview_value_for_item(item).is_none() {
                     preview_data.suppress_placeholder(item);

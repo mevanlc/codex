@@ -41,6 +41,12 @@ pub(crate) enum StatusSurfacePreviewItem {
     ModelWithReasoning,
     Reasoning,
     TaskProgress,
+    ModelBrief,
+    ModelWithReasoningBrief,
+    ReasoningBrief,
+    ContextRemainingBrief,
+    WeeklyLimitBrief,
+    HostnameBrief,
 }
 
 impl StatusSurfacePreviewItem {
@@ -79,6 +85,12 @@ impl StatusSurfacePreviewItem {
             StatusSurfacePreviewItem::ModelWithReasoning => "gpt-5.2-codex medium",
             StatusSurfacePreviewItem::Reasoning => "medium",
             StatusSurfacePreviewItem::TaskProgress => "Tasks 0/0",
+            StatusSurfacePreviewItem::ModelBrief => "5.2-codex",
+            StatusSurfacePreviewItem::ModelWithReasoningBrief => "5.2-codex me",
+            StatusSurfacePreviewItem::ReasoningBrief => "me",
+            StatusSurfacePreviewItem::ContextRemainingBrief => "ctx 0% left",
+            StatusSurfacePreviewItem::WeeklyLimitBrief => "secondary 0%",
+            StatusSurfacePreviewItem::HostnameBrief => "my-host",
         }
     }
 
@@ -117,6 +129,12 @@ impl StatusSurfacePreviewItem {
             Self::ModelWithReasoning,
             Self::Reasoning,
             Self::TaskProgress,
+            Self::ModelBrief,
+            Self::ModelWithReasoningBrief,
+            Self::ReasoningBrief,
+            Self::ContextRemainingBrief,
+            Self::WeeklyLimitBrief,
+            Self::HostnameBrief,
         ]
         .into_iter()
     }

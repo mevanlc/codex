@@ -4,7 +4,7 @@ expression: "render_lines(&view,\n100).lines().map(str::trim_end).collect::<Vec<
 ---
 
   Configure Status Line
-  Select which items to display in the status line.
+  Select items: [ ] off, [x] on, [b] brief (when available).
 
   Type to search
 

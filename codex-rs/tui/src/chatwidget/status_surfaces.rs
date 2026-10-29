@@ -731,6 +731,13 @@ impl ChatWidget {
             StatusLineItem::ModelName => Some(self.model_display_name().to_string()),
             StatusLineItem::ModelWithReasoning => Some(self.model_with_reasoning_display_name()),
             StatusLineItem::Reasoning => Some(self.reasoning_display_name()),
+            StatusLineItem::ModelNameBrief => {
+                Some(brief_model_name(self.model_display_name()).to_string())
+            }
+            StatusLineItem::ModelWithReasoningBrief => {
+                Some(self.model_with_reasoning_display_name_with_brief(true))
+            }
+            StatusLineItem::ReasoningBrief => Some(brief_reasoning(&self.reasoning_display_name())),
             StatusLineItem::CurrentDir => {
                 Some(format_directory_display(
                     self.status_line_cwd(),
@@ -739,6 +746,9 @@ impl ChatWidget {
             }
             StatusLineItem::ProjectRoot => self.status_line_project_root_name(),
             StatusLineItem::Hostname => os_host_name(),
+            StatusLineItem::HostnameBrief => {
+                os_host_name().map(|hostname| brief_hostname(&hostname).to_string())
+            }
             StatusLineItem::GitBranch => self.status_line_branch.clone(),
             StatusLineItem::PullRequestNumber => self
                 .status_line_git_summary
@@ -771,6 +781,9 @@ impl ChatWidget {
             StatusLineItem::ContextRemaining => self
                 .status_line_context_remaining_percent()
                 .map(|remaining| format!("Context {remaining}% left")),
+            StatusLineItem::ContextRemainingBrief => self
+                .status_line_context_remaining_percent()
+                .map(|remaining| format!("ctx {remaining}% left")),
             StatusLineItem::ContextUsed => self
                 .status_line_context_used_percent()
                 .map(|used| format!("Context {used}% used")),
@@ -782,13 +795,20 @@ impl ChatWidget {
                 let label = limit_label_for_window(window.window_minutes, is_secondary);
                 self.status_line_limit_display(Some(window), &label)
             }
-            StatusLineItem::WeeklyLimit => {
+            StatusLineItem::WeeklyLimit | StatusLineItem::WeeklyLimitBrief => {
                 let (window, is_secondary) = self
                     .rate_limit_snapshots_by_limit_id
                     .get("codex")
                     .and_then(weekly_status_window)?;
                 let label = limit_label_for_window(window.window_minutes, is_secondary);
-                self.status_line_limit_display(Some(window), &label)
+                let label = if item == StatusLineItem::WeeklyLimitBrief
+                    && label.eq_ignore_ascii_case("weekly")
+                {
+                    "7d"
+                } else {
+                    &label
+                };
+                self.status_line_limit_display(Some(window), label)
             }
             StatusLineItem::CodexVersion => Some(CODEX_CLI_VERSION.to_string()),
             StatusLineItem::ContextWindowSize => self
@@ -887,6 +907,16 @@ impl ChatWidget {
             StatusSurfacePreviewItem::Model => StatusLineItem::ModelName,
             StatusSurfacePreviewItem::ModelWithReasoning => StatusLineItem::ModelWithReasoning,
             StatusSurfacePreviewItem::Reasoning => StatusLineItem::Reasoning,
+            StatusSurfacePreviewItem::ModelBrief => StatusLineItem::ModelNameBrief,
+            StatusSurfacePreviewItem::ModelWithReasoningBrief => {
+                StatusLineItem::ModelWithReasoningBrief
+            }
+            StatusSurfacePreviewItem::ReasoningBrief => StatusLineItem::ReasoningBrief,
+            StatusSurfacePreviewItem::ContextRemainingBrief => {
+                StatusLineItem::ContextRemainingBrief
+            }
+            StatusSurfacePreviewItem::WeeklyLimitBrief => StatusLineItem::WeeklyLimitBrief,
+            StatusSurfacePreviewItem::HostnameBrief => StatusLineItem::HostnameBrief,
         };
         self.status_line_value_for_item(status_line_item)
     }
@@ -981,12 +1011,20 @@ impl ChatWidget {
     }
 
     fn model_with_reasoning_display_name(&self) -> String {
-        let label = self.reasoning_display_name();
+        self.model_with_reasoning_display_name_with_brief(false)
+    }
+
+    fn model_with_reasoning_display_name_with_brief(&self, brief: bool) -> String {
         let service_tier_label = self
             .processing_tier_display_name()
             .map(|tier| format!(" {tier}"))
             .unwrap_or_default();
-        format!("{} {label}{service_tier_label}", self.model_display_name())
+        format_model_with_reasoning(
+            self.model_display_name(),
+            &self.reasoning_display_name(),
+            &service_tier_label,
+            brief,
+        )
     }
 
     fn processing_tier_display_name(&self) -> Option<&str> {
@@ -1126,6 +1164,43 @@ impl ChatWidget {
         let mut truncated = head.graphemes(true).take(max_chars - 3).collect::<String>();
         truncated.push_str("...");
         truncated
+    }
+}
+
+fn brief_model_name(name: &str) -> &str {
+    if name
+        .get(..3)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("GPT"))
+        && matches!(name.as_bytes().get(3), Some(b'-' | b'_' | b' '))
+    {
+        &name[4..]
+    } else {
+        name
+    }
+}
+
+fn brief_reasoning(label: &str) -> String {
+    label.chars().take(2).collect()
+}
+
+fn brief_hostname(hostname: &str) -> &str {
+    hostname.rsplit_once('.').map_or(hostname, |(name, _)| name)
+}
+
+fn format_model_with_reasoning(
+    model: &str,
+    reasoning: &str,
+    tier_suffix: &str,
+    brief: bool,
+) -> String {
+    if brief {
+        format!(
+            "{} {}{tier_suffix}",
+            brief_model_name(model),
+            brief_reasoning(reasoning)
+        )
+    } else {
+        format!("{model} {reasoning}{tier_suffix}")
     }
 }
 
@@ -1286,4 +1361,64 @@ where
         }
     }
     (items, invalid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn brief_model_and_reasoning_preserve_unmatched_text_and_tier() {
+        for (model, expected) in [
+            ("GPT-6.1", "6.1"),
+            ("gPt_6.1 Custom Name", "6.1 Custom Name"),
+            ("gpt Custom Model", "Custom Model"),
+            ("GPT6.1", "GPT6.1"),
+            ("my-gpt-6.1", "my-gpt-6.1"),
+            ("模型", "模型"),
+            ("GPT-模型", "模型"),
+            ("", ""),
+        ] {
+            assert_eq!(brief_model_name(model), expected);
+            assert_eq!(
+                format_model_with_reasoning(model, "xhigh", " fast", true),
+                format!("{expected} xh fast")
+            );
+            assert_eq!(
+                format_model_with_reasoning(model, "xhigh", " fast", false),
+                format!("{model} xhigh fast")
+            );
+        }
+        for (effort, expected) in [
+            ("default", "de"),
+            ("none", "no"),
+            ("minimal", "mi"),
+            ("low", "lo"),
+            ("medium", "me"),
+            ("high", "hi"),
+            ("xhigh", "xh"),
+            ("max", "ma"),
+            ("ultra", "ul"),
+            ("高い推論", "高い"),
+            ("x", "x"),
+            ("", ""),
+        ] {
+            assert_eq!(brief_reasoning(effort), expected);
+        }
+    }
+
+    #[test]
+    fn brief_hostname_removes_only_the_last_dotted_suffix() {
+        for (hostname, expected) in [
+            ("host", "host"),
+            ("host.local", "host"),
+            ("host.example.com", "host.example"),
+            ("Host.Example.COM", "Host.Example"),
+            ("host.", "host"),
+            ("主机.本地", "主机"),
+        ] {
+            assert_eq!(brief_hostname(hostname), expected);
+        }
+    }
 }
