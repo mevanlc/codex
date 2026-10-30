@@ -45,6 +45,8 @@ pub(crate) enum StatusSurfacePreviewItem {
     ModelWithReasoningBrief,
     ReasoningBrief,
     ContextRemainingBrief,
+    ContextUsedBrief,
+    FiveHourLimitBrief,
     WeeklyLimitBrief,
     HostnameBrief,
 }
@@ -88,8 +90,10 @@ impl StatusSurfacePreviewItem {
             StatusSurfacePreviewItem::ModelBrief => "5.2-codex",
             StatusSurfacePreviewItem::ModelWithReasoningBrief => "5.2-codex me",
             StatusSurfacePreviewItem::ReasoningBrief => "me",
-            StatusSurfacePreviewItem::ContextRemainingBrief => "ctx 0% left",
-            StatusSurfacePreviewItem::WeeklyLimitBrief => "secondary 0%",
+            StatusSurfacePreviewItem::ContextRemainingBrief => "ctx < 0%",
+            StatusSurfacePreviewItem::ContextUsedBrief => "ctx > 0%",
+            StatusSurfacePreviewItem::FiveHourLimitBrief => "primary < 0%",
+            StatusSurfacePreviewItem::WeeklyLimitBrief => "secondary < 0%",
             StatusSurfacePreviewItem::HostnameBrief => "my-host",
         }
     }
@@ -133,6 +137,8 @@ impl StatusSurfacePreviewItem {
             Self::ModelWithReasoningBrief,
             Self::ReasoningBrief,
             Self::ContextRemainingBrief,
+            Self::ContextUsedBrief,
+            Self::FiveHourLimitBrief,
             Self::WeeklyLimitBrief,
             Self::HostnameBrief,
         ]

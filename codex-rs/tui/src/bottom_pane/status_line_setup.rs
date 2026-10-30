@@ -170,6 +170,10 @@ pub(crate) enum StatusLineItem {
     ReasoningBrief,
     /// Context remaining with an abbreviated label.
     ContextRemainingBrief,
+    /// Context used with an abbreviated label.
+    ContextUsedBrief,
+    /// Primary usage limit with a brief remaining-percentage label.
+    FiveHourLimitBrief,
     /// Secondary usage limit with an abbreviated weekly label.
     WeeklyLimitBrief,
     /// Machine hostname without its final dotted suffix.
@@ -183,6 +187,8 @@ impl StatusLineItem {
             Self::ModelWithReasoningBrief => Self::ModelWithReasoning,
             Self::ReasoningBrief => Self::Reasoning,
             Self::ContextRemainingBrief => Self::ContextRemaining,
+            Self::ContextUsedBrief => Self::ContextUsed,
+            Self::FiveHourLimitBrief => Self::FiveHourLimit,
             Self::WeeklyLimitBrief => Self::WeeklyLimit,
             Self::HostnameBrief => Self::Hostname,
             item => item,
@@ -195,6 +201,8 @@ impl StatusLineItem {
             Self::ModelWithReasoning => Some(Self::ModelWithReasoningBrief),
             Self::Reasoning => Some(Self::ReasoningBrief),
             Self::ContextRemaining => Some(Self::ContextRemainingBrief),
+            Self::ContextUsed => Some(Self::ContextUsedBrief),
+            Self::FiveHourLimit => Some(Self::FiveHourLimitBrief),
             Self::WeeklyLimit => Some(Self::WeeklyLimitBrief),
             Self::Hostname => Some(Self::HostnameBrief),
             _ => None,
@@ -227,10 +235,10 @@ impl StatusLineItem {
             StatusLineItem::ContextRemaining | StatusLineItem::ContextRemainingBrief => {
                 "Percentage of context window remaining (omitted when unknown)"
             }
-            StatusLineItem::ContextUsed => {
+            StatusLineItem::ContextUsed | StatusLineItem::ContextUsedBrief => {
                 "Percentage of context window used (omitted when unknown)"
             }
-            StatusLineItem::FiveHourLimit => {
+            StatusLineItem::FiveHourLimit | StatusLineItem::FiveHourLimitBrief => {
                 "Remaining usage on the primary usage limit (omitted when unavailable)"
             }
             StatusLineItem::WeeklyLimit | StatusLineItem::WeeklyLimitBrief => {
@@ -307,6 +315,8 @@ impl StatusLineItem {
             StatusLineItem::ContextRemainingBrief => {
                 StatusSurfacePreviewItem::ContextRemainingBrief
             }
+            StatusLineItem::ContextUsedBrief => StatusSurfacePreviewItem::ContextUsedBrief,
+            StatusLineItem::FiveHourLimitBrief => StatusSurfacePreviewItem::FiveHourLimitBrief,
             StatusLineItem::WeeklyLimitBrief => StatusSurfacePreviewItem::WeeklyLimitBrief,
             StatusLineItem::HostnameBrief => StatusSurfacePreviewItem::HostnameBrief,
         }
@@ -518,6 +528,8 @@ mod tests {
             ),
             ("reasoning-brief", StatusLineItem::Reasoning),
             ("context-remaining-brief", StatusLineItem::ContextRemaining),
+            ("context-used-brief", StatusLineItem::ContextUsed),
+            ("five-hour-limit-brief", StatusLineItem::FiveHourLimit),
             ("weekly-limit-brief", StatusLineItem::WeeklyLimit),
             ("hostname-brief", StatusLineItem::Hostname),
         ] {

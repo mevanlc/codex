@@ -9,12 +9,12 @@ expression: status_line_popup_snapshot(&mut chat)
 
 › [x] Use theme colors      Apply colors from the active /theme
   ───────────────────────
+  [b] context-remaining     Percentage of context window remaining (omitted when unknown)
+  [b] context-used          Percentage of context window used (omitted when unknown)
+  [b] five-hour-limit       Remaining usage on the 5-hour usage limit (omitted when unavailable)
   [b] weekly-limit          Remaining usage on the weekly usage limit (omitted when unavailable)
   [ ] model                 Current model name
   [ ] model-with-reasoning  Current model name with reasoning level
-  [ ] reasoning             Current reasoning level
-  [ ] current-dir           Current working directory
-  [ ] project-name          Project name (omitted when unavailable)
 ↓
-  7d 50% left
+  ctx < 100% · ctx > 0% · 5h < 65% · 7d < 50%
   space toggle · ←/→ reorder · enter save · esc cancel

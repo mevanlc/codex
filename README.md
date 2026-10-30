@@ -275,9 +275,14 @@ as independent IDs in the shared `[tui].status_line` list in `config.toml`:
 | `model-brief` | Remove a leading `GPT-`, `GPT_`, or `GPT `, ignoring case |
 | `reasoning-brief` | Show the first two characters of the effort label |
 | `model-with-reasoning-brief` | Apply both changes above; keep the processing tier |
-| `context-remaining-brief` | `Context 75% left` becomes `ctx 75% left` |
-| `weekly-limit-brief` | `weekly 82% left` becomes `7d 82% left`; other limit labels stay as displayed |
+| `context-remaining-brief` | `Context 75% left` becomes `ctx < 75%` |
+| `context-used-brief` | `Context 25% used` becomes `ctx > 25%` |
+| `five-hour-limit-brief` | `5h 65% left` becomes `5h < 65%` |
+| `weekly-limit-brief` | `weekly 82% left` becomes `7d < 82%` |
 | `hostname-brief` | Remove only the last dotted suffix: `host.example.com` becomes `host.example` |
+
+Brief usage limits keep their actual window labels when the service reports a
+different window, such as `monthly < 65%`.
 
 The IDs also work in `/statusline` arguments and presets. If a manually edited
 list includes both forms, both render; opening and saving the picker keeps only

@@ -89,6 +89,13 @@ async fn brief_status_line_preview_matches_footer_text_and_styles() {
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::XHigh));
     chat.set_service_tier(Some(ServiceTier::Fast.request_value().to_string()));
     cache_rate_limit_snapshot(&mut chat);
+    chat.rate_limit_snapshots_by_limit_id
+        .get_mut("codex")
+        .unwrap()
+        .primary
+        .as_mut()
+        .unwrap()
+        .window_minutes = Some(5 * 60);
 
     assert_eq!(
         chat.status_line_value_for_item(StatusLineItem::ModelNameBrief),
@@ -104,7 +111,11 @@ async fn brief_status_line_preview_matches_footer_text_and_styles() {
     );
     assert_eq!(
         chat.status_line_value_for_item(StatusLineItem::WeeklyLimitBrief),
-        Some("7d 50% left".into())
+        Some("7d < 50%".into())
+    );
+    assert_eq!(
+        chat.status_line_value_for_item(StatusLineItem::FiveHourLimitBrief),
+        Some("5h < 65%".into())
     );
 
     let pairs = [
@@ -112,6 +123,8 @@ async fn brief_status_line_preview_matches_footer_text_and_styles() {
         StatusLineItem::ModelWithReasoning,
         StatusLineItem::Reasoning,
         StatusLineItem::ContextRemaining,
+        StatusLineItem::ContextUsed,
+        StatusLineItem::FiveHourLimit,
         StatusLineItem::WeeklyLimit,
         StatusLineItem::Hostname,
     ];
@@ -120,9 +133,18 @@ async fn brief_status_line_preview_matches_footer_text_and_styles() {
         .unwrap();
     assert_eq!(
         chat.status_line_value_for_item(StatusLineItem::ContextRemainingBrief),
-        Some(context.replacen("Context", "ctx", 1))
+        Some(
+            context
+                .replacen("Context", "ctx <", 1)
+                .trim_end_matches(" left")
+                .to_string()
+        )
     );
     let preview = chat.status_surface_preview_data();
+    assert_eq!(
+        chat.status_line_value_for_item(StatusLineItem::ContextUsedBrief),
+        Some("ctx > 0%".into())
+    );
     for use_colors in [false, true] {
         for full in pairs {
             let brief = full.brief_form().unwrap();
@@ -140,7 +162,12 @@ async fn brief_status_line_preview_matches_footer_text_and_styles() {
         }
     }
     // The picker displays the full rate-limit name even in brief mode.
-    chat.local_settings.tui.status_line = Some(vec!["weekly-limit-brief".into()]);
+    chat.local_settings.tui.status_line = Some(vec![
+        "context-remaining-brief".into(),
+        "context-used-brief".into(),
+        "five-hour-limit-brief".into(),
+        "weekly-limit-brief".into(),
+    ]);
     insta::assert_snapshot!(status_line_popup_snapshot(&mut chat));
 }
 
@@ -162,7 +189,15 @@ async fn brief_status_line_preserves_custom_model_names_and_missing_data() {
         None
     );
     assert_eq!(
+        chat.status_line_value_for_item(StatusLineItem::ContextUsedBrief),
+        None
+    );
+    assert_eq!(
         chat.status_line_value_for_item(StatusLineItem::WeeklyLimitBrief),
+        None
+    );
+    assert_eq!(
+        chat.status_line_value_for_item(StatusLineItem::FiveHourLimitBrief),
         None
     );
 
@@ -177,7 +212,7 @@ async fn brief_status_line_preserves_custom_model_names_and_missing_data() {
             .window_minutes = minutes;
         assert_eq!(
             chat.status_line_value_for_item(StatusLineItem::WeeklyLimitBrief),
-            Some(format!("{label} 50% left"))
+            Some(format!("{label} < 50%"))
         );
     }
     chat.rate_limit_snapshots_by_limit_id
@@ -186,6 +221,14 @@ async fn brief_status_line_preserves_custom_model_names_and_missing_data() {
         .secondary = None;
     assert_eq!(
         status_preview_line_option(&mut chat, &[StatusLineItem::WeeklyLimitBrief]),
+        None
+    );
+    chat.rate_limit_snapshots_by_limit_id
+        .get_mut("codex")
+        .unwrap()
+        .primary = None;
+    assert_eq!(
+        status_preview_line_option(&mut chat, &[StatusLineItem::FiveHourLimitBrief]),
         None
     );
 }

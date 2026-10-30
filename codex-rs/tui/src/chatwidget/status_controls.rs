@@ -376,6 +376,7 @@ impl ChatWidget {
         if self.rate_limit_snapshots_by_limit_id.contains_key("codex") {
             for item in [
                 StatusSurfacePreviewItem::FiveHourLimit,
+                StatusSurfacePreviewItem::FiveHourLimitBrief,
                 StatusSurfacePreviewItem::WeeklyLimit,
                 StatusSurfacePreviewItem::WeeklyLimitBrief,
             ] {
@@ -453,10 +454,15 @@ impl ChatWidget {
         &self,
         window: Option<&RateLimitWindowDisplay>,
         label: &str,
+        brief: bool,
     ) -> Option<String> {
         let window = window?;
         let remaining = (100.0f64 - window.used_percent).clamp(0.0f64, 100.0f64);
-        Some(format!("{label} {remaining:.0}% left"))
+        Some(if brief {
+            format!("{label} < {remaining:.0}%")
+        } else {
+            format!("{label} {remaining:.0}% left")
+        })
     }
 
     pub(super) fn status_line_reasoning_effort_label(

@@ -50,6 +50,7 @@ impl StatusLineAccent {
             StatusLineItem::ContextRemaining
             | StatusLineItem::ContextRemainingBrief
             | StatusLineItem::ContextUsed
+            | StatusLineItem::ContextUsedBrief
             | StatusLineItem::ContextWindowSize
             | StatusLineItem::UsedTokens
             | StatusLineItem::TotalInputTokens
@@ -57,6 +58,7 @@ impl StatusLineAccent {
             | StatusLineItem::ThreadCredits
             | StatusLineItem::EstimatedThreadCost => Self::Usage,
             StatusLineItem::FiveHourLimit
+            | StatusLineItem::FiveHourLimitBrief
             | StatusLineItem::WeeklyLimit
             | StatusLineItem::WeeklyLimitBrief => Self::Limit,
             StatusLineItem::CodexVersion

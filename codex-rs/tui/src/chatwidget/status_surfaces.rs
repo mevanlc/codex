@@ -783,17 +783,24 @@ impl ChatWidget {
                 .map(|remaining| format!("Context {remaining}% left")),
             StatusLineItem::ContextRemainingBrief => self
                 .status_line_context_remaining_percent()
-                .map(|remaining| format!("ctx {remaining}% left")),
+                .map(|remaining| format!("ctx < {remaining}%")),
             StatusLineItem::ContextUsed => self
                 .status_line_context_used_percent()
                 .map(|used| format!("Context {used}% used")),
-            StatusLineItem::FiveHourLimit => {
+            StatusLineItem::ContextUsedBrief => self
+                .status_line_context_used_percent()
+                .map(|used| format!("ctx > {used}%")),
+            StatusLineItem::FiveHourLimit | StatusLineItem::FiveHourLimitBrief => {
                 let (window, is_secondary) = self
                     .rate_limit_snapshots_by_limit_id
                     .get("codex")
                     .and_then(five_hour_status_window)?;
                 let label = limit_label_for_window(window.window_minutes, is_secondary);
-                self.status_line_limit_display(Some(window), &label)
+                self.status_line_limit_display(
+                    Some(window),
+                    &label,
+                    item == StatusLineItem::FiveHourLimitBrief,
+                )
             }
             StatusLineItem::WeeklyLimit | StatusLineItem::WeeklyLimitBrief => {
                 let (window, is_secondary) = self
@@ -808,7 +815,11 @@ impl ChatWidget {
                 } else {
                     &label
                 };
-                self.status_line_limit_display(Some(window), label)
+                self.status_line_limit_display(
+                    Some(window),
+                    label,
+                    item == StatusLineItem::WeeklyLimitBrief,
+                )
             }
             StatusLineItem::CodexVersion => Some(CODEX_CLI_VERSION.to_string()),
             StatusLineItem::ContextWindowSize => self
@@ -915,6 +926,8 @@ impl ChatWidget {
             StatusSurfacePreviewItem::ContextRemainingBrief => {
                 StatusLineItem::ContextRemainingBrief
             }
+            StatusSurfacePreviewItem::ContextUsedBrief => StatusLineItem::ContextUsedBrief,
+            StatusSurfacePreviewItem::FiveHourLimitBrief => StatusLineItem::FiveHourLimitBrief,
             StatusSurfacePreviewItem::WeeklyLimitBrief => StatusLineItem::WeeklyLimitBrief,
             StatusSurfacePreviewItem::HostnameBrief => StatusLineItem::HostnameBrief,
         };

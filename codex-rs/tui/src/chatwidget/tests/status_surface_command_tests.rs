@@ -31,6 +31,8 @@ async fn brief_status_line_ids_work_in_commands_config_and_presets() {
     let ids = [
         "model-with-reasoning-brief",
         "context-remaining-brief",
+        "context-used-brief",
+        "five-hour-limit-brief",
         "weekly-limit-brief",
         "hostname-brief",
         "model-brief",
