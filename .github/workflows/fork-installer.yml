@@ -25,6 +25,8 @@ jobs:
     name: Test on ${{ matrix.label }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     strategy:
       fail-fast: false
       matrix:
@@ -41,6 +43,11 @@ jobs:
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+
+      - if: ${{ runner.os == 'Windows' }}
+        name: Enable long Git paths
+        shell: pwsh
+        run: git config --global core.longpaths true
 
       - if: ${{ runner.os == 'Windows' }}
         name: Configure MSVC toolchain
