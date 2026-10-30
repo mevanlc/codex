@@ -100,7 +100,8 @@ without administrator symlink privileges. Replaced loose commands are saved in
 the installer never prunes them automatically or changes your configuration.
 
 Every archive contains `codex-package.json`, `bin/codex`,
-`bin/codex-code-mode-host`, `codex-path/rg`, and the applicable sandbox resources
+`bin/codex-code-mode-host`, `bin/codex-exec-server`, `codex-path/rg`, and the
+applicable sandbox resources
 (with `.exe` suffixes on Windows). Android ripgrep is built for Android without
 Termux library dependencies; Android does not include Linux bwrap. Keep this
 whole directory together: extracting just the binaries loses required resources.
