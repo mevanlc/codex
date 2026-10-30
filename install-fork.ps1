@@ -1,5 +1,5 @@
 # Download the newest published codex-fork-installer for Windows and run it.
-$exitCode = & {
+& {
     Set-StrictMode -Version Latest
     $ErrorActionPreference = "Stop"
     $ProgressPreference = "SilentlyContinue"
@@ -102,13 +102,17 @@ $exitCode = & {
             }
         }
 
-        & $installerPath @args
-        return $LASTEXITCODE
+        $installerArgs = @($args | ForEach-Object {
+            if ($_ -eq "-?") { "--help" } else { $_ }
+        })
+        & $installerPath @installerArgs
     } finally {
         Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 } @args
 
+# Keep stdout on the caller's pipeline and read the native exit status separately.
+$exitCode = $LASTEXITCODE
 if ($exitCode -ne 0) {
     if ($MyInvocation.MyCommand.Path) {
         exit $exitCode
