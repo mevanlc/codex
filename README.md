@@ -306,10 +306,10 @@ just build-and-install-fork          # lite profile (default)
 just build-and-install-fork release  # optimized
 ```
 
-The command builds a complete package, including `codex-code-mode-host` and
-platform resources, then runs the fork installer on it. Commands in
-`~/.local/bin` select the new CLI package; previous releases are retained. The
-staged package and archive are replaced under `dist/codex-local` and
+The command builds a complete package, including `codex-code-mode-host`,
+`codex-exec-server`, and platform resources, then runs the fork installer.
+Commands in `~/.local/bin` select the new CLI package; previous releases are
+retained. The staged package and archive are replaced under `dist/codex-local` and
 `dist/codex-local.zip` on each run. Local archive installs are pinned against
 automatic updates. This uses the version in `codex-rs/Cargo.toml` without
 modifying it.
@@ -337,6 +337,8 @@ The script stamps a version derived from the newest `rust-v*` tag reachable from
 `--help` also prints per-platform prerequisites. Desktop builds use the exact-version sandboxed V8 archive and binding published by `openai/codex`. On Termux (aarch64 with `/system/build.prop` present), the script instead points `RUSTY_V8_ARCHIVE` at the Android prebuilt hosted on this repo's releases and adds the link flags needed for `libc++` and `__clear_cache`. Termux prerequisites: `pkg install rust binutils cmake openssl pkg-config`.
 
 This fork also raises `[profile.release]` to `opt-level = 3` with fat LTO.
+Android builds require Rust 1.98 or newer for working `File::lock` and
+`File::try_lock`; this checkout pins Rust 1.98.0.
 
 ## Status
 
