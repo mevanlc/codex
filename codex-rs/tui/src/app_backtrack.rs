@@ -415,7 +415,7 @@ impl App {
         {
             let was_select_mode = t.is_select_mode();
             let pending_follow_before = t.pending_follow_id();
-            tui.set_overlay_input(tui::OverlayInput::Transcript)?;
+            tui.set_mouse_capture(tui::MouseCapture::Enabled)?;
             t.motion = crate::motion::MotionMode::from_animations_enabled(
                 self.local_settings.tui.animations && self.local_settings.tui.effects.shimmer,
             );
@@ -442,7 +442,7 @@ impl App {
             let result =
                 if input { t.draw(tui) } else { Ok(()) }.and_then(|()| t.handle_event(tui, event));
             if result.is_err() {
-                let _ = tui.set_overlay_input(tui::OverlayInput::Default);
+                let _ = tui.set_mouse_capture(tui::MouseCapture::Inherit);
             }
             let completed_copy = result?;
             let close_overlay = t.is_done();
@@ -671,7 +671,7 @@ pub(crate) fn backtrack_revert_before_turn_id(
         }
     }
 
-    bail!("the selected prompt was not found in the persisted thread");
+    bail!("the selected prompt was not found in the persisted thread")
 }
 
 /// Returns whether a turn is the reconstructed inline-review child with duplicated prompt inputs.
@@ -1215,7 +1215,7 @@ mod tests {
         assert!(!has_backtrack_target(&cells));
 
         cells.push(Arc::new(UserHistoryCell {
-            spoken: false,
+            presentation: Default::default(),
             message: "hello".to_string(),
             text_elements: Vec::new(),
             local_image_paths: Vec::new(),

@@ -266,12 +266,12 @@ pub(crate) use chat_composer::ChatComposerConfig;
 pub(crate) use chat_composer::ClipboardPasteTarget;
 pub(crate) use chat_composer::ComposerDraftSnapshot;
 pub(crate) use chat_composer::InputResult;
+pub(crate) use chat_composer::KillBufferSnapshot;
 pub(crate) use chat_composer::QueuedInputAction;
 pub(crate) use chat_composer::RestrictedInputMode;
 pub(crate) use chat_composer::SHELL_FOLLOW_UP_PROMPT;
 pub(crate) use chat_composer::ShellInvocationMode;
 pub(crate) use chat_composer_history::HistoryEntry;
-pub(crate) use textarea::KillBufferSnapshot;
 
 use crate::status_indicator_widget::StatusDetailsCapitalization;
 use crate::status_indicator_widget::StatusIndicatorWidget;
@@ -488,9 +488,13 @@ impl BottomPane {
         self.request_redraw();
     }
 
-    pub(crate) fn set_agents_navigation_enabled(&mut self, enabled: bool) {
-        self.composer.set_agents_navigation_enabled(enabled);
+    pub(crate) fn set_command_center_enabled(&mut self, enabled: bool) {
+        self.composer.command_center_enabled = enabled;
         self.request_redraw();
+    }
+
+    pub(crate) fn command_center_enabled(&self) -> bool {
+        self.composer.command_center_enabled
     }
 
     pub(crate) fn agents_navigation_key_available(&self) -> bool {

@@ -26,6 +26,9 @@ use super::RetractSteerStatus;
 pub struct UserInputMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance_order: Option<u64>,
+    /// Optional host-assigned UUID for this particular Responses user item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_item_uuid: Option<uuid::Uuid>,
     #[serde(
         default,
         skip_serializing_if = "codex_history::UserInputOrigin::is_user"

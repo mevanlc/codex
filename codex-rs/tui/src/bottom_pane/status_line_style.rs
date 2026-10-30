@@ -39,6 +39,7 @@ impl StatusLineAccent {
             StatusLineItem::ModelName
             | StatusLineItem::ModelNameBrief
             | StatusLineItem::ModelWithReasoning
+            | StatusLineItem::Provider
             | StatusLineItem::ModelWithReasoningBrief
             | StatusLineItem::Reasoning
             | StatusLineItem::ReasoningBrief => Self::Model,
@@ -64,7 +65,8 @@ impl StatusLineAccent {
             StatusLineItem::CodexVersion
             | StatusLineItem::Hostname
             | StatusLineItem::HostnameBrief
-            | StatusLineItem::SessionId => Self::Metadata,
+            | StatusLineItem::SessionId
+            | StatusLineItem::Profile => Self::Metadata,
             StatusLineItem::FastMode | StatusLineItem::Daybreak | StatusLineItem::RawOutput => {
                 Self::Mode
             }

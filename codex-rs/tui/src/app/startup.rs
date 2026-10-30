@@ -922,10 +922,7 @@ impl App {
             &app_server_target,
             environment_manager.as_ref(),
         ));
-        chat_widget.set_agents_navigation_enabled(matches!(
-            app_server_target,
-            AppServerTarget::LocalDaemon { .. }
-        ));
+        chat_widget.set_command_center_enabled(app_server_target.supports_command_center());
         let thread_and_widget_ms = thread_and_widget_started_at.elapsed().as_millis();
         chat_widget.windows_sandbox_local_server = !app_server_target.uses_remote_workspace()
             && app_server.app_server_platform_os() == Some("windows");
@@ -1111,7 +1108,7 @@ See the Codex keymap documentation for supported actions and examples."
         }
         if start_in_agents_overview {
             app.open_agents_overview(&app_server);
-        } else if !matches!(app.app_server_target, AppServerTarget::Embedded) {
+        } else if app.app_server_target.supports_command_center() {
             app.refresh_agents_overview_threads(&app_server);
         }
         if let Some(entry) = startup_hooks_browser {
@@ -1299,7 +1296,7 @@ See the Codex keymap documentation for supported actions and examples."
                     if !tui.is_owned_screen() && tui.is_alt_screen_active() {
                         app.close_transcript_overlay(tui);
                     } else if let Err(err) =
-                        tui.set_overlay_input(crate::tui::OverlayInput::Default)
+                        tui.set_mouse_capture(app.chat_widget.mouse_capture(tui.is_owned_screen()))
                     {
                         break Err(err.into());
                     }
@@ -1386,7 +1383,9 @@ See the Codex keymap documentation for supported actions and examples."
                             && wait_for_drain
                         {
                             tokio::time::sleep_until(deadline).await;
-                            color_eyre::eyre::bail!("Server connection could not be restored");
+                            color_eyre::eyre::bail!(
+                                "Automatic reconnect timed out waiting for the server to finish shutting down."
+                            );
                         }
                         attempt.await
                     }));
@@ -1680,6 +1679,8 @@ See the Codex keymap documentation for supported actions and examples."
                 }
             }
         };
+        // Let the pending terminal poll unwind while the app server shuts down.
+        tui.pause_events();
         app.chat_widget.mention_usage_mut().flush().await;
         if let Err(err) = backends.shutdown().await {
             tracing::warn!(error = %err, "failed to shut down embedded app server");

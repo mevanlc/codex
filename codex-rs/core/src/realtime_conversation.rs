@@ -154,7 +154,8 @@ impl RealtimeHandoffAdmission {
             return Ok(());
         };
         if !self.retired.load(Ordering::Acquire) {
-            session.route_realtime_text_input(text).await?;
+            // Bound the layout of the handoff future while retaining the admission permit.
+            Box::pin(session.route_realtime_text_input(text)).await?;
         }
         Ok(())
     }
@@ -354,14 +355,14 @@ impl RealtimeStreamedItem {
             if self.buffered_text.is_empty() {
                 return None;
             }
-            let text = std::mem::take(&mut self.buffered_text);
+            let text = self.buffered_text.drain(..).collect::<String>();
             let text = format!("{prefix}{text}");
             self.sent_bytes += text.len();
             return Some(text);
         }
 
-        let head = std::mem::take(&mut self.buffered_text);
-        let tail = std::mem::take(&mut self.tail_text);
+        let head = self.buffered_text.drain(..).collect::<String>();
+        let tail = self.tail_text.drain(..).collect::<String>();
         let text = format!("{prefix}{head}{HANDOFF_STREAM_TRUNCATION_MARKER}{tail}");
         self.sent_bytes += text.len();
         Some(text)
@@ -817,6 +818,7 @@ impl RealtimeConversationManager {
         {
             let mut guard = self.state.lock().await;
             if let Some(state) = guard.conversation.as_mut()
+                // Only attach the task to the conversation currently stored in the manager.
                 && Arc::ptr_eq(&state.realtime_active, realtime_active)
             {
                 state.fanout_task = fanout_task.take();
@@ -2133,6 +2135,7 @@ enum RealtimeSidebandSessionInitialization {
     },
 }
 
+// The main loop for realtime inputs, including user audio/text and model commentary/results.
 async fn run_realtime_input_task(
     input: RealtimeInputTask,
     pending_outbound: Option<Box<RealtimePendingOutbound>>,
@@ -2153,6 +2156,7 @@ async fn run_realtime_input_task(
     let mut output_audio_state: Option<OutputAudioState> = None;
     let mut response_create_queue = RealtimeResponseCreateQueue::default();
 
+    // Send any previously unsent messages before entering the main event loop.
     if let Some(pending_outbound) = pending_outbound
         && let Err(err) = send_realtime_pending_outbound(
             &pending_outbound,

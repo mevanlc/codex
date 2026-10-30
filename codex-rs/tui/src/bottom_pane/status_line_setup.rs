@@ -10,7 +10,8 @@
 //!
 //! # Available Status Line Items
 //!
-//! - Model information (name, reasoning level)
+//! - Model information (name, reasoning level, provider)
+//! - Named configuration profile
 //! - Directory paths (current dir, project root)
 //! - Machine hostname
 //! - Git information (branch name)
@@ -178,6 +179,13 @@ pub(crate) enum StatusLineItem {
     WeeklyLimitBrief,
     /// Machine hostname without its final dotted suffix.
     HostnameBrief,
+
+    /// Named config profile selected for this invocation.
+    Profile,
+
+    /// Model provider ID for the active thread.
+    #[strum(to_string = "provider", serialize = "model-provider")]
+    Provider,
 }
 
 impl StatusLineItem {
@@ -217,6 +225,10 @@ impl StatusLineItem {
                 "Current model name with reasoning level"
             }
             StatusLineItem::Reasoning | StatusLineItem::ReasoningBrief => "Current reasoning level",
+            StatusLineItem::Profile => {
+                "Config profile selected with --profile (omitted when unset)"
+            }
+            StatusLineItem::Provider => "Model provider for the active thread",
             StatusLineItem::CurrentDir => "Current working directory",
             StatusLineItem::ProjectRoot => "Project name (omitted when unavailable)",
             StatusLineItem::Hostname | StatusLineItem::HostnameBrief => {
@@ -279,6 +291,8 @@ impl StatusLineItem {
             StatusLineItem::ModelName => StatusSurfacePreviewItem::Model,
             StatusLineItem::ModelWithReasoning => StatusSurfacePreviewItem::ModelWithReasoning,
             StatusLineItem::Reasoning => StatusSurfacePreviewItem::Reasoning,
+            StatusLineItem::Profile => StatusSurfacePreviewItem::Profile,
+            StatusLineItem::Provider => StatusSurfacePreviewItem::Provider,
             StatusLineItem::CurrentDir => StatusSurfacePreviewItem::CurrentDir,
             StatusLineItem::ProjectRoot => StatusSurfacePreviewItem::ProjectRoot,
             StatusLineItem::Hostname => StatusSurfacePreviewItem::Hostname,

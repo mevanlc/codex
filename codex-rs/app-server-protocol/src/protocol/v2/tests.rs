@@ -1947,6 +1947,7 @@ fn process_notifications_round_trip() {
     let exited = ProcessExitedNotification {
         process_handle: "proc-1".to_string(),
         exit_code: 0,
+        output_drain_timed_out: Some(true),
         stdout: "out".to_string(),
         stdout_cap_reached: false,
         stderr: "err".to_string(),
@@ -1958,15 +1959,25 @@ fn process_notifications_round_trip() {
         json!({
             "processHandle": "proc-1",
             "exitCode": 0,
+            "outputDrainTimedOut": true,
             "stdout": "out",
             "stdoutCapReached": false,
             "stderr": "err",
             "stderrCapReached": true,
         })
     );
-    let decoded = serde_json::from_value::<ProcessExitedNotification>(value)
+    let decoded = serde_json::from_value::<ProcessExitedNotification>(value.clone())
         .expect("deserialize process/exited");
     assert_eq!(decoded, exited);
+
+    let mut legacy = value;
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("outputDrainTimedOut");
+    let decoded = serde_json::from_value::<ProcessExitedNotification>(legacy)
+        .expect("deserialize process/exited from an older server");
+    assert_eq!(decoded.output_drain_timed_out, None);
 }
 
 #[test]
@@ -2217,6 +2228,7 @@ fn config_requirements_granular_allowed_approval_policy_is_marked_experimental()
             check_for_update_on_startup: None,
             allow_login_shell: None,
             feedback: None,
+            otel: None,
         });
 
     assert_eq!(reason, Some("askForApproval.granular"));
@@ -4798,6 +4810,10 @@ fn codex_error_info_serializes_http_status_code_in_camel_case() {
 #[test]
 fn core_error_info_converts_to_camel_case() {
     for (core, expected) in [
+        (
+            CoreCodexErrorInfo::PolicyCapacityUnavailable,
+            json!("policyCapacityUnavailable"),
+        ),
         (CoreCodexErrorInfo::CyberPolicy, json!("cyberPolicy")),
         (CoreCodexErrorInfo::BioPolicy, json!("other")),
         (CoreCodexErrorInfo::InvalidPrompt, json!("other")),

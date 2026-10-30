@@ -847,7 +847,11 @@ impl AppServerSession {
                 FeedbackAudience::External,
                 false,
             ),
-            Some(Account::Chatgpt { email, plan_type }) => {
+            Some(Account::Chatgpt {
+                email,
+                plan_type,
+                workspace_name,
+            }) => {
                 let feedback_audience = if email
                     .as_deref()
                     .is_some_and(|email| email.ends_with("@openai.com"))
@@ -862,6 +866,7 @@ impl AppServerSession {
                     Some(StatusAccountDisplay::ChatGpt {
                         email,
                         plan: Some(plan_type_display_name(plan_type)),
+                        workspace: workspace_display(workspace_name, account.workspace_routing),
                     }),
                     Some(plan_type),
                     feedback_audience,
@@ -1515,6 +1520,7 @@ impl AppServerSession {
     pub(crate) async fn turn_start(
         &mut self,
         thread_id: ThreadId,
+        turn_trigger: &str,
         client_user_message_id: String,
         items: Vec<UserInput>,
         cwd: PathBuf,
@@ -1533,7 +1539,7 @@ impl AppServerSession {
         let request_id = self.next_request_id();
         let mut params = TurnStartParams {
             thread_id: thread_id.to_string(),
-            turn_trigger: Some("user".to_string()),
+            turn_trigger: Some(turn_trigger.to_string()),
             client_user_message_id: Some(client_user_message_id),
             input: items,
             output_schema,
@@ -1990,6 +1996,20 @@ pub(crate) async fn start_thread_with_request_handle(
     Ok(started)
 }
 
+pub(crate) fn workspace_display(
+    name: Option<String>,
+    routing: Option<codex_app_server_protocol::WorkspaceRouting>,
+) -> Option<String> {
+    let name = name
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty() && !name.chars().any(char::is_control));
+    let id = routing.map(|routing| routing.chatgpt_account_id);
+    match (name, id) {
+        (Some(name), Some(id)) => Some(format!("{name} ({id})")),
+        (name, id) => name.or(id),
+    }
+}
+
 pub(crate) fn status_account_display_from_auth_mode(
     auth_mode: Option<AuthMode>,
     plan_type: Option<codex_protocol::account::PlanType>,
@@ -2002,6 +2022,7 @@ pub(crate) fn status_account_display_from_auth_mode(
         | Some(AuthMode::PersonalAccessToken) => Some(StatusAccountDisplay::ChatGpt {
             email: None,
             plan: plan_type.map(plan_type_display_name),
+            workspace: None,
         }),
         Some(AuthMode::Headers)
         | Some(AuthMode::BedrockApiKey)
@@ -2853,6 +2874,7 @@ mod tests {
             account: Some(Account::Chatgpt {
                 email: Some("teammate@openai.com".to_string()),
                 plan_type: codex_protocol::account::PlanType::Plus,
+                workspace_name: None,
             }),
             requires_openai_auth: true,
         };
@@ -2967,6 +2989,7 @@ mod tests {
             account: Some(Account::Chatgpt {
                 email: Some("teammate@openai.com".to_string()),
                 plan_type: codex_protocol::account::PlanType::Plus,
+                workspace_name: None,
             }),
             requires_openai_auth: true,
             workspace_routing: None,
@@ -3324,6 +3347,7 @@ mod tests {
         let (turn, sent_params) = tokio::join!(
             app_server.turn_start(
                 thread_id,
+                "user",
                 client_user_message_id.clone(),
                 input.clone(),
                 test_path_buf("/local/workspace"),
@@ -4870,6 +4894,7 @@ mod tests {
             Some(StatusAccountDisplay::ChatGpt {
                 email: None,
                 plan: Some(ref plan),
+                ..
             }) if plan == "Enterprise"
         ));
 
@@ -4882,6 +4907,7 @@ mod tests {
             Some(StatusAccountDisplay::ChatGpt {
                 email: None,
                 plan: Some(ref plan),
+                ..
             }) if plan == "Business"
         ));
 
@@ -4894,6 +4920,7 @@ mod tests {
             Some(StatusAccountDisplay::ChatGpt {
                 email: None,
                 plan: Some(ref plan),
+                ..
             }) if plan == "Business Premium"
         ));
     }
