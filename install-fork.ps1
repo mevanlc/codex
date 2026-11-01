@@ -1,4 +1,5 @@
 # Download the newest published codex-fork-installer for Windows and run it.
+$installerResult = [PSCustomObject]@{ ExitCode = 0 }
 & {
     Set-StrictMode -Version Latest
     $ErrorActionPreference = "Stop"
@@ -92,7 +93,10 @@
     $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-fork-installer-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
     try {
-        $installerPath = Join-Path $tempDir $asset
+        # A released installer may predate its explicit asInvoker manifest.
+        # Avoid Windows installer-detection heuristics for those binaries by
+        # giving the temporary copy a neutral name.
+        $installerPath = Join-Path $tempDir "codex-fork-bootstrap.exe"
         Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -Headers $downloadHeaders -OutFile $installerPath
 
         if ($expectedSha256) {
@@ -105,14 +109,18 @@
         $installerArgs = @($args | ForEach-Object {
             if ($_ -eq "-?") { "--help" } else { $_ }
         })
+        # Do not inherit a stale native exit code from the caller when this
+        # script is evaluated with `irm ... | iex`.
+        $global:LASTEXITCODE = 0
         & $installerPath @installerArgs
+        $installerResult.ExitCode = $global:LASTEXITCODE
     } finally {
         Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 } @args
 
 # Keep stdout on the caller's pipeline and read the native exit status separately.
-$exitCode = $LASTEXITCODE
+$exitCode = $installerResult.ExitCode
 if ($exitCode -ne 0) {
     if ($MyInvocation.MyCommand.Path) {
         exit $exitCode

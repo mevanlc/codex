@@ -44,7 +44,7 @@ Install the newest complete package available for your platform from
 `codex-fork-installer`, a single self-contained program published for every
 platform. `install-fork.sh` and `install-fork.ps1` detect your platform, download
 the newest published `codex-fork-installer-<target>` binary, verify its SHA-256
-digest, and run it (needing no Python, `gh`, or `zstd`).
+digest, and run it (needing no administrator rights, Python, `gh`, or `zstd`).
 
 macOS, Linux, and Android/Termux (`pkg install curl` if needed):
 

@@ -1,6 +1,48 @@
 load("//:defs.bzl", "codex_rust_crate")
 
+WINDOWS_INSTALLER_MANIFEST_RUSTC_FLAGS = select({
+    "@llvm//constraints/windows/abi:gnullvm": [
+        "-C",
+        "link-arg=$(location :codex-fork-installer-manifest-resource)",
+    ],
+    "@llvm//constraints/windows/abi:msvc": [
+        "-C",
+        "link-arg=/MANIFEST:EMBED",
+        "-C",
+        "link-arg=/MANIFESTINPUT:$(location :codex-fork-installer.manifest)",
+    ],
+    "//conditions:default": [],
+})
+
+# Cargo's MSVC linker can consume the XML manifest directly. The supported
+# gnullvm cross-build runs on Linux, so compile the same RT_MANIFEST resource
+# with hermetic LLVM instead of relying on mt.exe.
+genrule(
+    name = "codex-fork-installer-manifest-resource",
+    srcs = ["codex-fork-installer.manifest"],
+    outs = ["codex-fork-installer.manifest.res"],
+    cmd = " && ".join([
+        "printf '1 24 \"%s\"\\n' \"$(location :codex-fork-installer.manifest)\" > \"$(@D)/codex-fork-installer.manifest.rc\"",
+        "$(location @llvm//tools:llvm-rc) -no-preprocess \"$(@D)/codex-fork-installer.manifest.rc\"",
+    ]),
+    tools = ["@llvm//tools:llvm-rc"],
+)
+
 codex_rust_crate(
     name = "fork-installer",
+    binary_compile_data_extra = {
+        "codex-fork-installer": select({
+            "@llvm//constraints/windows/abi:gnullvm": [":codex-fork-installer-manifest-resource"],
+            "@llvm//constraints/windows/abi:msvc": ["codex-fork-installer.manifest"],
+            "//conditions:default": [],
+        }),
+    },
+    binary_rustc_flags_extra = {
+        "codex-fork-installer": WINDOWS_INSTALLER_MANIFEST_RUSTC_FLAGS,
+    },
+    # rules_rust drops Cargo's rustc-link-arg-bin directive; the target-local
+    # linker settings above provide the manifest for Bazel builds.
+    build_script_enabled = False,
     crate_name = "codex_fork_installer",
+    test_data_extra = [":codex-fork-installer"],
 )
