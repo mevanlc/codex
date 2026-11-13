@@ -649,6 +649,7 @@ fn open_questions(chat: &mut ChatWidget, options: Option<Vec<String>>) {
     chat.thread_id = Some(ThreadId::new());
     chat.on_agent_message_item_completed(
         AgentMessageItem {
+            moderation: None,
             id: "review".into(),
             content: Vec::new(),
             phase: None,
@@ -806,7 +807,7 @@ async fn question_navigation_can_retract_a_pending_steer() {
     assert_eq!(
         ops.try_recv().expect("retract pending steer"),
         Op::RetractSteer {
-            expected_turn_id: pending.turn_id.clone().unwrap(),
+            expected_turn_id: pending.admitted_turn_id.clone().unwrap(),
             client_user_message_id: pending.client_id.clone(),
         }
     );
@@ -837,6 +838,7 @@ async fn question_drafts_survive_navigation_and_snapshot_replay() {
     let saved = chat.capture_thread_input_state();
     let (mut chat, _rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
     let item = AppServerThreadItemPayload::AgentMessage {
+        moderation: None,
         id: "buffered".into(),
         text: String::new(),
         phase: None,
@@ -1103,6 +1105,7 @@ async fn async_question_markdown_matches_loaded_history() {
     let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
     let title = "Keep `--verbose` for **failed** runs?";
     let item = AppServerThreadItemPayload::AgentMessage {
+        moderation: None,
         id: "ask".into(),
         text: format!("{title}\n- Only for **CI**\n\nSee the [guide](https://example.test/guide)?"),
         phase: None,

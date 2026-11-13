@@ -408,7 +408,7 @@ async fn restore_thread_input_state_restores_pending_steers_without_downgrading_
     };
     let expected_pending = PendingSteer {
         client_id: "saved-submission".to_string(),
-        turn_id: Some("turn-1".to_string()),
+        admitted_turn_id: Some("turn-1".to_string()),
         compare_key: expected_compare_key,
         ..pending_steer("pending steer")
     };
@@ -915,7 +915,7 @@ async fn queued_message_shortcut_restores_pending_steer_after_retraction_succeed
     chat.bottom_pane.set_task_running(/*running*/ true);
 
     let mut pending = pending_steer("pending steer");
-    pending.turn_id = None;
+    pending.admitted_turn_id = None;
     chat.input_queue.pending_steers.push_back(pending);
     chat.mark_pending_steer_accepted("client-pending steer", "accepted-turn-id".to_string());
     chat.refresh_pending_input_preview();
@@ -1131,6 +1131,7 @@ async fn manual_interrupt_restores_pending_steer_mention_bindings_to_composer() 
         )],
         Vec::new(),
         mention_bindings.clone(),
+        crate::bottom_pane::ShellPrefixHandling::Interpret,
     );
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 

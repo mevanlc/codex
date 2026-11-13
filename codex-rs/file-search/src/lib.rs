@@ -40,7 +40,7 @@ pub use cli::Cli;
 
 /// A single match result returned from the search.
 ///
-/// * `score` – Relevance score returned by `nucleo`.
+/// * `score` – Relevance score used to select and order this result.
 /// * `path`  – Path to the matched entry (file or directory), relative to the
 ///   search directory.
 /// * `match_type` – Whether this match is a file or directory.
@@ -383,9 +383,7 @@ struct SessionInner {
 
 struct RankedMatch<'a> {
     match_: nucleo::Match,
-    root_idx: usize,
     relative_path: &'a str,
-    match_type: MatchType,
 }
 
 fn ranked_snapshot_matches<'a>(
@@ -407,27 +405,18 @@ fn ranked_snapshot_matches<'a>(
             .iter()
             .filter_map(|match_| {
                 let item = snapshot.get_item(match_.idx)?;
-                let (root_idx, relative_path, match_type) = match item.data {
-                    IndexedEntry::Ascii {
-                        root_idx,
-                        match_type,
-                    } => {
+                let relative_path = match item.data {
+                    IndexedEntry::Ascii { .. } => {
                         let Utf32String::Ascii(path) = &item.matcher_columns[0] else {
                             return None;
                         };
-                        (*root_idx, path.as_ref(), *match_type)
+                        path.as_ref()
                     }
-                    IndexedEntry::Unicode(entry) => (
-                        entry.root_idx,
-                        entry.relative_path.as_ref(),
-                        entry.match_type,
-                    ),
+                    IndexedEntry::Unicode(entry) => entry.relative_path.as_ref(),
                 };
                 Some(RankedMatch {
                     match_: *match_,
-                    root_idx,
                     relative_path,
-                    match_type,
                 })
             })
             .collect::<Vec<_>>();
@@ -498,7 +487,7 @@ fn matcher_worker(
 ) -> anyhow::Result<()> {
     const TICK_TIMEOUT_MS: u64 = 10;
     let config = Config::DEFAULT.match_paths();
-    let mut indices_matcher = inner.compute_indices.then(|| Matcher::new(config.clone()));
+    let mut matcher = Matcher::new(config);
     let cancel_requested = || inner.cancelled.load(Ordering::Relaxed);
     let shutdown_requested = || inner.shutdown.load(Ordering::Relaxed);
 
@@ -506,6 +495,7 @@ fn matcher_worker(
     let mut next_notify = never();
     let mut will_notify = false;
     let mut walk_complete = false;
+    let mut ranking = None;
 
     loop {
         select! {
@@ -515,6 +505,7 @@ fn matcher_worker(
                 };
                 match signal {
                     WorkSignal::QueryUpdated(query) => {
+                        ranking = None;
                         let append = query.starts_with(&last_query);
                         nucleo.pattern.reparse(
                             0,
@@ -547,20 +538,26 @@ fn matcher_worker(
             }
             recv(next_notify) -> _ => {
                 will_notify = false;
-                let status = nucleo.tick(TICK_TIMEOUT_MS);
-                if status.changed
-                    && let Some(snapshot) = snapshot::for_query(
-                        &inner,
-                        &nucleo,
-                        &last_query,
-                        &mut indices_matcher,
-                        walk_complete,
-                    )
-                {
-                    inner.reporter.on_update(&snapshot);
+                if ranking.is_none() {
+                    let status = nucleo.tick(TICK_TIMEOUT_MS);
+                    if status.changed {
+                        ranking = snapshot::Ranking::start(&nucleo, &last_query, walk_complete);
+                    }
+                    if ranking.is_none() && !status.running && walk_complete {
+                        inner.reporter.on_complete();
+                    }
                 }
-                if !status.running && walk_complete {
-                    inner.reporter.on_complete();
+                if let Some(active) = &mut ranking {
+                    if let Some(snapshot) = active.advance(
+                        &inner, &nucleo, &last_query, &mut matcher,
+                        Duration::from_millis(TICK_TIMEOUT_MS),
+                    ) {
+                        inner.reporter.on_update(&snapshot);
+                        ranking = None;
+                    }
+                    // Resume this snapshot or collect work that arrived while ranking it.
+                    will_notify = true;
+                    next_notify = after(Duration::ZERO);
                 }
             }
             default(Duration::from_millis(100)) => {

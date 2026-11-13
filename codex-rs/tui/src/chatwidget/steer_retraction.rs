@@ -14,7 +14,7 @@ impl ChatWidget {
         let Some(pending) = self.input_queue.pending_steers.back() else {
             return;
         };
-        let Some(expected_turn_id) = pending.turn_id.clone() else {
+        let Some(expected_turn_id) = pending.admitted_turn_id.clone() else {
             return;
         };
         let client_user_message_id = pending.client_id.clone();
@@ -37,7 +37,7 @@ impl ChatWidget {
             // Every user submission now has an ID, including newly started turns.
             return;
         };
-        pending.turn_id = Some(turn_id);
+        pending.admitted_turn_id = Some(turn_id);
     }
 
     pub(crate) fn on_pending_steer_retraction_result(

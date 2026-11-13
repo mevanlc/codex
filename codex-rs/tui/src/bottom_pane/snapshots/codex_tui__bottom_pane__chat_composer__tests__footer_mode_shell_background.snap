@@ -1,6 +1,6 @@
 ---
 source: tui/src/bottom_pane/chat_composer.rs
-assertion_line: 5407
+assertion_line: 5410
 expression: terminal.backend()
 ---
 "                                                                                                    "
@@ -11,4 +11,4 @@ expression: terminal.backend()
 "                                                                                                    "
 "                                                                                                    "
 "                                                                                                    "
-"                                                      Shell mode · background · Tab to change mode  "
+"                                                       Shell mode · background · Tab to change mode "

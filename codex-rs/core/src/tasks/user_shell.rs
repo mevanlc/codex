@@ -282,7 +282,7 @@ pub(crate) async fn execute_user_shell_command_with_background(
                 raw_command.clone(),
                 shell_snapshot,
                 permissions,
-                &turn_environment.environment,
+                turn_environment.environment(),
                 turn_environment.selection.environment_id.clone(),
                 cancellation_token,
             )
@@ -445,6 +445,7 @@ async fn send_user_shell_error(session: &Session, turn_context: &TurnContext, me
                 misalignment: None,
                 message: message.to_string(),
                 codex_error_info: None,
+                rejected_audio_file_ids: Vec::new(),
             }),
         )
         .await;

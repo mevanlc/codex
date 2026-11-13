@@ -122,7 +122,7 @@ async fn exec_command_with_tty(
                 turn.initial_environments
                     .primary()
                     .expect("turn environment")
-                    .environment
+                    .environment()
                     .as_ref(),
             )
             .await?,
@@ -1358,7 +1358,7 @@ async fn user_background_shell_launch_failure_leaves_no_registered_process() -> 
             "echo unreachable".to_string(),
             None,
             permissions,
-            &environment.environment,
+            environment.environment(),
             environment.selection.environment_id.clone(),
             tokio_util::sync::CancellationToken::new(),
         )
