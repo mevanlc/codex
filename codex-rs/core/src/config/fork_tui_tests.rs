@@ -42,6 +42,7 @@ primary_accent = "#00AAFF"
 "##,
             ForkTuiOptions {
                 chatbox_placeholder_tips: ChatboxPlaceholderTips::Off,
+                passive_hints: codex_config::types::PassiveHints::Once,
                 file_mentions_preserve_at: true,
                 file_mentions_allow_explicit_paths: false,
                 primary_accent: Some("#00AAFF".to_string()),

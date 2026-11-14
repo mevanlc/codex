@@ -161,6 +161,7 @@ fast_default_opt_out = true
                 home.path().join(codex_config::CONFIG_OVERLAY_FILE),
                 r#"[tui]
 chatbox_placeholder_tips = "off"
+passive_hints = "never"
 file_mentions_preserve_at = true
 file_mentions_allow_explicit_paths = false
 primary_accent = "3,4,5"
@@ -218,6 +219,7 @@ primary_accent = "3,4,5"
         } else {
             codex_config::types::ForkTuiOptions {
                 chatbox_placeholder_tips: codex_config::types::ChatboxPlaceholderTips::Off,
+                passive_hints: codex_config::types::PassiveHints::Never,
                 file_mentions_preserve_at: true,
                 file_mentions_allow_explicit_paths: false,
                 primary_accent: Some("3,4,5".to_string()),

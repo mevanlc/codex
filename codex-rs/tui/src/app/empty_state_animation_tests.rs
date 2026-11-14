@@ -177,6 +177,11 @@ async fn non_startup_history_dismisses_logo_until_a_new_thread() -> Result<()> {
 #[tokio::test]
 async fn empty_state_animation_preserves_header_cursor_and_footer() -> Result<()> {
     let mut app = crate::app::test_support::make_test_app().await;
+    // Compare decoration changes independently of the once-per-launch hint dismissal.
+    crate::chatwidget::tests::helpers::set_passive_hints(
+        &mut app.chat_widget,
+        codex_config::types::PassiveHints::Auto,
+    );
     app.local_settings.tui.animations = true;
     let size = Size::new(/*width*/ 120, /*height*/ 44);
     let mut tui = crate::tui::test_support::make_test_tui()?;

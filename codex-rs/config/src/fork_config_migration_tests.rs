@@ -16,6 +16,7 @@ theme = "nord" # keep this
 primary_accent = '#7a81ff'
 # no rotating tips
 chatbox_placeholder_tips = "off"
+passive_hints = "always"
 file_mentions_preserve_at = true
 file_mentions_allow_explicit_paths = false
 [tui.keymap.global]
@@ -36,6 +37,7 @@ open_external_editor_with_quote = "ctrl-x g" # quoted response
 [tui]
 primary_accent = '#7a81ff'
 chatbox_placeholder_tips = "off"
+passive_hints = "always"
 file_mentions_preserve_at = true
 file_mentions_allow_explicit_paths = false
 [tui.keymap.global]

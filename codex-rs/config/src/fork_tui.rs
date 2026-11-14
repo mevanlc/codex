@@ -15,6 +15,16 @@ pub enum ChatboxPlaceholderTips {
     Off,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PassiveHints {
+    Never,
+    #[default]
+    Once,
+    Auto,
+    Always,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ForkTuiOptions {
@@ -24,6 +34,15 @@ pub struct ForkTuiOptions {
     /// - `off`: Use a generic placeholder instead.
     #[serde(default)]
     pub chatbox_placeholder_tips: ChatboxPlaceholderTips,
+
+    /// Visibility of the agents and shortcuts hints below the composer.
+    ///
+    /// - `never`: Hide the hints.
+    /// - `once` (default): Show at startup until first hidden, then keep hidden for the session.
+    /// - `auto`: Show whenever the composer is empty (the original behavior).
+    /// - `always`: Also show while the composer contains a draft.
+    #[serde(default)]
+    pub passive_hints: PassiveHints,
 
     /// Keep the leading `@` when a file-search completion is inserted into the composer.
     /// Defaults to `false`.
@@ -49,6 +68,7 @@ impl Default for ForkTuiOptions {
     fn default() -> Self {
         Self {
             chatbox_placeholder_tips: ChatboxPlaceholderTips::default(),
+            passive_hints: PassiveHints::default(),
             file_mentions_preserve_at: false,
             file_mentions_allow_explicit_paths: true,
             primary_accent: None,

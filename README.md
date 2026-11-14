@@ -15,6 +15,7 @@ This fork maintains a build of Codex CLI that runs natively on Android via [Term
 - **Local source installs** — `just build-and-install-fork` builds and installs a complete managed package; `build-and-install.sh` also supports loose-binary installs with Termux auto-detection and target-dir pruning
 - **`[tui].primary_accent`** — replace Codex's cyan accent with a color of your choosing
 - **`[tui].chatbox_placeholder_tips`** — turn off the rotating composer tips
+- **`[tui].passive_hints`** — show composer navigation hints once per CLI launch, always, automatically, or never
 - **File mention settings** — optionally preserve the `@` prefix and complete explicit paths
 - **Shell invocation modes** — press Tab in `!` mode to cycle normal execution, agent follow-up, and managed background execution
 - **`--x-no-mcp`** — disable every MCP server and orchestrator MCP access for one invocation
@@ -164,7 +165,7 @@ fork; without it, all fork defaults apply. Keep shared settings in `config.toml`
 so official clients can read that file without encountering fork extensions.
 
 The overlay accepts only `tui.primary_accent`, `tui.chatbox_placeholder_tips`,
-`tui.file_mentions_preserve_at`, `tui.file_mentions_allow_explicit_paths`, and
+`tui.passive_hints`, `tui.file_mentions_preserve_at`, `tui.file_mentions_allow_explicit_paths`, and
 `tui.keymap.global.open_external_editor_with_quote`. On startup, the fork
 automatically moves these entries from the top level of `config.toml` into the
 overlay, preserving existing overlay values when both files set the same key.
@@ -208,6 +209,26 @@ chatbox_placeholder_tips = "off"
 ```
 
 `on` (the default) keeps upstream's rotating tip prompts in the composer; `off` leaves the placeholder blank.
+
+### Passive composer hints
+
+```toml
+[tui]
+passive_hints = "once"
+```
+
+This controls the `← for agents · ? for shortcuts` hints below the composer:
+
+| Value | Behavior |
+| --- | --- |
+| `never` | Hide the hints. |
+| `once` (default) | Show at startup; after they first disappear, keep them hidden until the CLI restarts, including across thread switches and `/new`. |
+| `auto` | Show when the composer is empty, matching the original behavior. |
+| `always` | Keep showing the hints while the composer contains a draft. |
+
+The shortcuts remain enabled in every mode. `always` still yields to popups and
+transient controls; Left continues to move the cursor while editing a draft.
+Status indicators, warnings, and explicitly opened shortcut help are unaffected.
 
 ### File mentions
 

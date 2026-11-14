@@ -16,6 +16,20 @@ does not enable managed-hooks-only mode.
 
 ## TUI
 
+Fork-only TUI settings belong in `$CODEX_HOME/config-overlay.toml`.
+
+To control the `← for agents · ? for shortcuts` composer hints, set:
+
+```toml
+[tui]
+passive_hints = "once"
+```
+
+`never` hides them; `once` (default) shows them at startup until they first
+disappear, then keeps them hidden across conversations until the CLI restarts;
+`auto` shows them whenever the composer is empty; `always` also shows them while
+typing. The shortcuts, status indicators, warnings, and shortcut help remain available.
+
 To disable the rotating "tip" placeholders in the chatbox, set:
 
 ```toml

@@ -24,6 +24,121 @@ fn composer() -> ChatComposer {
 }
 
 #[test]
+fn passive_hint_modes_control_empty_and_nonempty_composers() {
+    use codex_config::types::PassiveHints;
+
+    for mode in [
+        PassiveHints::Never,
+        PassiveHints::Once,
+        PassiveHints::Auto,
+        PassiveHints::Always,
+    ] {
+        let mut composer = composer();
+        composer.command_center_enabled = true;
+        composer.set_passive_hints(mode);
+        for (draft, expected) in [
+            ("", mode != PassiveHints::Never),
+            ("draft", mode == PassiveHints::Always),
+            (
+                "",
+                matches!(mode, PassiveHints::Auto | PassiveHints::Always),
+            ),
+        ] {
+            composer.set_text_content(draft.into(), Vec::new(), Vec::new());
+            let (text, _) = render(&composer, 100, None);
+            assert_eq!(text.contains("← for agents"), expected, "{mode:?}: {text}");
+            assert_eq!(
+                text.contains("? for shortcuts"),
+                expected,
+                "{mode:?}: {text}"
+            );
+            assert!(text.contains("MODEL"), "{mode:?}: {text}");
+        }
+    }
+}
+
+#[test]
+fn passive_hints_once_measurements_do_not_dismiss_but_rendered_disappearance_does() {
+    let mut composer = composer();
+    composer.set_passive_hints(codex_config::types::PassiveHints::Once);
+    assert!(render(&composer, 80, None).0.contains("? for shortcuts"));
+    // A speculative narrow measurement must not consume the startup appearance.
+    composer.desired_height_with_options(8, ComposerRenderOptions::default());
+    assert!(render(&composer, 80, None).0.contains("? for shortcuts"));
+    assert!(!render(&composer, 8, None).0.contains("? for shortcuts"));
+    assert!(!render(&composer, 80, None).0.contains("? for shortcuts"));
+}
+
+#[test]
+fn passive_hints_once_dismissal_survives_replacement_and_setting_refresh() {
+    let mut original = composer();
+    original.set_passive_hints(codex_config::types::PassiveHints::Once);
+    assert!(render(&original, 80, None).0.contains("? for shortcuts"));
+    let mut replacement = composer();
+    replacement.set_passive_hints(codex_config::types::PassiveHints::Once);
+    replacement.inherit_passive_hints(&original);
+    replacement.set_text_content("draft".into(), Vec::new(), Vec::new());
+    render(&replacement, 80, None);
+    replacement.set_text_content(String::new(), Vec::new(), Vec::new());
+    replacement.set_passive_hints(codex_config::types::PassiveHints::Once);
+    assert!(!render(&replacement, 80, None).0.contains("? for shortcuts"));
+    assert!(!render(&original, 80, None).0.contains("? for shortcuts"));
+    let mut restarted = composer();
+    restarted.set_passive_hints(codex_config::types::PassiveHints::Once);
+    assert!(render(&restarted, 80, None).0.contains("? for shortcuts"));
+}
+
+#[test]
+fn passive_hints_never_keeps_controls_and_warnings_available() {
+    let (tx, mut events) = unbounded_channel();
+    let mut composer = composer();
+    composer.app_event_tx = AppEventSender::new(tx);
+    composer.command_center_enabled = true;
+    composer.set_passive_hints(codex_config::types::PassiveHints::Never);
+    let options = ComposerRenderOptions {
+        separate_status_line: true,
+        warning_count: 2,
+        ..Default::default()
+    };
+    let (buf, _) = render_status(&composer, Rect::new(0, 0, 100, 8), options);
+    let text = frame(&buf);
+    assert!(text.contains("2 warnings"), "{text}");
+    assert!(text.contains("MODEL"), "{text}");
+    assert!(
+        !text.contains("for agents") && !text.contains("for shortcuts"),
+        "{text}"
+    );
+    composer.handle_key_event(KeyCode::Left.into());
+    assert!(matches!(
+        events.try_recv(),
+        Ok(crate::app_event::AppEvent::OpenAgentsOverview)
+    ));
+    composer.handle_key_event(KeyCode::Char('?').into());
+    assert!(composer.shortcut_overlay_visible());
+}
+
+#[test]
+fn passive_hints_policy_also_controls_supplemental_transcript_shortcuts() {
+    let mut composer = composer();
+    let footer = TranscriptFooter {
+        text: "inspect activity".into(),
+        cursor_column: None,
+        is_interactive: false,
+    };
+    for (mode, draft, expected) in [
+        (codex_config::types::PassiveHints::Never, "", false),
+        (codex_config::types::PassiveHints::Auto, "", true),
+        (codex_config::types::PassiveHints::Auto, "draft", false),
+        (codex_config::types::PassiveHints::Always, "draft", true),
+    ] {
+        composer.set_passive_hints(mode);
+        composer.set_text_content(draft.into(), Vec::new(), Vec::new());
+        let text = render(&composer, 100, Some(&footer)).0;
+        assert_eq!(text.contains("? shortcuts"), expected, "{mode:?}: {text}");
+    }
+}
+
+#[test]
 fn extension_status_line_clips_links_to_footer_layout() {
     let mut composer = composer();
     let tree: crate::ui_tree::UiTree = r#"{

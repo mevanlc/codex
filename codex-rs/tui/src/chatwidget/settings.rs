@@ -368,6 +368,11 @@ impl ChatWidget {
         self.sync_worktrees_enabled();
     }
 
+    pub(crate) fn inherit_passive_hints(&mut self, previous: &Self) {
+        self.bottom_pane
+            .inherit_passive_hints(&previous.bottom_pane);
+    }
+
     pub(super) fn sync_worktrees_enabled(&mut self) {
         self.bottom_pane
             .set_worktrees_enabled(self.local_worktree_operations);

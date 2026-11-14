@@ -449,6 +449,11 @@ async fn plan_menu_allows_transcript_selection_and_copy_but_respects_popup_bound
 #[tokio::test]
 async fn empty_enter_returns_to_latest_with_contextual_hints() -> Result<()> {
     let (mut app, mut events, mut operations) = make_test_app_with_channels().await;
+    // This cursor invariant compares footers whose passive hints return after editing.
+    crate::chatwidget::tests::helpers::set_passive_hints(
+        &mut app.chat_widget,
+        codex_config::types::PassiveHints::Auto,
+    );
     let mut server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     tui.set_owned_screen(/*owned*/ true)?;

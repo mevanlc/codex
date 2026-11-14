@@ -2,6 +2,24 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
+async fn passive_hints_once_stays_hidden_when_the_app_replaces_the_conversation() -> Result<()> {
+    let (mut app, _events, _ops) = make_test_app_with_channels().await;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    assert_eq!(
+        app.local_settings.tui.fork.passive_hints,
+        codex_config::types::PassiveHints::Once
+    );
+    assert!(render_bottom_popup(&app.chat_widget, 96).contains("? for shortcuts"));
+    app.chat_widget
+        .restore_user_message_to_composer("draft".into());
+    assert!(!render_bottom_popup(&app.chat_widget, 96).contains("? for shortcuts"));
+    let init = app.chatwidget_init_for_forked_or_resumed_thread(&mut tui, app.config.clone(), None);
+    app.replace_chat_widget(ChatWidget::new_with_app_event(init));
+    assert!(!render_bottom_popup(&app.chat_widget, 96).contains("? for shortcuts"));
+    Ok(())
+}
+
+#[tokio::test]
 async fn agents_navigation_opens_the_command_center_on_every_target() -> Result<()> {
     let endpoint = crate::RemoteAppServerEndpoint::UnixSocket {
         socket_path: AbsolutePathBuf::relative_to_current_dir("codex.sock")?,

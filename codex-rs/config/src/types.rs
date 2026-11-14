@@ -5,6 +5,7 @@
 
 pub use crate::fork_tui::ChatboxPlaceholderTips;
 pub use crate::fork_tui::ForkTuiOptions;
+pub use crate::fork_tui::PassiveHints;
 pub use crate::mcp_ema::McpEmaAuthScope;
 pub use crate::mcp_ema::McpEnterpriseManagedAuthConfig;
 pub use crate::mcp_ema::McpServerIdpOAuthConfig;

@@ -26,6 +26,7 @@ fn overlay_rejects_non_fork_fields_and_invalid_values() {
         "model = 'x'",
         "[tui]\ntheme = 'nord'",
         "[tui]\nprimary_accent = false",
+        "[tui]\npassive_hints = 'invalid'",
         "[tui.keymap.global]\ncopy = 'ctrl-g'",
         "[tui.keymap.global]\nopen_external_editor_with_quote = 'invalid-key'",
     ] {
@@ -45,4 +46,21 @@ fn overlay_rejects_non_fork_fields_and_invalid_values() {
         )
     );
     assert_eq!(ConfigFileKind::ForkOverlay.validate(&value), Ok(()));
+}
+
+#[test]
+fn passive_hint_modes_belong_to_the_overlay() {
+    assert_eq!(
+        crate::types::PassiveHints::default(),
+        crate::types::PassiveHints::Once
+    );
+    for mode in ["never", "once", "auto", "always"] {
+        let value = toml::from_str(&format!("tui.passive_hints = '{mode}'")).unwrap();
+        assert_eq!(ConfigFileKind::ForkOverlay.validate(&value), Ok(()));
+        assert!(ConfigFileKind::Shared.validate(&value).is_err());
+        assert_eq!(
+            ConfigFileKind::for_edit(&["tui".into(), "passive_hints".into()], None),
+            Ok(ConfigFileKind::ForkOverlay),
+        );
+    }
 }

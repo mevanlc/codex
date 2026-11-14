@@ -312,10 +312,10 @@ impl super::ChatComposer {
         buf: &mut Buffer,
         footer: &TranscriptFooter,
         warning_area: Option<Rect>,
-    ) {
+    ) -> bool {
         let hint_area = warning_notice::before_warning(hint_area, warning_area);
         if hint_area.is_empty() {
-            return;
+            return false;
         }
         let mut text = footer.text.clone();
         text.lines.truncate(usize::from(hint_area.height));
@@ -326,10 +326,10 @@ impl super::ChatComposer {
         {
             *line = flash.line.clone();
         }
+        let mut navigation_visible = false;
         if !footer.is_interactive
             && !self.footer.flash_visible()
-            && self.footer_mode() == FooterMode::ComposerEmpty
-            && !self.is_in_paste_burst()
+            && self.show_passive_navigation_hints()
             && let Some(key) = self.footer.toggle_shortcuts_key
             && let Some(line) = text.lines.last_mut()
         {
@@ -341,6 +341,7 @@ impl super::ChatComposer {
             shortcuts.push_span(" shortcuts".set_style(secondary_text_style()));
             if line.width() + shortcuts.width() <= usize::from(hint_area.width) {
                 line.extend(shortcuts.spans);
+                navigation_visible = true;
             }
         }
         if self.footer.status_line_enabled
@@ -355,6 +356,7 @@ impl super::ChatComposer {
             mode.right_aligned().render(bottom_row, buf);
         }
         Paragraph::new(text).render(hint_area, buf);
+        navigation_visible
     }
 
     pub(crate) fn footer_flash_delay(&self) -> Option<Duration> {
@@ -375,6 +377,8 @@ pub(super) struct FooterState {
     pub(super) esc_backtrack_hint: bool,
     pub(super) use_shift_enter_hint: bool,
     pub(super) mode: FooterMode,
+    pub(super) passive_hints_mode: codex_config::types::PassiveHints,
+    pub(super) passive_hints_once: std::rc::Rc<std::cell::Cell<super::passive_hints::OnceState>>,
     pub(super) hint_override: Option<Vec<(String, String)>>,
     pub(super) flash: Option<FooterFlash>,
     pub(super) context_window_percent: Option<i64>,

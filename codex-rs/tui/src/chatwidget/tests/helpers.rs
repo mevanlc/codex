@@ -278,6 +278,11 @@ pub(crate) fn set_active_cell(chat: &mut ChatWidget, cell: Box<dyn HistoryCell>)
     chat.transcript.active_cell = Some(cell);
 }
 
+pub(crate) fn set_passive_hints(chat: &mut ChatWidget, mode: codex_config::types::PassiveHints) {
+    chat.local_settings.tui.fork.passive_hints = mode;
+    chat.bottom_pane.set_passive_hints(mode);
+}
+
 // ChatWidget may emit other `Op`s (e.g. history/logging updates) on the same channel; this helper
 // filters until we see a submission op.
 pub(super) fn next_submit_op(op_rx: &mut tokio::sync::mpsc::UnboundedReceiver<Op>) -> Op {

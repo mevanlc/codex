@@ -4114,6 +4114,15 @@
       },
       "type": "object"
     },
+    "PassiveHints": {
+      "enum": [
+        "never",
+        "once",
+        "auto",
+        "always"
+      ],
+      "type": "string"
+    },
     "PermissionProfileToml": {
       "additionalProperties": false,
       "properties": {

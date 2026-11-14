@@ -4,13 +4,17 @@
 //! In two rows, navigation and modes stay above actions and the remaining indicators.
 //! Shorten or drop labels in collapse order. If a row still overflows, refill it
 //! in interaction priority order, then paint the surviving labels in reading order.
+//! The overlay policy controls only the agents/shortcuts labels. `once` observes
+//! actual painting, not measurement, and shares its lifetime across thread switches.
 
 use super::*;
 use crate::bottom_pane::footer::goal_status_indicator_line;
 use crate::bottom_pane::footer::mode_indicator_line;
 use crate::line_truncation::line_width;
 use crate::style::secondary_text_style;
+use codex_config::types::PassiveHints;
 use ratatui::style::Styled;
+use std::rc::Rc;
 
 // Declaration order is the reading order within each side.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -31,6 +35,52 @@ enum Kind {
 }
 
 use Kind::*;
+
+#[derive(Clone, Copy, Default)]
+pub(super) enum OnceState {
+    #[default]
+    Pending,
+    Visible,
+    Hidden,
+}
+
+impl ChatComposer {
+    pub(crate) fn set_passive_hints(&mut self, mode: PassiveHints) {
+        self.footer.passive_hints_mode = mode;
+    }
+
+    pub(crate) fn inherit_passive_hints(&mut self, previous: &Self) {
+        self.footer.passive_hints_once = Rc::clone(&previous.footer.passive_hints_once);
+    }
+
+    pub(super) fn show_passive_navigation_hints(&self) -> bool {
+        let show = match self.footer.passive_hints_mode {
+            PassiveHints::Never => false,
+            PassiveHints::Once => {
+                !matches!(self.footer.passive_hints_once.get(), OnceState::Hidden)
+            }
+            PassiveHints::Auto | PassiveHints::Always => true,
+        };
+        show && (self.footer_mode() == FooterMode::ComposerEmpty
+            || (self.footer.passive_hints_mode == PassiveHints::Always
+                && self.footer_mode() == FooterMode::ComposerHasDraft))
+            && self.has_focus
+            && self.draft.input_enabled
+            && !self.popup_active()
+            && !self.is_in_paste_burst()
+    }
+
+    pub(super) fn observe_passive_navigation_hints(&self, visible: bool) {
+        if self.footer.passive_hints_mode == PassiveHints::Once {
+            let state = self.footer.passive_hints_once.get();
+            self.footer.passive_hints_once.set(match (state, visible) {
+                (OnceState::Pending, true) => OnceState::Visible,
+                (OnceState::Visible, false) => OnceState::Hidden,
+                _ => state,
+            });
+        }
+    }
+}
 
 impl Kind {
     fn is_input_mode(self) -> bool {
@@ -192,20 +242,22 @@ impl Hints {
         self.placement(two)
     }
 
-    pub(super) fn render(mut self, area: Rect, buf: &mut Buffer) -> Option<Rect> {
+    pub(super) fn render(mut self, area: Rect, buf: &mut Buffer) -> (Option<Rect>, bool) {
         if area.is_empty() {
-            return None;
+            return (None, false);
         }
         let two = area.height > 1;
         let rows = self.fit(usize::from(area.width), two);
         self.labels.sort_by_key(|label| label.kind);
         let mut cursors = rows.map(|row| [area.x, area.right() - row.right as u16]);
         let mut warning = None;
+        let mut navigation_visible = false;
         for label in self.labels {
             let Some((cells, line)) = label.selected.map(|i| &label.forms[i]) else {
                 continue;
             };
             let row = label.kind.row(two);
+            navigation_visible |= matches!(label.kind, Agents | Shortcuts);
             let x = &mut cursors[row][usize::from(!label.kind.left())];
             let y = area.y + row as u16;
             // Keep the meter's extra right inset when it is alone on its side and space permits.
@@ -228,7 +280,7 @@ impl Hints {
                 *x += 3;
             }
         }
-        warning
+        (warning, navigation_visible)
     }
 }
 
@@ -313,8 +365,10 @@ impl ChatComposer {
                 [Line::from(agent.clone().set_style(secondary_text_style()))],
             );
         }
-        if mode == FooterMode::ComposerEmpty && can_navigate && !self.is_in_paste_burst() {
-            if self.agents_navigation_available() {
+        if self.show_passive_navigation_hints() {
+            if self.agents_navigation_available_with_draft(
+                self.footer.passive_hints_mode == PassiveHints::Always,
+            ) {
                 hints.add(
                     Agents,
                     [shortcut(

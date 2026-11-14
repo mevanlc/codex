@@ -562,6 +562,15 @@ impl BottomPane {
         self.request_redraw();
     }
 
+    pub(crate) fn set_passive_hints(&mut self, mode: codex_config::types::PassiveHints) {
+        self.composer.set_passive_hints(mode);
+        self.request_redraw();
+    }
+
+    pub(crate) fn inherit_passive_hints(&mut self, previous: &Self) {
+        self.composer.inherit_passive_hints(&previous.composer);
+    }
+
     pub fn set_file_mentions_allow_explicit_paths(&mut self, allow_explicit_paths: bool) {
         self.composer
             .set_file_mentions_allow_explicit_paths(allow_explicit_paths);

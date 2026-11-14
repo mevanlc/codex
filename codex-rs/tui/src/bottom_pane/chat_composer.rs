@@ -18,6 +18,9 @@
 //! Owned transcripts keep persistent status below the composer and hints on a separate final row.
 //! Shortcut help expands above the composer, with its close hint replacing the final shortcuts row
 //! so input and persistent status stay anchored when help opens or closes.
+//! Fork overlay `tui.passive_hints` controls agents/shortcuts discoverability. The main chat
+//! defaults to showing them once per CLI launch, until their first rendered disappearance;
+//! thread replacement retains that dismissal. `always` also keeps them visible while typing.
 //! Escape dismisses visible shortcut help before editing, transcript backtracking, or interruption.
 //! Fullscreen limits the composer height; wheel browsing preserves the caret until editor input.
 //! Transcript interactions borrow the hint footer through `ComposerRenderOptions`;
@@ -802,6 +805,9 @@ impl ChatComposer {
                 esc_backtrack_hint: false,
                 use_shift_enter_hint,
                 mode: FooterMode::ComposerEmpty,
+                // Embedded editors retain their existing behavior; main chat applies the overlay.
+                passive_hints_mode: codex_config::types::PassiveHints::Auto,
+                passive_hints_once: Default::default(),
                 hint_override: None,
                 flash: None,
                 context_window_percent: None,
@@ -4849,14 +4855,16 @@ impl ChatComposer {
         };
         let warning_area = warning_notice.as_ref().map(|(area, _)| *area);
         let mut painted_warning = warning_area;
+        let mut navigation_visible = false;
         match (options.footer, passive) {
             _ if options.unfocused => {}
             (_, Some(hints)) => {
                 let hint_area = passive_hints::hint_area(footer_rect);
-                painted_warning = hints.render(hint_area, buf);
+                (painted_warning, navigation_visible) = hints.render(hint_area, buf);
             }
             (Some(footer), None) => {
-                self.render_transcript_footer(transcript_hint_area, buf, footer, warning_area);
+                navigation_visible =
+                    self.render_transcript_footer(transcript_hint_area, buf, footer, warning_area);
             }
             (None, None) if self.shortcuts_above_composer(options) => {
                 let props = self.hint_footer_props();
@@ -4959,6 +4967,9 @@ impl ChatComposer {
                     }
                 }
             }
+        }
+        if !options.unfocused && !options.is_dialog_backdrop {
+            self.observe_passive_navigation_hints(navigation_visible);
         }
         self.footer.warning_notice_area.set(painted_warning);
         if let Some((warning_area, line)) = warning_notice {

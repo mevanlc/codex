@@ -338,6 +338,9 @@ impl ChatWidget {
             .set_voice_command_enabled(/*enabled*/ false);
         widget.sync_mentions_v2_enabled();
         widget.sync_file_mention_settings();
+        widget
+            .bottom_pane
+            .set_passive_hints(widget.local_settings.tui.fork.passive_hints);
         widget.update_collaboration_mode_indicator();
 
         widget

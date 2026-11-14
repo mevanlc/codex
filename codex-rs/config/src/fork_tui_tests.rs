@@ -22,6 +22,7 @@ fn fork_options_round_trip_alongside_upstream_tui_fields() {
     let source = r##"
 [tui]
 chatbox_placeholder_tips = "off"
+passive_hints = "always"
 file_mentions_preserve_at = true
 file_mentions_allow_explicit_paths = false
 primary_accent = "#00AAFF"
@@ -33,6 +34,7 @@ theme = "dracula"
     let tui = parsed.tui.unwrap();
     let expected = ForkTuiOptions {
         chatbox_placeholder_tips: ChatboxPlaceholderTips::Off,
+        passive_hints: PassiveHints::Always,
         file_mentions_preserve_at: true,
         file_mentions_allow_explicit_paths: false,
         primary_accent: Some("#00AAFF".to_string()),
@@ -83,6 +85,7 @@ file_mentions_allow_explicit_paths = false
         (
             ForkTuiOptions {
                 chatbox_placeholder_tips: ChatboxPlaceholderTips::Off,
+                passive_hints: PassiveHints::Once,
                 file_mentions_preserve_at: false,
                 file_mentions_allow_explicit_paths: false,
                 primary_accent: Some("#00AAFF".to_string()),

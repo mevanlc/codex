@@ -15,12 +15,17 @@ impl ChatComposer {
     }
 
     pub(super) fn agents_navigation_available(&self) -> bool {
+        self.agents_navigation_available_with_draft(false)
+    }
+
+    /// `always` may retain the navigation hint while typing; the key still edits the draft.
+    pub(super) fn agents_navigation_available_with_draft(&self, allow_draft: bool) -> bool {
         self.command_center_enabled
             && self.agents_navigation_key_available()
             && self.has_focus
             && self.draft.input_enabled
             && self.slash_commands_enabled()
-            && self.is_empty()
+            && (allow_draft || self.is_empty())
             && !self.is_in_paste_burst()
             && !self.popup_active()
             && !self.draft.textarea.is_vim_operator_pending()

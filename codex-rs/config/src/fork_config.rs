@@ -10,6 +10,7 @@ pub const CONFIG_OVERLAY_FILE: &str = "config-overlay.toml";
 pub(crate) const FORK_CONFIG_PATHS: &[&[&str]] = &[
     &["tui", "primary_accent"],
     &["tui", "chatbox_placeholder_tips"],
+    &["tui", "passive_hints"],
     &["tui", "file_mentions_preserve_at"],
     &["tui", "file_mentions_allow_explicit_paths"],
     &["tui", "keymap", "global", "open_external_editor_with_quote"],

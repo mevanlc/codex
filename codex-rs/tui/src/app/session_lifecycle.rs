@@ -546,6 +546,7 @@ impl App {
     /// replacement widget so that replayed collab items render agent names immediately.
     pub(super) fn replace_chat_widget(&mut self, mut chat_widget: ChatWidget) {
         chat_widget.inherit_view_transition_key_guard(&mut self.chat_widget);
+        chat_widget.inherit_passive_hints(&self.chat_widget);
         chat_widget.fork_in_progress = self.chat_widget.fork_in_progress;
         self.pending_right_click_paste = None;
         self.config_notification_test_pending = None;
