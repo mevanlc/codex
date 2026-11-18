@@ -1,6 +1,6 @@
 ---
 source: tui/src/app/owned_transcript_follow_tests.rs
-expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
+expression: "crate::chatwidget::tests::helpers::normalize_working_snapshot(snapshots.join(\"\\n\\n\"))"
 ---
 80 columns, 12 rows
 transcript row 37
@@ -49,8 +49,8 @@ row 39
   e
 
   GPT-
-  5.6-
-  Sol…
+  5.6…
+
 
 80 columns, 6 rows
 • Working (0s • esc to interrupt)

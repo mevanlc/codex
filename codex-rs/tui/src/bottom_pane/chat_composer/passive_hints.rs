@@ -1,8 +1,6 @@
 //! Fit whole composer hints with navigation and actions on the left and indicators on the right.
-//! Request a second row only when a compact input mode (Shell, Vim, Plan) and a
-//! current action (queue or active side conversation) fit separately but not together.
-//! In two rows, navigation and modes stay above actions and the remaining indicators.
-//! Shorten or drop labels in collapse order. If a row still overflows, refill it
+//! Routine hints share one permanently reserved row, even when no labels are visible.
+//! Shorten or drop labels in collapse order. If the row still overflows, refill it
 //! in interaction priority order, then paint the surviving labels in reading order.
 //! The overlay policy controls only the agents/shortcuts labels. `once` observes
 //! actual painting, not measurement, and shares its lifetime across thread switches.
@@ -147,30 +145,6 @@ impl Hints {
                 selected: Some(0),
             });
         }
-    }
-
-    pub(super) fn desired_rows(&self, width: u16) -> u16 {
-        let width = usize::from(width);
-        let mut compact = Row::default();
-        let mut any_fits = false;
-        for label in &self.labels {
-            let Some(&(cells, _)) = label.forms.last() else {
-                continue;
-            };
-            any_fits |= cells <= width;
-            let group = if label.kind.is_input_mode() {
-                &mut compact.right
-            } else if matches!(label.kind, Action | Side) {
-                &mut compact.left
-            } else {
-                continue;
-            };
-            let next = joined_width(*group, cells);
-            if next <= width {
-                *group = next;
-            }
-        }
-        u16::from(any_fits) + u16::from(compact.width() > width)
     }
 
     fn placement(&self, two_rows: bool) -> [Row; 2] {

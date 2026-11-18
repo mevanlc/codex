@@ -1,6 +1,5 @@
 ---
 source: tui/src/startup_draft_tests.rs
-assertion_line: 144
 expression: "snapshots.join(\"\\n---\\n\")"
 ---
 empty (48 columns):
@@ -41,6 +40,7 @@ forking (48 columns):
 
 › draft while loading
 
+
 ---
 multiline (48 columns):
 
@@ -50,6 +50,7 @@ multiline (48 columns):
 
 › first startup line
   second startup line
+
 
 ---
 narrow (18 columns):

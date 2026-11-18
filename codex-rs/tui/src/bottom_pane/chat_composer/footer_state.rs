@@ -11,10 +11,10 @@
 //! Only the two base composer modes opt into fresh-thread decoration; queries and help do not.
 //! Shortcut help occupies the space above the composer and keeps its close hint on the final row.
 //! Passive transcript hints retain the shortcuts entry when it fits beside the complete hint.
+//! Routine hints reserve one row even when empty; explicit transcript interactions may use more.
 
 use std::time::Instant;
 
-use super::super::footer::footer_height;
 use super::super::footer::reset_mode_after_activity;
 use super::ActivePopup;
 use super::warning_notice;
@@ -285,25 +285,27 @@ impl super::ChatComposer {
         self.shortcut_overlay_visible() && options.footer.is_none()
     }
 
-    pub(super) fn footer_hint_height(&self, width: u16, options: ComposerRenderOptions<'_>) -> u16 {
+    pub(super) fn footer_hint_height(
+        &self,
+        _width: u16,
+        options: ComposerRenderOptions<'_>,
+    ) -> u16 {
         if options.is_dialog_backdrop {
+            return 0;
+        }
+        // Embedded editors and views that supply their own controls explicitly suppress this row.
+        if self.custom_footer_height() == Some(0) {
             return 0;
         }
         // The inactive pane keeps its bottom hints row blank.
         if options.unfocused || self.shortcuts_above_composer(options) {
             return 1;
         }
-        if let Some(hints) = self.passive_hints(options) {
-            return hints
-                .desired_rows(super::passive_hints::hint_area(Rect::new(0, 0, width, 1)).width);
-        }
-        options.footer.map_or_else(
-            || {
-                self.custom_footer_height()
-                    .unwrap_or_else(|| footer_height(&self.hint_footer_props(), width))
-            },
-            |footer| footer.text.height().try_into().unwrap_or(u16::MAX),
-        )
+        // Changing routine hint content must not move the composer or status line.
+        // Only an explicit transcript footer can request additional rows.
+        options.footer.map_or(1, |footer| {
+            footer.text.height().try_into().unwrap_or(u16::MAX).max(1)
+        })
     }
 
     pub(super) fn render_transcript_footer(
