@@ -1,8 +1,14 @@
 use std::collections::BTreeMap;
+use std::collections::HashSet;
+use std::fmt::Display;
+use std::str::FromStr;
+use strum::IntoEnumIterator;
 
-use super::footer_content::FooterContent;
+use crate::terminal_hyperlinks::HyperlinkLine;
 use codex_protocol::ThreadId;
 
+use super::multi_select_picker::MultiSelectItem;
+use super::multi_select_picker::MultiSelectState;
 use super::status_line_from_segments;
 use super::status_line_setup::StatusLineItem;
 
@@ -246,15 +252,59 @@ impl StatusSurfacePreviewData {
             .unwrap_or_else(|| fallback.to_string())
     }
 
-    pub(crate) fn rate_limit_item_description(
+    /// Builds configured-first rows, with full and brief forms sharing a row.
+    pub(crate) fn picker_items<T>(
         &self,
-        item: StatusSurfacePreviewItem,
-        fallback: &str,
-    ) -> String {
-        self.live_value_for(item)
-            .and_then(rate_limit_preview_copy)
-            .map(|copy| copy.description.to_string())
-            .unwrap_or_else(|| fallback.to_string())
+        configured: Option<&[String]>,
+        forms: impl Fn(T) -> (T, Option<T>),
+        description: impl Fn(T) -> &'static str,
+        preview_item: impl Fn(T) -> Option<StatusSurfacePreviewItem>,
+    ) -> Vec<MultiSelectItem>
+    where
+        T: Copy + Display + FromStr + IntoEnumIterator + PartialEq,
+    {
+        let selected = configured
+            .into_iter()
+            .flatten()
+            .filter_map(|id| id.parse::<T>().ok());
+        let mut seen = HashSet::new();
+        selected
+            .map(|item| (item, true))
+            .chain(T::iter().map(|item| (item, false)))
+            .filter_map(|(item, enabled)| {
+                let (full, brief) = forms(item);
+                let id = full.to_string();
+                if !seen.insert(id.clone()) {
+                    return None;
+                }
+                let copy = preview_item(full)
+                    .filter(|item| {
+                        matches!(
+                            item,
+                            StatusSurfacePreviewItem::FiveHourLimit
+                                | StatusSurfacePreviewItem::WeeklyLimit
+                        )
+                    })
+                    .and_then(|item| self.live_value_for(item))
+                    .and_then(rate_limit_preview_copy);
+                let (name, description) = copy.map_or_else(
+                    || (id.clone(), description(full).to_string()),
+                    |copy| (copy.name.to_string(), copy.description.to_string()),
+                );
+                Some(MultiSelectItem {
+                    id,
+                    name,
+                    description: Some(description),
+                    state: if enabled && brief == Some(item) {
+                        MultiSelectState::Brief
+                    } else {
+                        enabled.into()
+                    },
+                    brief_id: brief.map(|item| item.to_string()),
+                    ..Default::default()
+                })
+            })
+            .collect()
     }
 
     pub(crate) fn value_for(&self, item: StatusSurfacePreviewItem) -> Option<&str> {
@@ -272,7 +322,7 @@ impl StatusSurfacePreviewData {
         &self,
         items: I,
         use_theme_colors: bool,
-    ) -> Option<FooterContent>
+    ) -> Option<HyperlinkLine>
     where
         I: IntoIterator<Item = StatusLineItem>,
     {
@@ -287,7 +337,6 @@ impl StatusSurfacePreviewData {
             self.live_value_for(StatusSurfacePreviewItem::PullRequestNumber)
                 .and(self.pull_request_url.as_deref()),
         )
-        .map(FooterContent::HyperlinkLine)
     }
 }
 

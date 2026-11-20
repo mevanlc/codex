@@ -12,8 +12,10 @@ use ignore::WalkState;
 use ignore::overrides::Override;
 use nucleo::Injector;
 use nucleo::Utf32String;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 
 #[cfg(test)]
@@ -79,8 +81,11 @@ fn run_phased_walk<'a>(
 fn build_walker(config: WalkConfig<'_>, phase: WalkPhase) -> Option<WalkParallel> {
     let (first_root, additional_roots) = config.search_directories.split_first()?;
     let mut builder = WalkBuilder::new(first_root);
+    let mut walk_roots = HashSet::from([first_root.as_path()]);
     for root in additional_roots {
-        builder.add(root);
+        if walk_roots.insert(root.as_path()) {
+            builder.add(root);
+        }
     }
     builder
         .threads(config.threads)
@@ -118,6 +123,19 @@ pub(super) fn worker(
     };
     let cancelled = inner.cancelled.clone();
     let shutdown = inner.shutdown.clone();
+    let roots = config.search_directories;
+    let walk_roots: HashSet<_> = roots.iter().map(PathBuf::as_path).collect();
+    // Both walks can expose different entries under a nested root. Share the
+    // paths already indexed across phases to avoid reporting those entries twice.
+    let seen_paths: Vec<_> = roots
+        .iter()
+        .map(|root| {
+            root.ancestors()
+                .skip(1)
+                .any(|parent| walk_roots.contains(parent))
+                .then(|| Mutex::new(HashSet::new()))
+        })
+        .collect();
 
     run_phased_walk(
         config,
@@ -125,7 +143,7 @@ pub(super) fn worker(
         || {
             const CHECK_INTERVAL: usize = 1024;
             let mut n = 0;
-            let search_directories = inner.search_directories.clone();
+            let seen_paths = &seen_paths;
             let injector = injector.clone();
             let cancelled = inner.cancelled.clone();
             let shutdown = inner.shutdown.clone();
@@ -139,7 +157,13 @@ pub(super) fn worker(
                 if path.to_str().is_none() {
                     return WalkState::Continue;
                 }
-                if let Some((root_idx, relative_path)) = get_file_path(path, &search_directories) {
+                if let Some((root_idx, relative_path)) = get_file_path(path, roots)
+                    && seen_paths[root_idx].as_ref().is_none_or(|seen| {
+                        seen.lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .insert(PathBuf::from(relative_path))
+                    })
+                {
                     let match_type = match entry.file_type() {
                         Some(file_type) if file_type.is_dir() => MatchType::Directory,
                         _ => MatchType::File,

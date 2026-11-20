@@ -362,7 +362,7 @@ The script stamps a version derived from the newest `rust-v*` tag reachable from
 
 This fork also raises `[profile.release]` to `opt-level = 3` with fat LTO.
 Android builds require Rust 1.98 or newer for working `File::lock` and
-`File::try_lock`; this checkout pins Rust 1.98.0.
+`File::try_lock`; this checkout pins Rust 1.99.1.
 
 ## Status
 

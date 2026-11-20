@@ -60,4 +60,5 @@ same-file = { workspace = true }
 
 [dev-dependencies]
 codex-utils-absolute-path = { workspace = true }
+codex-utils-cargo-bin = { workspace = true }
 pretty_assertions = { workspace = true }

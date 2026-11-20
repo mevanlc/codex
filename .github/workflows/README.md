@@ -16,8 +16,8 @@ The workflows in this directory are split so that pull requests get fast, review
 
 ## Post-Merge On `main`
 
-- `bazel.yml` also runs on pushes to `main`.
-  This re-verifies the merged Bazel path and helps keep the BuildBuddy caches warm.
+- `blocking-ci.yml` calls `bazel.yml` on pushes to `main`.
+  This re-verifies the merged Bazel path and populates the GCS cache when configured.
 - `rust-ci-full.yml` is the full Cargo-native verification workflow.
   It keeps the heavier checks off the PR path while still validating them after merge:
   - the full Cargo `clippy` matrix

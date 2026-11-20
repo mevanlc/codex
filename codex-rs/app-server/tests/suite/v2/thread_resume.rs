@@ -175,6 +175,60 @@ const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 #[tokio::test]
+async fn independent_cold_resumes_overlap() -> Result<()> {
+    let responses = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    mock_responses_config(&responses.uri()).write(codex_home.path())?;
+    let make_rollout = |preview| {
+        create_fake_rollout(
+            codex_home.path(),
+            "2025-01-05T12-00-00",
+            "2025-01-05T12:00:00Z",
+            preview,
+            Some("mock_provider"),
+            /*git_info*/ None,
+        )
+    };
+    let slow = make_rollout("slow")?;
+    let quick = make_rollout("quick")?;
+    let mut client = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let url = format!("http://{}/mcp", listener.local_addr()?);
+    let slow_id = client
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: slow,
+            config: Some(std::collections::HashMap::from([(
+                "mcp_servers.blocked".to_string(),
+                json!({"url": url, "required": true, "startup_timeout_sec": 30}),
+            )])),
+            exclude_turns: true,
+            ..Default::default()
+        })
+        .await?;
+    let (blocked, _) = timeout(DEFAULT_READ_TIMEOUT, listener.accept()).await??;
+    let quick_id = client
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: quick.clone(),
+            exclude_turns: true,
+            ..Default::default()
+        })
+        .await?;
+    let response: ThreadResumeResponse =
+        timeout(DEFAULT_READ_TIMEOUT, client.read_response(quick_id)).await??;
+    assert_eq!(response.thread.id, quick);
+    drop((blocked, listener));
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        client.read_stream_until_error_message(RequestId::Integer(slow_id)),
+    )
+    .await??;
+    Ok(())
+}
+
+#[tokio::test]
 async fn thread_resume_paginated_model_context_preserves_original_metadata() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
@@ -3099,6 +3153,7 @@ fn append_resume_redaction_history(
             call_id: "mcp-1".to_string(),
             invocation: McpInvocation {
                 server: "docs".to_string(),
+                environment_id: None,
                 tool: "lookup".to_string(),
                 arguments: Some(json!({"secret":"argument"})),
             },
@@ -4424,8 +4479,10 @@ async fn assert_cold_paginated_resume_restores_usage(
                 compaction_response_id: None,
                 latest_token_usage_record: None,
                 resume_metadata: Some(CompactionResumeMetadata {
+                    next_item_ordinal: None,
                     dynamic_tools: None,
                     rejected_audio_file_ids: Default::default(),
+                    observation_clock_floor_ms: None,
                     turn_attribution: None,
                     multi_agent_version: None,
                     last_started_turn_id: matches!(
