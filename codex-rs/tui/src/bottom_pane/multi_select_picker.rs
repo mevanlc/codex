@@ -24,29 +24,23 @@
 //!     MultiSelectItem {
 //!         id: "a".into(),
 //!         name: "Item A".into(),
-//!         description: None,
 //!         state: MultiSelectState::On,
-//!         brief_id: None,
-//!         orderable: true,
-//!         section_break_after: false,
+//!         ..Default::default()
 //!     },
 //!     MultiSelectItem {
 //!         id: "b".into(),
 //!         name: "Item B".into(),
-//!         description: None,
-//!         state: MultiSelectState::Off,
-//!         brief_id: None,
-//!         orderable: true,
-//!         section_break_after: false,
+//!         ..Default::default()
 //!     },
 //! ])
-//! .on_confirm(|selected_ids, tx| { /* handle confirmation */ })
+//! .on_confirm(|items, tx| { /* handle confirmation */ })
 //! .build();
 //! ```
 
 use codex_utils_fuzzy_match::fuzzy_match;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
@@ -101,13 +95,8 @@ enum Direction {
     Down,
 }
 
-/// Callback invoked when any item's state changes (toggled or reordered).
-/// Receives the full list of items and the event sender.
-pub type ChangeCallBack = Box<dyn Fn(&[MultiSelectItem], &AppEventSender) + Send + Sync>;
-
-/// Callback invoked when the user confirms their selection (presses Enter).
-/// Receives a list of IDs for all enabled items.
-pub type ConfirmCallback = Box<dyn Fn(&[String], &AppEventSender) + Send + Sync>;
+/// Receives all rows, including disabled ones, when they change or are confirmed.
+type ItemsCallback = Box<dyn Fn(&[MultiSelectItem], &AppEventSender) + Send + Sync>;
 
 /// Callback invoked when the user cancels the picker (presses Escape).
 pub type CancelCallback = Box<dyn Fn(&AppEventSender) + Send + Sync>;
@@ -153,6 +142,9 @@ pub(crate) struct MultiSelectItem {
     /// Optional ID selected by the third, brief state.
     pub brief_id: Option<String>,
 
+    /// Whether this row is marked truncatable. `None` hides the second checkbox.
+    pub truncatable: Option<bool>,
+
     /// Whether this item can be moved when ordering is enabled.
     pub orderable: bool,
 
@@ -170,6 +162,7 @@ impl Default for MultiSelectItem {
             description: None,
             state: MultiSelectState::Off,
             brief_id: None,
+            truncatable: None,
             orderable: true,
             section_break_after: false,
             on_activate: None,
@@ -249,6 +242,8 @@ pub(crate) struct MultiSelectPicker {
     /// Shared list keybindings for navigation and completion.
     keymap: ListKeymap,
 
+    truncation_shortcut: Option<KeyBinding>,
+
     /// Optional callback to generate a preview line from current item states.
     preview_builder: Option<PreviewCallback>,
 
@@ -256,10 +251,10 @@ pub(crate) struct MultiSelectPicker {
     preview_line: Option<StatusLine>,
 
     /// Callback invoked when items change (toggle or reorder).
-    on_change: Option<ChangeCallBack>,
+    on_change: Option<ItemsCallback>,
 
     /// Callback invoked when the user confirms their selection.
-    on_confirm: Option<ConfirmCallback>,
+    on_confirm: Option<ItemsCallback>,
 
     /// Callback invoked when the user cancels the picker.
     on_cancel: Option<CancelCallback>,
@@ -387,8 +382,13 @@ impl MultiSelectPicker {
                     MultiSelectState::On => 'x',
                     MultiSelectState::Brief => 'b',
                 };
+                let truncation_marker = match item.truncatable {
+                    Some(true) => "[t]",
+                    Some(false) => "[ ]",
+                    None => "",
+                };
                 let item_name = truncate_text(&item.name, ITEM_NAME_TRUNCATE_LEN);
-                format!("{prefix} [{marker}] {item_name}")
+                format!("{prefix} [{marker}]{truncation_marker} {item_name}")
             };
             rows.push(GenericDisplayRow {
                 name,
@@ -423,24 +423,34 @@ impl MultiSelectPicker {
         }
     }
 
-    /// Cycles the selected item through off/on, or off/on/brief when supported.
-    ///
-    /// Updates the preview line and invokes the `on_change` callback if set.
-    fn toggle_selected(&mut self) {
-        let Some(idx) = self.state.selected_idx else {
-            return;
-        };
-        let Some(actual_idx) = self.filtered_indices.get(idx).copied() else {
-            return;
-        };
-        let Some(item) = self.items.get_mut(actual_idx) else {
-            return;
-        };
+    fn selected_item_mut(&mut self) -> Option<&mut MultiSelectItem> {
+        let index = self.filtered_indices.get(self.state.selected_idx?)?;
+        self.items.get_mut(*index)
+    }
 
+    /// Cycles the selected item through off/on, or off/on/brief when supported.
+    fn toggle_selected(&mut self) {
+        let Some(item) = self.selected_item_mut() else {
+            return;
+        };
         if item.on_activate.is_some() {
             return;
         }
         item.cycle();
+        self.items_changed();
+    }
+
+    fn toggle_truncatable(&mut self) {
+        if let Some(marked) = self
+            .selected_item_mut()
+            .and_then(|item| item.truncatable.as_mut())
+        {
+            *marked = !*marked;
+            self.items_changed();
+        }
+    }
+
+    fn items_changed(&mut self) {
         self.update_preview_line();
         if let Some(on_change) = &self.on_change {
             on_change(&self.items, &self.app_event_tx);
@@ -449,8 +459,7 @@ impl MultiSelectPicker {
 
     /// Confirms the current selection and closes the picker.
     ///
-    /// Collects the IDs of all enabled items and passes them to the
-    /// `on_confirm` callback. Does nothing if already complete.
+    /// Passes all rows to the `on_confirm` callback. Does nothing if already complete.
     fn confirm_selection(&mut self, activation_key: KeyBinding) {
         if let Some(action) = self
             .state
@@ -470,13 +479,7 @@ impl MultiSelectPicker {
         self.complete = true;
 
         if let Some(on_confirm) = &self.on_confirm {
-            let selected_ids: Vec<String> = self
-                .items
-                .iter()
-                .filter_map(MultiSelectItem::selected_id)
-                .map(str::to_string)
-                .collect();
-            on_confirm(&selected_ids, &self.app_event_tx);
+            on_confirm(&self.items, &self.app_event_tx);
         }
     }
 
@@ -525,10 +528,7 @@ impl MultiSelectPicker {
         // move item in underlying list
         self.items.swap(actual_idx, new_idx);
 
-        self.update_preview_line();
-        if let Some(on_change) = &self.on_change {
-            on_change(&self.items, &self.app_event_tx);
-        }
+        self.items_changed();
 
         // rebuild filtered indices to keep search/filter consistent
         self.apply_filter();
@@ -595,6 +595,15 @@ impl BottomPaneView for MultiSelectPicker {
         key_event: KeyEvent,
         activation_key: Option<KeyBinding>,
     ) {
+        if self
+            .truncation_shortcut
+            .is_some_and(|key| key.is_press(key_event))
+        {
+            if key_event.kind == KeyEventKind::Press {
+                self.toggle_truncatable();
+            }
+            return;
+        }
         // Printable characters always feed search. Movement aliases such as
         // plain j/k only apply through non-text events or modified bindings.
         let allow_plain_char_navigation = !is_plain_text_key_event(key_event);
@@ -743,7 +752,7 @@ impl Renderable for MultiSelectPicker {
 ///     .items(items)
 ///     .enable_ordering()
 ///     .on_preview(|items| Some(Line::from("Preview")))
-///     .on_confirm(|ids, tx| { /* handle */ })
+///     .on_confirm(|items, tx| { /* handle */ })
 ///     .on_cancel(|tx| { /* handle */ })
 ///     .build();
 /// ```
@@ -757,9 +766,10 @@ pub(crate) struct MultiSelectPickerBuilder {
     accepts_input_when_disconnected: bool,
     app_event_tx: AppEventSender,
     keymap: ListKeymap,
+    truncation_shortcut: Option<KeyBinding>,
     preview_builder: Option<PreviewCallback>,
-    on_change: Option<ChangeCallBack>,
-    on_confirm: Option<ConfirmCallback>,
+    on_change: Option<ItemsCallback>,
+    on_confirm: Option<ItemsCallback>,
     on_cancel: Option<CancelCallback>,
 }
 
@@ -776,6 +786,7 @@ impl MultiSelectPickerBuilder {
             accepts_input_when_disconnected: false,
             app_event_tx,
             keymap: RuntimeKeymap::defaults().list,
+            truncation_shortcut: None,
             preview_builder: None,
             on_change: None,
             on_confirm: None,
@@ -805,6 +816,11 @@ impl MultiSelectPickerBuilder {
     /// Sets the shared list keymap used for navigation and completion.
     pub fn list_keymap(mut self, keymap: ListKeymap) -> Self {
         self.keymap = keymap;
+        self
+    }
+
+    pub fn truncation_shortcut(mut self, key: KeyBinding) -> Self {
+        self.truncation_shortcut = Some(key);
         self
     }
 
@@ -847,10 +863,10 @@ impl MultiSelectPickerBuilder {
 
     /// Sets a callback invoked when the user confirms their selection (Enter).
     ///
-    /// The callback receives a list of IDs for all enabled items.
+    /// The callback receives the full list of rows, including disabled ones.
     pub fn on_confirm<F>(mut self, callback: F) -> Self
     where
-        F: Fn(&[String], &AppEventSender) + Send + Sync + 'static,
+        F: Fn(&[MultiSelectItem], &AppEventSender) + Send + Sync + 'static,
     {
         self.on_confirm = Some(Box::new(callback));
         self
@@ -878,6 +894,9 @@ impl MultiSelectPickerBuilder {
 
         let instructions = if self.instructions.is_empty() {
             let mut spans = vec![key_hint::plain(KeyCode::Char(' ')).into(), " toggle".dim()];
+            if let Some(key) = self.truncation_shortcut {
+                spans.extend([" · ".dim(), key.into(), " toggle [t]".dim()]);
+            }
             if self.ordering_enabled
                 && let (Some(left), Some(right)) = (
                     self.keymap.primary_hint(ListAction::MoveLeft),
@@ -916,6 +935,7 @@ impl MultiSelectPickerBuilder {
             require_selection: self.require_selection,
             accepts_input_when_disconnected: self.accepts_input_when_disconnected,
             keymap: self.keymap,
+            truncation_shortcut: self.truncation_shortcut,
             search_query: String::new(),
             filtered_indices: Vec::new(),
             preview_builder: self.preview_builder,

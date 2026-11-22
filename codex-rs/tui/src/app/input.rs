@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::app_backtrack::SIDE_EDIT_PREVIOUS_UNAVAILABLE_MESSAGE;
+use crate::bottom_pane::StatusLineSetupView;
 use crate::keymap::KeymapContextSet;
 use crate::keymap::bindings_for_action;
 use crate::keymap::keymap_action_ids;
@@ -100,6 +101,15 @@ impl App {
         }
         if self.overlay.is_none() && self.chat_widget.handle_quick_dial_menu(key_event) {
             return None;
+        }
+        if self.overlay.is_none()
+            && self
+                .chat_widget
+                .active_view_is(StatusLineSetupView::VIEW_ID)
+            && StatusLineSetupView::TRUNCATION_KEY.is_press(key_event)
+        {
+            self.cancel_pending_key_chord();
+            return Some(key_event);
         }
         let contexts = self.key_chord_contexts(tui);
         let select_mode_chord = self.select_mode_owns_chord(tui, key_event);

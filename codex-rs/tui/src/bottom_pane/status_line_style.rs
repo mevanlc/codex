@@ -2,14 +2,15 @@
 
 use ratatui::style::Color;
 use ratatui::style::Style;
-use ratatui::style::Styled;
 use ratatui::text::Span;
+use std::collections::BTreeSet;
 
+use super::status_line::StatusLine;
+use super::status_line::StatusLineComponent;
 use super::status_line_setup::StatusLineItem;
 use crate::render::highlight::foreground_style_for_scopes;
 use crate::style::readable_color_on;
 use crate::style::secondary_text_style;
-use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_palette::StdoutColorLevel;
 use crate::terminal_palette::effective_stdout_color_level;
 use crate::thread_color::thread_color;
@@ -120,15 +121,17 @@ impl StatusLineAccent {
 
 pub(crate) fn status_line_from_segments<I>(
     segments: I,
+    truncatable: &BTreeSet<StatusLineItem>,
     use_theme_colors: bool,
     thread_id: Option<ThreadId>,
     pull_request_url: Option<&str>,
-) -> Option<HyperlinkLine>
+) -> Option<StatusLine>
 where
     I: IntoIterator<Item = (StatusLineItem, String)>,
 {
     status_line_from_segments_with_resolver(
         segments,
+        truncatable,
         use_theme_colors,
         thread_id,
         pull_request_url,
@@ -138,23 +141,20 @@ where
 
 fn status_line_from_segments_with_resolver<I, F>(
     segments: I,
+    truncatable: &BTreeSet<StatusLineItem>,
     use_theme_colors: bool,
     thread_id: Option<ThreadId>,
     pull_request_url: Option<&str>,
     theme_style_for_accent: F,
-) -> Option<HyperlinkLine>
+) -> Option<StatusLine>
 where
     I: IntoIterator<Item = (StatusLineItem, String)>,
     F: Fn(StatusLineAccent) -> Option<Style>,
 {
-    let mut line = HyperlinkLine::default();
+    let mut components = Vec::new();
     for (item, mut text) in segments {
         // Paragraph skips control characters, so they must not enter this single row's link offsets.
         text.retain(|ch| !ch.is_control());
-        if !line.line.spans.is_empty() {
-            line.line
-                .push_span(STATUS_LINE_SEPARATOR.set_style(secondary_text_style()));
-        }
         let style = if use_theme_colors
             && matches!(
                 item,
@@ -184,14 +184,19 @@ where
         } else {
             style
         };
-        if item == StatusLineItem::PullRequestNumber {
-            line.push_span(Span::styled(text, style.underlined()), pull_request_url);
+        let (style, destination) = if item == StatusLineItem::PullRequestNumber {
+            (style.underlined(), pull_request_url.map(str::to_owned))
         } else {
-            line.line.push_span(Span::styled(text, style));
-        }
+            (style, None)
+        };
+        components.push(StatusLineComponent {
+            span: Span::styled(text, style),
+            destination,
+            truncatable: truncatable.contains(&item.full_form()),
+        });
     }
 
-    (!line.line.spans.is_empty()).then_some(line)
+    StatusLine::from_components(components)
 }
 
 fn soften_status_line_style(mut style: Style) -> Style {
@@ -269,15 +274,16 @@ mod tests {
                 (StatusLineItem::CurrentDir, "/repo".to_string()),
                 (StatusLineItem::GitBranch, "main".to_string()),
             ],
+            /*truncatable*/ &BTreeSet::new(),
             /*use_theme_colors*/ true,
             /*thread_id*/ None,
             /*pull_request_url*/ None,
             |_| None,
         )
-        .expect("status line")
-        .line;
+        .expect("status line");
+        let line = &line.as_native().unwrap().line;
 
-        assert_eq!(line_text(&line), "gpt-5 · /repo · main");
+        assert_eq!(line_text(line), "gpt-5 · /repo · main");
         assert_eq!(line.spans[0].style.fg, Some(Color::Cyan));
         assert!(!line.spans[0].style.add_modifier.contains(Modifier::DIM));
         assert_eq!(line.spans[2].style.fg, Some(Color::Green));
@@ -293,6 +299,7 @@ mod tests {
                 (StatusLineItem::ModelName, "gpt-5".to_string()),
                 (StatusLineItem::ContextUsed, "Context 12% used".to_string()),
             ],
+            /*truncatable*/ &BTreeSet::new(),
             /*use_theme_colors*/ true,
             /*thread_id*/ None,
             /*pull_request_url*/ None,
@@ -301,8 +308,8 @@ mod tests {
                 _ => None,
             },
         )
-        .expect("status line")
-        .line;
+        .expect("status line");
+        let line = &line.as_native().unwrap().line;
 
         assert_eq!(line.spans[0].style.fg, Some(Color::Red));
         assert!(!line.spans[0].style.add_modifier.contains(Modifier::DIM));
@@ -318,15 +325,16 @@ mod tests {
                 (StatusLineItem::ThreadCredits, "5.2 credits".to_string()),
                 (StatusLineItem::EstimatedThreadCost, "~$0.21".to_string()),
             ],
+            /*truncatable*/ &BTreeSet::new(),
             /*use_theme_colors*/ true,
             /*thread_id*/ None,
             /*pull_request_url*/ None,
             |_| None,
         )
-        .expect("thread usage status line")
-        .line;
+        .expect("thread usage status line");
+        let line = &line.as_native().unwrap().line;
 
-        assert_eq!(line_text(&line), "5.2 credits · ~$0.21");
+        assert_eq!(line_text(line), "5.2 credits · ~$0.21");
         assert_eq!(line.spans[0].style, line.spans[2].style);
         assert_eq!(line.spans[1].style, secondary_text_style());
     }
@@ -341,13 +349,14 @@ mod tests {
         crate::terminal_palette::with_test_default_colors(colors, || {
             let line = status_line_from_segments_with_resolver(
                 [(StatusLineItem::ModelName, "gpt-5".to_string())],
+                /*truncatable*/ &BTreeSet::new(),
                 /*use_theme_colors*/ true,
                 /*thread_id*/ None,
                 /*pull_request_url*/ None,
                 |_| Some(Style::default().fg(Color::Rgb(255, 0, 0))),
             )
-            .expect("status line")
-            .line;
+            .expect("status line");
+            let line = &line.as_native().unwrap().line;
 
             assert_eq!(
                 line.spans[0].style.fg,
@@ -367,15 +376,16 @@ mod tests {
                 (StatusLineItem::ModelName, "gpt-5".to_string()),
                 (StatusLineItem::ContextUsed, "Context 12% used".to_string()),
             ],
+            /*truncatable*/ &BTreeSet::new(),
             /*use_theme_colors*/ false,
             /*thread_id*/ None,
             /*pull_request_url*/ None,
             |_| Some(Style::default().red()),
         )
-        .expect("status line")
-        .line;
+        .expect("status line");
+        let line = &line.as_native().unwrap().line;
 
-        assert_eq!(line_text(&line), "gpt-5 · Context 12% used");
+        assert_eq!(line_text(line), "gpt-5 · Context 12% used");
         assert_eq!(line.spans[0].style, secondary_text_style());
         assert_eq!(line.spans[1].style, secondary_text_style());
         assert_eq!(line.spans[2].style, secondary_text_style());
@@ -385,13 +395,14 @@ mod tests {
     fn pull_request_number_uses_link_style() {
         let line = status_line_from_segments_with_resolver(
             [(StatusLineItem::PullRequestNumber, "PR #20252".to_string())],
+            /*truncatable*/ &BTreeSet::new(),
             /*use_theme_colors*/ false,
             /*thread_id*/ None,
             /*pull_request_url*/ None,
             |_| None,
         )
-        .expect("status line")
-        .line;
+        .expect("status line");
+        let line = &line.as_native().unwrap().line;
 
         assert_eq!(line.spans[0].style, secondary_text_style().underlined());
     }
@@ -401,6 +412,7 @@ mod tests {
         assert_eq!(
             status_line_from_segments_with_resolver(
                 Vec::<(StatusLineItem, String)>::new(),
+                /*truncatable*/ &BTreeSet::new(),
                 /*use_theme_colors*/ true,
                 /*thread_id*/ None,
                 /*pull_request_url*/ None,
@@ -430,6 +442,7 @@ mod tests {
                         "Custom permissions".to_string(),
                     ),
                 ],
+                /*truncatable*/ &BTreeSet::new(),
                 /*use_theme_colors*/ true,
                 /*thread_id*/ None,
                 /*pull_request_url*/ None,
@@ -442,8 +455,8 @@ mod tests {
                     Some(Style::default().fg(crate::terminal_palette::rgb_color(rgb)))
                 },
             )
-            .expect("status line")
-            .line;
+            .expect("status line");
+            let line = &line.as_native().unwrap().line;
             let area = Rect::new(
                 /*x*/ 0, /*y*/ 0, /*width*/ 42, /*height*/ 1,
             );
@@ -492,12 +505,13 @@ mod tests {
                 (StatusLineItem::CurrentDir, "~/code".to_string()),
                 (StatusLineItem::UsedTokens, "12k tokens".to_string()),
             ],
+            /*truncatable*/ &BTreeSet::new(),
             /*use_theme_colors*/ true,
             /*thread_id*/ None,
             /*pull_request_url*/ None,
         )
-        .expect("status line")
-        .line;
+        .expect("status line");
+        let line = &line.as_native().unwrap().line;
         if level == "0" {
             assert_eq!(
                 line.spans

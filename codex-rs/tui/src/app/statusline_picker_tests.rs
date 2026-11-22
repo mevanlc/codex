@@ -5,6 +5,7 @@ use super::*;
 use crate::app::tests::make_test_app_with_channels;
 use crate::app::tests::test_thread_session;
 use crate::app_server_session::ThreadParamsMode;
+use crate::bottom_pane::StatusLineSetupView;
 use crate::chatwidget::tests::render_bottom_popup;
 use crate::statusline_metrics::tests::Collector;
 use crate::statusline_provider::test_support::advertised;
@@ -34,6 +35,87 @@ async fn picker() -> anyhow::Result<(
         ThreadParamsMode::Cloud,
     );
     Ok((app, owner, commands, events))
+}
+
+#[tokio::test]
+async fn statusline_ctrl_t_marks_disabled_items_and_round_trips_through_config()
+-> anyhow::Result<()> {
+    let (mut app, mut owner, _commands, mut events) = picker().await?;
+    let mut tui = make_test_tui()?;
+    app.chat_widget.statusline_feature_enabled = false;
+    let selected = vec!["model-with-reasoning-brief".to_string()];
+    app.chat_widget.local_settings.tui.status_line = Some(selected.clone());
+    app.chat_widget
+        .restore_user_message_to_composer("/statusline".into());
+    app.chat_widget.handle_key_event(KeyCode::Enter.into());
+    assert!(app.chat_widget.active_view_is(StatusLineSetupView::VIEW_ID));
+
+    let ctrl_t = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL);
+    let repeat = KeyEvent::new_with_kind(
+        KeyCode::Char('t'),
+        KeyModifiers::CONTROL,
+        KeyEventKind::Repeat,
+    );
+    for key in [
+        KeyCode::Down.into(),
+        ctrl_t,
+        KeyCode::Down.into(),
+        ctrl_t,
+        repeat,
+    ] {
+        app.handle_tui_event(&mut tui, &mut owner, TuiEvent::Key(key))
+            .await
+            .unwrap();
+    }
+    assert!(app.overlay.is_none());
+    let frame = render_bottom_popup(&app.chat_widget, /*width*/ 100);
+    assert!(frame.contains("[b][t] model-with-reasoning"), "{frame}");
+    assert!(frame.contains("› [ ][t] model "), "{frame}");
+
+    let overlay = app
+        .local_settings
+        .codex_home
+        .join(codex_config::CONFIG_OVERLAY_FILE);
+    assert!(!overlay.exists());
+    app.handle_tui_event(&mut tui, &mut owner, TuiEvent::Key(KeyCode::Enter.into()))
+        .await
+        .unwrap();
+    let save = std::iter::from_fn(|| events.try_recv().ok())
+        .find(|event| matches!(event, AppEvent::StatusLineSetup { .. }))
+        .expect("Enter saves the status line");
+    crate::boxed_future!(app.handle_event(&mut tui, &mut owner, save))
+        .await
+        .unwrap();
+
+    let overlay: toml::Table = toml::from_str(&std::fs::read_to_string(overlay)?)?;
+    assert_eq!(
+        overlay,
+        toml::toml! { [tui] status_line_truncatable = ["model", "model-with-reasoning"] }
+    );
+    let shared: toml::Table = toml::from_str(&std::fs::read_to_string(
+        &app.local_settings.user_config_path,
+    )?)?;
+    assert!(shared["tui"].get("status_line_truncatable").is_none());
+    app.refresh_in_memory_config_from_disk().await.unwrap();
+    assert_eq!(
+        app.chat_widget.local_settings.tui.status_line,
+        Some(selected)
+    );
+    assert_eq!(
+        app.chat_widget
+            .local_settings
+            .tui
+            .fork
+            .status_line_truncatable,
+        ["model", "model-with-reasoning"]
+    );
+
+    app.chat_widget
+        .restore_user_message_to_composer("/statusline".into());
+    app.chat_widget.handle_key_event(KeyCode::Enter.into());
+    let frame = render_bottom_popup(&app.chat_widget, /*width*/ 100);
+    assert!(frame.contains("[ ][t] model "), "{frame}");
+    Ok(())
 }
 
 #[tokio::test(start_paused = true)]

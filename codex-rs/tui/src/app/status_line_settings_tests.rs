@@ -2,6 +2,7 @@
 
 use crate::AppServerTarget;
 use crate::app::test_support::make_test_app;
+use crate::bottom_pane::StatusLineItem;
 use crate::chatwidget::tests::render_bottom_popup;
 use crate::statusline_metrics::tests::Collector;
 use codex_config::types::BuiltinStatusLine;
@@ -9,6 +10,50 @@ use codex_config::types::StatusLineProviderId;
 use codex_config::types::StatusLineSelection;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
+use std::collections::BTreeSet;
+
+#[tokio::test]
+async fn status_line_overlay_write_failure_keeps_the_previously_saved_truncation()
+-> anyhow::Result<()> {
+    let mut app = make_test_app().await;
+    let overlay = app
+        .local_settings
+        .codex_home
+        .join(codex_config::CONFIG_OVERLAY_FILE);
+    let initial = "[tui]\nstatus_line_truncatable = ['current-dir']\n";
+    std::fs::write(&overlay, initial)?;
+    app.refresh_in_memory_config_from_disk().await.unwrap();
+    let broken = "[broken";
+    std::fs::write(&overlay, broken)?;
+
+    app.save_status_line_settings(vec![StatusLineItem::ModelName], false, BTreeSet::new())
+        .await;
+    assert_eq!(std::fs::read_to_string(&overlay)?, broken);
+    assert_eq!(
+        app.local_settings.tui.status_line.as_deref(),
+        Some(["model".to_string()].as_slice())
+    );
+    assert!(!app.chat_widget.local_settings.tui.status_line_use_colors);
+    for settings in [&app.local_settings, &app.chat_widget.local_settings] {
+        assert_eq!(settings.tui.fork.status_line_truncatable, ["current-dir"]);
+    }
+
+    std::fs::write(&overlay, initial)?;
+    app.save_status_line_settings(vec![StatusLineItem::ModelName], false, BTreeSet::new())
+        .await;
+    app.refresh_in_memory_config_from_disk().await.unwrap();
+    assert!(
+        app.chat_widget
+            .local_settings
+            .tui
+            .fork
+            .status_line_truncatable
+            .is_empty()
+    );
+    let parsed: toml::Table = toml::from_str(&std::fs::read_to_string(overlay)?)?;
+    assert_eq!(parsed, toml::toml! { [tui] status_line_truncatable = [] });
+    Ok(())
+}
 
 #[tokio::test]
 async fn remote_session_saves_to_the_active_local_profile() -> anyhow::Result<()> {

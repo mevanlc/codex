@@ -25,14 +25,12 @@
 
 use super::StatusLine;
 use super::shortcut_overlay;
-use super::status_line_style::STATUS_LINE_SEPARATOR;
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
 use crate::key_hint::ShortcutHint;
 use crate::render::line_utils::prefix_lines;
 use crate::status::format_tokens_compact;
 use crate::style::secondary_text_style;
-use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::ui_consts::FOOTER_INDENT_COLS;
 use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
@@ -807,24 +805,12 @@ pub(crate) fn passive_footer_status_line(props: &FooterProps) -> Option<StatusLi
         .status_line_value
         .as_ref()
         .filter(|_| props.status_line_enabled);
-    let mut line = if let Some(status) = status {
-        let Some(line) = status.as_native() else {
-            return Some(status.clone());
-        };
-        line.clone()
-    } else {
-        HyperlinkLine::default()
-    };
     let suffix = passive_footer_suffix(props, status.is_some());
-    if status.is_none() && suffix.spans.is_empty() {
-        return None;
+    if let Some(status) = status {
+        Some(status.with_suffix(suffix))
+    } else {
+        (!suffix.spans.is_empty()).then(|| suffix.into())
     }
-    if line.width() > 0 && suffix.width() > 0 {
-        line.line
-            .push_span(STATUS_LINE_SEPARATOR.set_style(secondary_text_style()));
-    }
-    line.line.spans.extend(suffix.spans);
-    Some(line.into())
 }
 
 fn passive_footer_suffix(props: &FooterProps, has_status: bool) -> Line<'static> {

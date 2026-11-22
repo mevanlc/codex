@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;
 use strum::IntoEnumIterator;
 
-use crate::terminal_hyperlinks::HyperlinkLine;
 use codex_protocol::ThreadId;
 
+use super::StatusLine;
 use super::multi_select_picker::MultiSelectItem;
 use super::multi_select_picker::MultiSelectState;
 use super::status_line_from_segments;
@@ -321,8 +322,9 @@ impl StatusSurfacePreviewData {
     pub(crate) fn status_line_for_items<I>(
         &self,
         items: I,
+        truncatable: &BTreeSet<StatusLineItem>,
         use_theme_colors: bool,
-    ) -> Option<HyperlinkLine>
+    ) -> Option<StatusLine>
     where
         I: IntoIterator<Item = StatusLineItem>,
     {
@@ -332,6 +334,7 @@ impl StatusSurfacePreviewData {
         });
         status_line_from_segments(
             segments,
+            truncatable,
             use_theme_colors,
             self.thread_id,
             self.live_value_for(StatusSurfacePreviewItem::PullRequestNumber)

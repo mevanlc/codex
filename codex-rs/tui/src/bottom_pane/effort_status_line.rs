@@ -29,6 +29,7 @@ use crate::terminal_palette::best_color;
 use crate::terminal_palette::default_bg;
 use crate::terminal_palette::default_fg;
 
+use super::StatusLine;
 use super::effort_ignition::EffortTier;
 
 const SCROLL_OUT: Duration = Duration::from_millis(620);
@@ -62,7 +63,7 @@ impl EffortTier {
 
 pub(crate) struct EffortStatusLineTransition {
     tier: EffortTier,
-    previous: HyperlinkLine,
+    previous: StatusLine,
     phase: Cell<TransitionPhase>,
 }
 
@@ -74,7 +75,7 @@ enum TransitionPhase {
 }
 
 impl EffortStatusLineTransition {
-    pub(crate) fn new(tier: EffortTier, previous: HyperlinkLine) -> Self {
+    pub(crate) fn new(tier: EffortTier, previous: StatusLine) -> Self {
         Self {
             tier,
             previous,
@@ -88,9 +89,10 @@ impl EffortStatusLineTransition {
 
     pub(crate) fn render_line(
         &self,
-        current: Option<HyperlinkLine>,
+        current: Option<&StatusLine>,
         width: u16,
     ) -> Option<HyperlinkLine> {
+        let current = current.and_then(|line| line.native_line_for_width(width));
         let elapsed = match self.phase.get() {
             TransitionPhase::Pending => {
                 self.phase.set(TransitionPhase::Running(Instant::now()));
@@ -103,7 +105,8 @@ impl EffortStatusLineTransition {
         if elapsed >= TOTAL {
             self.phase.set(TransitionPhase::Finished);
         }
-        transition_line_at(self.tier, &self.previous, current, elapsed, width)
+        let previous = self.previous.native_line_for_width(width)?;
+        transition_line_at(self.tier, &previous, current, elapsed, width)
     }
 }
 

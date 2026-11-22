@@ -26,6 +26,7 @@ passive_hints = "always"
 file_mentions_preserve_at = true
 file_mentions_allow_explicit_paths = false
 primary_accent = "#00AAFF"
+status_line_truncatable = ["current-dir"]
 notifications = false
 animations = false
 theme = "dracula"
@@ -38,6 +39,7 @@ theme = "dracula"
         file_mentions_preserve_at: true,
         file_mentions_allow_explicit_paths: false,
         primary_accent: Some("#00AAFF".to_string()),
+        status_line_truncatable: vec!["current-dir".into()],
     };
     assert_eq!(tui.fork, expected);
     assert_eq!(
@@ -89,6 +91,7 @@ file_mentions_allow_explicit_paths = false
                 file_mentions_preserve_at: false,
                 file_mentions_allow_explicit_paths: false,
                 primary_accent: Some("#00AAFF".to_string()),
+                status_line_truncatable: Vec::new(),
             },
             Notifications::Enabled(false),
         ),

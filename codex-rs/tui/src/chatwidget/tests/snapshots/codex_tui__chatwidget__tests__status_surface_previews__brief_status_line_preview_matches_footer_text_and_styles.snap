@@ -3,18 +3,18 @@ source: tui/src/chatwidget/tests/status_surface_previews.rs
 expression: status_line_popup_snapshot(&mut chat)
 ---
   Configure Status Line
-  Select items: [ ] off, [x] on, [b] brief (when available).
+  [ ] off, [x] on, [b] brief, [t] truncatable
 
   Type to search
 
-› [x] Use theme colors      Apply colors from the active /theme
+› [x] Use theme colors         Apply colors from the active /theme
   ───────────────────────
-  [b] context-remaining     Percentage of context window remaining (omitted when unknown)
-  [b] context-used          Percentage of context window used (omitted when unknown)
-  [b] five-hour-limit       Remaining usage on the 5-hour usage limit (omitted when unavailable)
-  [b] weekly-limit          Remaining usage on the weekly usage limit (omitted when unavailable)
-  [ ] model                 Current model name
-  [ ] model-with-reasoning  Current model name with reasoning level
+  [b][ ] context-remaining     Percentage of context window remaining (omitted when unknown)
+  [b][ ] context-used          Percentage of context window used (omitted when unknown)
+  [b][ ] five-hour-limit       Remaining usage on the 5-hour usage limit (omitted when unavailable)
+  [b][ ] weekly-limit          Remaining usage on the weekly usage limit (omitted when unavailable)
+  [ ][ ] model                 Current model name
+  [ ][ ] model-with-reasoning  Current model name with reasoning level
 ↓
   ctx < 100% · ctx > 0% · 5h < 65% · 7d < 50%
-  space toggle · ←/→ reorder · enter save · esc cancel
+  space toggle · ⌃t toggle [t] · ←/→ reorder · enter save · esc cancel

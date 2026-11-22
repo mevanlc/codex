@@ -46,6 +46,7 @@ use codex_protocol::openai_models::ReasoningEffort;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_approval_presets::ApprovalPreset;
 use codex_utils_path_uri::PathUri;
+use std::collections::BTreeSet;
 use strum_macros::IntoStaticStr;
 use uuid::Uuid;
 
@@ -1915,10 +1916,11 @@ pub(crate) enum AppEvent {
         request_id: Uuid,
         result: Result<crate::workspace_messages::WorkspaceHeadlineFetchResult, String>,
     },
-    /// Apply a user-confirmed status-line item ordering/selection.
+    /// Apply the user-confirmed built-in status line settings.
     StatusLineSetup {
         items: Vec<StatusLineItem>,
         use_theme_colors: bool,
+        truncatable: BTreeSet<StatusLineItem>,
     },
     /// Dismiss the status-line setup UI without changing config.
     StatusLineSetupCancelled,

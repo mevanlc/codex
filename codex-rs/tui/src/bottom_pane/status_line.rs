@@ -1,8 +1,13 @@
 //! Measure and paint native and extension status lines within the caller's content rectangle.
 
+use super::status_line_style::STATUS_LINE_SEPARATOR;
+use crate::line_truncation::line_width;
+use crate::line_truncation::span_width;
+use crate::line_truncation::truncate_line_to_width;
 use crate::line_truncation::truncate_line_with_ellipsis;
 use crate::render::highlight::with_syntax_theme;
 use crate::render::line_utils::line_to_static;
+use crate::style::secondary_text_style;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::project_hyperlink_columns;
 use crate::ui_tree::PreparedUiTree;
@@ -19,7 +24,10 @@ use std::borrow::Cow;
 use std::cell::Ref;
 use std::cell::RefCell;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use unicode_segmentation::UnicodeSegmentation;
+
+const MIN_TRUNCATED_COMPONENT_WIDTH: usize = 5;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StatusLineFocus {
@@ -33,8 +41,44 @@ pub(crate) struct StatusLine(StatusContent);
 
 #[derive(Clone, Debug, PartialEq)]
 enum StatusContent {
-    Native(CachedLayout<Box<HyperlinkLine>, Option<Vec<HyperlinkLine>>>),
+    Native(CachedLayout<Arc<NativeStatusLine>, NativeLayout>),
     Extension(CachedLayout<Arc<PreparedUiTree>, u16>),
+}
+
+#[derive(Debug, PartialEq)]
+enum NativeStatusLine {
+    Plain(HyperlinkLine),
+    Components(NativeComponents),
+}
+
+#[derive(Debug, PartialEq)]
+pub(super) struct StatusLineComponent {
+    pub(super) span: Span<'static>,
+    pub(super) destination: Option<String>,
+    pub(super) truncatable: bool,
+}
+
+#[derive(Debug)]
+struct NativeComponents {
+    items: Arc<[StatusLineComponent]>,
+    separator: Span<'static>,
+    suffix: Line<'static>,
+    full_line: OnceLock<HyperlinkLine>,
+}
+
+impl PartialEq for NativeComponents {
+    fn eq(&self, other: &Self) -> bool {
+        self.items == other.items
+            && self.separator == other.separator
+            && self.suffix == other.suffix
+    }
+}
+
+#[derive(Debug)]
+enum NativeLayout {
+    Original,
+    Fitted(HyperlinkLine),
+    Wrapped(Vec<HyperlinkLine>),
 }
 
 #[derive(Debug)]
@@ -92,7 +136,7 @@ impl From<UiTree> for StatusLine {
 
 impl From<HyperlinkLine> for StatusLine {
     fn from(line: HyperlinkLine) -> Self {
-        Self(StatusContent::Native(CachedLayout::new(Box::new(line))))
+        Self::native(NativeStatusLine::Plain(line))
     }
 }
 
@@ -109,10 +153,84 @@ impl From<&'static str> for StatusLine {
 }
 
 impl StatusLine {
+    fn native(line: NativeStatusLine) -> Self {
+        Self(StatusContent::Native(CachedLayout::new(Arc::new(line))))
+    }
+
+    pub(super) fn from_components(items: Vec<StatusLineComponent>) -> Option<Self> {
+        if items.is_empty() {
+            return None;
+        }
+        let separator = Span::styled(STATUS_LINE_SEPARATOR, secondary_text_style());
+        if items.iter().any(|item| item.truncatable) {
+            return Some(Self::native(NativeStatusLine::Components(
+                NativeComponents {
+                    items: items.into(),
+                    separator,
+                    suffix: Line::default(),
+                    full_line: OnceLock::new(),
+                },
+            )));
+        }
+        let mut line = HyperlinkLine::default();
+        for item in items {
+            append_component(
+                &mut line,
+                &separator,
+                item.span,
+                item.destination.as_deref(),
+            );
+        }
+        Some(line.into())
+    }
+
+    pub(super) fn is_native(&self) -> bool {
+        matches!(self.0, StatusContent::Native(_))
+    }
+
+    #[cfg(test)]
     pub(crate) fn as_native(&self) -> Option<&HyperlinkLine> {
         match &self.0 {
-            StatusContent::Native(native) => Some(&native.content),
+            StatusContent::Native(native) => Some(native.content.full_line()),
             StatusContent::Extension(_) => None,
+        }
+    }
+
+    pub(super) fn with_suffix(&self, suffix: Line<'static>) -> Self {
+        if suffix.spans.is_empty() {
+            return self.clone();
+        }
+        let StatusContent::Native(native) = &self.0 else {
+            return self.clone();
+        };
+        match native.content.as_ref() {
+            NativeStatusLine::Plain(line) => {
+                let mut line = line.clone();
+                let separator = Span::styled(STATUS_LINE_SEPARATOR, secondary_text_style());
+                append_suffix(&mut line, &separator, &suffix);
+                line.into()
+            }
+            NativeStatusLine::Components(components) => {
+                Self::native(NativeStatusLine::Components(NativeComponents {
+                    items: Arc::clone(&components.items),
+                    separator: components.separator.clone(),
+                    suffix,
+                    full_line: OnceLock::new(),
+                }))
+            }
+        }
+    }
+
+    /// Fit a native row before applying the one-row reasoning-effort transition.
+    pub(super) fn native_line_for_width(&self, width: u16) -> Option<HyperlinkLine> {
+        let StatusContent::Native(native) = &self.0 else {
+            return None;
+        };
+        let bounds = Size { width, height: 1 };
+        match &*native_layout(native, bounds) {
+            NativeLayout::Original => Some(native.content.full_line().clone()),
+            NativeLayout::Fitted(line) => Some(line.clone()),
+            NativeLayout::Wrapped(rows) => rows.first().cloned(),
         }
     }
 
@@ -122,10 +240,13 @@ impl StatusLine {
             return 0;
         }
         match &self.0 {
-            StatusContent::Native(native) => wrapped_rows(native, bounds).map_or_else(
-                || u16::from(native.content.width() > 0),
-                |rows| rows.len().max(1).min(usize::from(bounds.height)) as u16,
-            ),
+            StatusContent::Native(native) => match &*native_layout(native, bounds) {
+                NativeLayout::Original => u16::from(native.content.full_line().width() > 0),
+                NativeLayout::Fitted(line) => u16::from(line.width() > 0),
+                NativeLayout::Wrapped(rows) => {
+                    rows.len().max(1).min(usize::from(bounds.height)) as u16
+                }
+            },
             StatusContent::Extension(extension) => {
                 *extension.get(bounds, |tree| tree.measure(bounds).height)
             }
@@ -139,10 +260,12 @@ impl StatusLine {
         }
         match &self.0 {
             StatusContent::Native(native) => {
-                let wrapped = wrapped_rows(native, area.as_size());
-                let rows = wrapped
-                    .as_deref()
-                    .unwrap_or_else(|| std::slice::from_ref(native.content.as_ref()));
+                let layout = native_layout(native, area.as_size());
+                let rows = match &*layout {
+                    NativeLayout::Original => std::slice::from_ref(native.content.full_line()),
+                    NativeLayout::Fitted(line) => std::slice::from_ref(line),
+                    NativeLayout::Wrapped(rows) => rows.as_slice(),
+                };
                 let more_rows = rows.len() > usize::from(area.height);
                 for (row, line) in area.rows().zip(rows) {
                     render_status_row(
@@ -163,22 +286,149 @@ impl StatusLine {
     }
 }
 
-fn wrapped_rows(
-    native: &CachedLayout<Box<HyperlinkLine>, Option<Vec<HyperlinkLine>>>,
-    bounds: Size,
-) -> Option<Ref<'_, [HyperlinkLine]>> {
-    if bounds.height <= 1 {
-        return None;
+impl NativeStatusLine {
+    fn full_line(&self) -> &HyperlinkLine {
+        match self {
+            Self::Plain(line) => line,
+            Self::Components(components) => components.full_line.get_or_init(|| {
+                let mut line = HyperlinkLine::default();
+                for item in components.items.iter() {
+                    append_component(
+                        &mut line,
+                        &components.separator,
+                        item.span.clone(),
+                        item.destination.as_deref(),
+                    );
+                }
+                append_suffix(&mut line, &components.separator, &components.suffix);
+                line
+            }),
+        }
     }
+}
+
+impl NativeComponents {
+    fn fit(&self, width: usize) -> Option<HyperlinkLine> {
+        let separator_width = span_width(&self.separator);
+        let suffix_width = line_width(&self.suffix);
+        let mut count = self.items.len();
+        let mut body_width = self
+            .items
+            .iter()
+            .map(|item| span_width(&item.span))
+            .sum::<usize>()
+            + count.saturating_sub(1) * separator_width;
+        let combined_width = |body| {
+            body + suffix_width
+                + if body > 0 && suffix_width > 0 {
+                    separator_width
+                } else {
+                    0
+                }
+        };
+        let mut total = combined_width(body_width);
+        if total <= width {
+            return None;
+        }
+
+        let mut dropped = Vec::new();
+        let mut shortened = None;
+        for (index, item) in self
+            .items
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|(_, item)| item.truncatable)
+        {
+            let item_width = span_width(&item.span);
+            let available = width.saturating_sub(total - item_width);
+            if available >= MIN_TRUNCATED_COMPONENT_WIDTH {
+                // The ellipsis takes one terminal column. Grapheme boundaries can leave
+                // another column unused, so check the actual prefix before keeping it.
+                let prefix = truncate_line_to_width(Line::from(item.span.clone()), available - 1);
+                if let Some(span) = prefix.spans.into_iter().next()
+                    && span_width(&span) + 1 >= MIN_TRUNCATED_COMPONENT_WIDTH
+                {
+                    shortened = Some((index, span));
+                    break;
+                }
+            }
+
+            dropped.push(index);
+            count -= 1;
+            body_width -= item_width + if count > 0 { separator_width } else { 0 };
+            total = combined_width(body_width);
+            if total <= width {
+                break;
+            }
+        }
+
+        let mut line = HyperlinkLine::default();
+        for (index, item) in self.items.iter().enumerate() {
+            if dropped.last() == Some(&index) {
+                dropped.pop();
+                continue;
+            }
+            let prefix = shortened.as_ref().filter(|(target, _)| *target == index);
+            let span = prefix.map_or(&item.span, |(_, span)| span);
+            append_component(
+                &mut line,
+                &self.separator,
+                span.clone(),
+                item.destination.as_deref(),
+            );
+            if prefix.is_some() {
+                line.line.push_span(Span::styled("…", item.span.style));
+            }
+        }
+        append_suffix(&mut line, &self.separator, &self.suffix);
+        Some(line)
+    }
+}
+
+fn append_component(
+    line: &mut HyperlinkLine,
+    separator: &Span<'static>,
+    span: Span<'static>,
+    destination: Option<&str>,
+) {
+    if !line.line.spans.is_empty() {
+        line.line.push_span(separator.clone());
+    }
+    line.push_span(span, destination);
+}
+
+fn append_suffix(line: &mut HyperlinkLine, separator: &Span<'static>, suffix: &Line<'static>) {
+    if suffix.spans.is_empty() {
+        return;
+    }
+    if line.width() > 0 && line_width(suffix) > 0 {
+        line.line.push_span(separator.clone());
+    }
+    line.line.spans.extend(suffix.spans.iter().cloned());
+}
+
+fn native_layout(
+    native: &CachedLayout<Arc<NativeStatusLine>, NativeLayout>,
+    mut bounds: Size,
+) -> Ref<'_, NativeLayout> {
     // Reuse the same wrapped prefix across small height changes.
-    let bounds = Size {
-        height: bounds.height.max(4),
-        ..bounds
-    };
-    let cached = native.get(bounds, |line| {
-        (line.width() > usize::from(bounds.width)).then(|| wrap_rows(line, bounds))
-    });
-    Ref::filter_map(cached, Option::as_deref).ok()
+    if bounds.height > 1 {
+        bounds.height = bounds.height.max(4);
+    }
+    native.get(bounds, |native| {
+        let width = usize::from(bounds.width);
+        let fitted = match native.as_ref() {
+            NativeStatusLine::Plain(_) => None,
+            NativeStatusLine::Components(components) => components.fit(width),
+        };
+        let line = fitted.as_ref().unwrap_or_else(|| native.full_line());
+        if bounds.height > 1 && line.width() > width {
+            NativeLayout::Wrapped(wrap_rows(line, bounds))
+        } else {
+            fitted.map_or(NativeLayout::Original, NativeLayout::Fitted)
+        }
+    })
 }
 
 fn render_status_row(

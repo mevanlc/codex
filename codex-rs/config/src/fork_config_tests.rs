@@ -27,6 +27,7 @@ fn overlay_rejects_non_fork_fields_and_invalid_values() {
         "[tui]\ntheme = 'nord'",
         "[tui]\nprimary_accent = false",
         "[tui]\npassive_hints = 'invalid'",
+        "[tui]\nstatus_line_truncatable = true",
         "[tui.keymap.global]\ncopy = 'ctrl-g'",
         "[tui.keymap.global]\nopen_external_editor_with_quote = 'invalid-key'",
     ] {

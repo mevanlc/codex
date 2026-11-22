@@ -198,13 +198,17 @@ impl ChatWidget {
             }
         }
 
+        let truncatable = StatusLineItem::parse_truncatable(
+            &self.local_settings.tui.fork.status_line_truncatable,
+        );
         let line = status_line_from_segments(
             segments,
+            &truncatable,
             self.local_settings.tui.status_line_use_colors,
             self.thread_id,
             self.status_line_pull_request_url(),
         );
-        self.set_status_line(line.map(Into::into));
+        self.set_status_line(line);
     }
 
     /// Clears the terminal title Codex most recently wrote, if any.

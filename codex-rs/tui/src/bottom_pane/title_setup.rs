@@ -283,8 +283,10 @@ pub(crate) fn terminal_title_setup(
         };
         app_event.send(AppEvent::TerminalTitleSetupPreview { items });
     })
-    .on_confirm(|ids, app_event| {
-        let Some(items) = parse_terminal_title_items(ids.iter().map(String::as_str)) else {
+    .on_confirm(|items, app_event| {
+        let Some(items) =
+            parse_terminal_title_items(items.iter().filter_map(MultiSelectItem::selected_id))
+        else {
             return;
         };
         app_event.send(AppEvent::TerminalTitleSetup { items });

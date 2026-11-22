@@ -19,6 +19,7 @@ chatbox_placeholder_tips = "off"
 passive_hints = "always"
 file_mentions_preserve_at = true
 file_mentions_allow_explicit_paths = false
+status_line_truncatable = ["current-dir", "thread-name"]
 [tui.keymap.global]
 open_external_editor_with_quote = "ctrl-x g" # quoted response
 "#,
@@ -40,6 +41,7 @@ chatbox_placeholder_tips = "off"
 passive_hints = "always"
 file_mentions_preserve_at = true
 file_mentions_allow_explicit_paths = false
+status_line_truncatable = ["current-dir", "thread-name"]
 [tui.keymap.global]
 open_external_editor_with_quote = "ctrl-x g"
 "#

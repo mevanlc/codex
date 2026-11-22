@@ -22,7 +22,7 @@ This fork maintains a build of Codex CLI that runs natively on Android via [Term
 - **Retractable steer messages** — pull a still-pending steer back into the composer; backed by a new `turn/retract` app-server method
 - **Context usage on resume and fork** — restore the saved context fullness before the next turn, including paginated forks and turns that crossed a compaction checkpoint with their identity saved only in the following turn context
 - **Unrestricted reasoning shortcuts** — the reasoning hotkeys step all the way into Max and Ultra
-- **Brief statusline components** — selected components cycle through off, full, and brief in `/statusline`
+- **Brief and truncatable statusline components** — cycle supported rows through off, full, and brief, and use Ctrl+T in `/statusline` to mark components that can shrink or disappear
 - **Platform fixes** — `SHELL`-based shell detection on Android, vendored OpenSSL, fork-aware update checks
 
 Everything else behaves like upstream Codex.
@@ -165,9 +165,9 @@ fork; without it, all fork defaults apply. Keep shared settings in `config.toml`
 so official clients can read that file without encountering fork extensions.
 
 The overlay accepts only `tui.primary_accent`, `tui.chatbox_placeholder_tips`,
-`tui.passive_hints`, `tui.file_mentions_preserve_at`, `tui.file_mentions_allow_explicit_paths`, and
-`tui.keymap.global.open_external_editor_with_quote`. On startup, the fork
-automatically moves these entries from the top level of `config.toml` into the
+`tui.passive_hints`, `tui.file_mentions_preserve_at`, `tui.file_mentions_allow_explicit_paths`,
+`tui.status_line_truncatable`, and `tui.keymap.global.open_external_editor_with_quote`.
+On startup, the fork automatically moves these entries from the top level of `config.toml` into the
 overlay, preserving existing overlay values when both files set the same key.
 It saves the overlay before removing the original entries, so interrupted
 migrations can be retried safely. With no entries to move, no files are created.
@@ -313,6 +313,23 @@ The IDs also work in `/statusline` arguments and presets. If a manually edited
 list includes both forms, both render; opening and saving the picker keeps only
 the first occurrence of each pair, using its form and position. Cancelling leaves
 the list unchanged.
+
+### Truncatable statusline components
+
+In `/statusline`, press Ctrl+T to toggle `[t]` for the highlighted component.
+The flag applies to both full and brief forms and stays set when the component
+is disabled. Enter saves the marked IDs in `$CODEX_HOME/config-overlay.toml`.
+Use full-form IDs when editing this setting by hand.
+
+```toml
+[tui]
+status_line_truncatable = ["current-dir", "thread-name"]
+```
+
+If the statusline is too wide, it tries to shorten the rightmost marked component
+with `…`. If the shortened value would occupy fewer than five terminal columns,
+the component is dropped. If more space is needed, the renderer moves left to the next marked component.
+The remaining content can wrap if it still exceeds the available width.
 
 ### Platform fixes
 

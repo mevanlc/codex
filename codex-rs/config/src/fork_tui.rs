@@ -62,6 +62,11 @@ pub struct ForkTuiOptions {
     /// - `0..255` ANSI palette index (for example `14`)
     #[serde(default)]
     pub primary_accent: Option<String>,
+
+    /// Built-in status line items that may be shortened or dropped to fit the terminal.
+    /// Use the same identifier for the full and brief forms, even for disabled items.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub status_line_truncatable: Vec<String>,
 }
 
 impl Default for ForkTuiOptions {
@@ -72,6 +77,7 @@ impl Default for ForkTuiOptions {
             file_mentions_preserve_at: false,
             file_mentions_allow_explicit_paths: true,
             primary_accent: None,
+            status_line_truncatable: Vec::new(),
         }
     }
 }

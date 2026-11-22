@@ -136,6 +136,11 @@ impl ChatWidget {
         self.refresh_status_line();
     }
 
+    pub(crate) fn set_status_line_truncatable(&mut self, ids: Vec<String>) {
+        self.config_panel_tui.fork.status_line_truncatable = ids.clone();
+        self.local_settings.tui.fork.status_line_truncatable = ids;
+    }
+
     /// Applies a temporary terminal-title selection while the setup UI is open.
     pub(crate) fn preview_terminal_title(&mut self, items: Vec<TerminalTitleItem>) {
         if self.terminal_title_setup_original_items.is_none() {
@@ -342,11 +347,13 @@ impl ChatWidget {
                 thread_id: self.thread_id(),
             }
         };
+        let preview_data = self.status_surface_preview_data();
         let view = StatusLineSetupView::new(
             Some(configured_status_line_items.as_slice()),
+            &self.local_settings.tui.fork.status_line_truncatable,
             self.local_settings.tui.status_line_use_colors,
             providers,
-            self.status_surface_preview_data(),
+            preview_data,
             self.app_event_tx.clone(),
             self.bottom_pane.list_keymap(),
         );

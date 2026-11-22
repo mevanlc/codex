@@ -957,7 +957,7 @@ impl ChatComposer {
             self.effort_ignition = Some(EffortIgnition::new(tier, style));
             self.effort_animation_style = Some(style);
             let previous = self.with_status_surface_content(StatusLineFocus::Focused, |status| {
-                status.and_then(StatusLine::as_native).cloned()
+                status.filter(|status| status.is_native()).cloned()
             });
             if let Some(previous) = previous {
                 self.effort_status_line_transition =
@@ -5862,18 +5862,16 @@ mod tests {
         );
         let url = "https://github.com/openai/codex/pull/20252";
         composer.set_status_line_enabled(/*enabled*/ true);
-        composer.set_status_line(
-            crate::bottom_pane::status_line_from_segments(
-                [(
-                    crate::bottom_pane::status_line_setup::StatusLineItem::PullRequestNumber,
-                    "PR #20252".to_string(),
-                )],
-                /*use_theme_colors*/ false,
-                /*thread_id*/ None,
-                Some(url),
-            )
-            .map(Into::into),
-        );
+        composer.set_status_line(crate::bottom_pane::status_line_from_segments(
+            [(
+                crate::bottom_pane::status_line_setup::StatusLineItem::PullRequestNumber,
+                "PR #20252".to_string(),
+            )],
+            /*truncatable*/ &Default::default(),
+            /*use_theme_colors*/ false,
+            /*thread_id*/ None,
+            Some(url),
+        ));
 
         let area = Rect::new(0, 0, 40, 6);
         let mut buf = Buffer::empty(area);

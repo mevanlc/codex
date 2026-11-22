@@ -89,6 +89,13 @@
           "default": null,
           "description": "Overrides the default cyan accent used throughout the TUI.\n\nSupported formats: - `r,g,b` where each channel is `0..255` (for example `0,170,255`) - `#RRGGBB` (for example `#00AAFF`) - `0..255` ANSI palette index (for example `14`)",
           "type": "string"
+        },
+        "status_line_truncatable": {
+          "description": "Built-in status line items that may be shortened or dropped to fit the terminal. Use the same identifier for the full and brief forms, even for disabled items.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "type": "object"

@@ -227,6 +227,7 @@ primary_accent = "3,4,5"
                 file_mentions_preserve_at: true,
                 file_mentions_allow_explicit_paths: false,
                 primary_accent: Some("3,4,5".to_string()),
+                status_line_truncatable: Vec::new(),
             }
         };
         assert_eq!(local.tui.fork, expected_fork);

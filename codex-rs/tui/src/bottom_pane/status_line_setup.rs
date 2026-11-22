@@ -22,8 +22,10 @@
 //! - Session info (thread title, thread ID, tokens used)
 //! - Application version
 
+use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use std::collections::BTreeSet;
 use strum_macros::Display;
 use strum_macros::EnumIter;
 use strum_macros::EnumString;
@@ -195,6 +197,13 @@ impl serde::Serialize for StatusLineItem {
 }
 
 impl StatusLineItem {
+    pub(crate) fn parse_truncatable(ids: &[String]) -> BTreeSet<Self> {
+        ids.iter()
+            .filter_map(|id| id.parse::<Self>().ok())
+            .map(Self::full_form)
+            .collect()
+    }
+
     pub(crate) fn full_form(self) -> Self {
         match self {
             Self::ModelNameBrief => Self::ModelName,
@@ -366,6 +375,7 @@ pub(crate) struct StatusLineSetupView {
 
 impl StatusLineSetupView {
     pub(crate) const VIEW_ID: &'static str = "status-line-setup";
+    pub(crate) const TRUNCATION_KEY: KeyBinding = crate::key_hint::ctrl(KeyCode::Char('t'));
 
     /// Creates a new status line setup view.
     ///
@@ -373,6 +383,7 @@ impl StatusLineSetupView {
     ///
     /// * `status_line_items` - Currently configured item IDs (in display order),
     ///   or `None` to start with all items disabled
+    /// * `truncatable` - Item IDs marked truncatable, including disabled items
     /// * `use_theme_colors` - Whether the preview and saved status line use colors from
     ///   the active theme
     /// * `app_event_tx` - Event sender for dispatching configuration changes
@@ -382,6 +393,7 @@ impl StatusLineSetupView {
     /// occurrence determines the form and position. Remaining items are appended disabled.
     pub(crate) fn new(
         status_line_items: Option<&[String]>,
+        truncatable: &[String],
         use_theme_colors: bool,
         providers: StatuslineProviderActions,
         preview_data: StatusSurfacePreviewData,
@@ -420,53 +432,64 @@ impl StatusLineSetupView {
             name: "Use theme colors".to_string(),
             description: Some("Apply colors from the active /theme".to_string()),
             state: use_theme_colors.into(),
-            brief_id: None,
             orderable: false,
             section_break_after: true,
-            on_activate: None,
+            ..Default::default()
         });
 
-        items.extend(preview_data.picker_items(
+        let truncatable = StatusLineItem::parse_truncatable(truncatable);
+        let mut components = preview_data.picker_items(
             status_line_items,
             |item| (item.full_form(), item.full_form().brief_form()),
             StatusLineItem::description,
             |item| Some(item.preview_item()),
-        ));
+        );
+        for component in &mut components {
+            component.truncatable = Some(
+                component
+                    .id
+                    .parse::<StatusLineItem>()
+                    .is_ok_and(|item| truncatable.contains(&item)),
+            );
+        }
+        items.extend(components);
 
         Self {
             picker: MultiSelectPicker::builder(
                 "Configure Status Line".to_string(),
-                Some("Select items: [ ] off, [x] on, [b] brief (when available).".to_string()),
+                Some("[ ] off, [x] on, [b] brief, [t] truncatable".to_string()),
                 app_event_tx,
             )
             .list_keymap(list_keymap)
             .items(items)
             .enable_ordering()
+            .truncation_shortcut(Self::TRUNCATION_KEY)
             .on_preview_content(move |items| {
                 let use_theme_colors = items.iter().any(|item| {
                     item.id == STATUS_LINE_USE_THEME_COLORS_ITEM_ID && item.is_enabled()
                 });
-                preview_data
-                    .status_line_for_items(
-                        items
-                            .iter()
-                            .filter_map(MultiSelectItem::selected_id)
-                            .filter_map(|id| id.parse::<StatusLineItem>().ok()),
-                        use_theme_colors,
-                    )
-                    .map(Into::into)
+                preview_data.status_line_for_items(
+                    items
+                        .iter()
+                        .filter_map(MultiSelectItem::selected_id)
+                        .filter_map(|id| id.parse::<StatusLineItem>().ok()),
+                    &marked_items(items),
+                    use_theme_colors,
+                )
             })
-            .on_confirm(|ids, app_event| {
-                let use_theme_colors = ids
+            .on_confirm(|rows, app_event| {
+                let use_theme_colors = rows
                     .iter()
-                    .any(|id| id == STATUS_LINE_USE_THEME_COLORS_ITEM_ID);
-                let items = ids
+                    .any(|row| row.selected_id() == Some(STATUS_LINE_USE_THEME_COLORS_ITEM_ID));
+                let items = rows
                     .iter()
+                    .filter_map(MultiSelectItem::selected_id)
                     .filter_map(|id| id.parse::<StatusLineItem>().ok())
                     .collect::<Vec<_>>();
                 app_event.send(AppEvent::StatusLineSetup {
                     items,
                     use_theme_colors,
+                    truncatable: marked_items(rows),
                 });
             })
             .on_cancel(|app_event| {
@@ -475,6 +498,13 @@ impl StatusLineSetupView {
             .build(),
         }
     }
+}
+
+fn marked_items(rows: &[MultiSelectItem]) -> BTreeSet<StatusLineItem> {
+    rows.iter()
+        .filter(|row| row.truncatable == Some(true))
+        .filter_map(|row| row.id.parse().ok())
+        .collect()
 }
 
 impl BottomPaneView for StatusLineSetupView {
@@ -529,7 +559,6 @@ mod tests {
     use crate::app_event_sender::AppEventSender;
     use crate::bottom_pane::multi_select_picker::MultiSelectState;
     use crate::bottom_pane::multi_select_picker::tests::render_lines as render_picker_lines;
-    use crate::terminal_hyperlinks::HyperlinkLine;
     use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
     use tokio::sync::mpsc::unbounded_channel;
@@ -566,6 +595,7 @@ mod tests {
         let (tx, mut rx) = unbounded_channel();
         let mut view = StatusLineSetupView::new(
             Some(&["model-with-reasoning".into()]),
+            /*truncatable*/ &[],
             true,
             StatuslineProviderActions::Hidden,
             StatusSurfacePreviewData::default(),
@@ -576,7 +606,7 @@ mod tests {
         let mut frames = Vec::new();
         for marker in ["[x]", "[b]", "[ ]", "[x]", "[b]"] {
             let frame = render_lines(&view, 100);
-            assert!(frame.contains(&format!("{marker} model-with-reasoning")));
+            assert!(frame.contains(&format!("{marker}[ ] model-with-reasoning")));
             assert!(!frame.contains("model-with-reasoning-brief"));
             if marker == "[b]" {
                 assert!(frame.contains("5.2-codex me"));
@@ -587,6 +617,11 @@ mod tests {
             }
         }
         insta::assert_snapshot!(frames[..3].join("\n\n"));
+        view.handle_key_event(KeyEvent::new(
+            KeyCode::Char('t'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ));
+        assert!(render_lines(&view, 100).contains("› [b][t] model-with-reasoning"));
         // Move the brief row down one slot, then enable the model row.
         view.handle_key_event(KeyEvent::from(KeyCode::Right));
         view.handle_key_event(KeyEvent::from(KeyCode::Up));
@@ -594,8 +629,9 @@ mod tests {
         view.handle_key_event(KeyEvent::from(KeyCode::Enter));
         assert!(matches!(
             rx.try_recv().unwrap(),
-            AppEvent::StatusLineSetup { items, use_theme_colors: true }
+            AppEvent::StatusLineSetup { items, use_theme_colors: true, truncatable }
                 if items == [StatusLineItem::ModelName, StatusLineItem::ModelWithReasoningBrief]
+                    && truncatable == BTreeSet::from([StatusLineItem::ModelWithReasoning])
         ));
     }
 
@@ -612,6 +648,7 @@ mod tests {
                     "hostname".into(),
                     "model-brief".into(),
                 ]),
+                &["hostname-brief".into(), "model-name".into()],
                 false,
                 StatuslineProviderActions::Hidden,
                 StatusSurfacePreviewData::default(),
@@ -619,10 +656,18 @@ mod tests {
                 crate::keymap::RuntimeKeymap::defaults().list,
             );
             let frame = render_lines(&view, 100);
-            assert!(frame.contains("[b] hostname"));
-            assert!(frame.contains("[x] model "));
+            assert!(frame.contains("[b][t] hostname"));
+            assert!(frame.contains("[x][t] model "));
             assert_eq!(frame.matches("machine hostname").count(), 1);
             assert!(!frame.contains("hostname-brief"));
+            if cancel {
+                view.handle_key_event(KeyEvent::from(KeyCode::Down));
+                view.handle_key_event(KeyEvent::new(
+                    KeyCode::Char('t'),
+                    crossterm::event::KeyModifiers::CONTROL,
+                ));
+                assert!(render_lines(&view, 100).contains("› [b][ ] hostname"));
+            }
             view.handle_key_event(KeyEvent::from(if cancel {
                 KeyCode::Esc
             } else {
@@ -633,17 +678,53 @@ mod tests {
                 AppEvent::StatusLineSetup {
                     items,
                     use_theme_colors,
+                    truncatable,
                 } if !cancel => {
                     assert_eq!(
                         items,
                         [StatusLineItem::HostnameBrief, StatusLineItem::ModelName]
                     );
                     assert!(!use_theme_colors);
+                    assert_eq!(
+                        truncatable,
+                        BTreeSet::from([StatusLineItem::Hostname, StatusLineItem::ModelName])
+                    );
                 }
                 event => panic!("unexpected event: {event:?}"),
             }
             assert!(rx.try_recv().is_err());
         }
+    }
+
+    #[test]
+    fn picker_preview_fits_marked_items_at_the_preview_width() {
+        use crossterm::event::KeyEvent;
+        use crossterm::event::KeyModifiers;
+
+        let (tx, _rx) = unbounded_channel();
+        let mut view = StatusLineSetupView::new(
+            Some(&["thread-name".into(), "model".into()]),
+            /*truncatable*/ &[],
+            /*use_theme_colors*/ false,
+            StatuslineProviderActions::Hidden,
+            StatusSurfacePreviewData::from_iter([
+                (StatusSurfacePreviewItem::ThreadName, "Release checklist"),
+                (StatusSurfacePreviewItem::Model, "gpt-5"),
+            ]),
+            AppEventSender::new(tx),
+            crate::keymap::RuntimeKeymap::defaults().list,
+        );
+        let width = 17;
+        let preview_text = "  Rele… · gpt-5";
+        assert!(
+            !render_lines(&view, width)
+                .lines()
+                .any(|line| line == preview_text)
+        );
+        view.handle_key_event(KeyCode::Down.into());
+        view.handle_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL));
+        let frame = render_lines(&view, width);
+        assert!(frame.lines().any(|line| line == preview_text), "{frame}");
     }
 
     #[test]
@@ -797,20 +878,14 @@ mod tests {
                 name: String::new(),
                 description: None,
                 state: MultiSelectState::On,
-                brief_id: None,
-                orderable: true,
-                section_break_after: false,
-                on_activate: None,
+                ..Default::default()
             },
             MultiSelectItem {
                 id: StatusLineItem::CurrentDir.to_string(),
                 name: String::new(),
                 description: None,
                 state: MultiSelectState::On,
-                brief_id: None,
-                orderable: true,
-                section_break_after: false,
-                on_activate: None,
+                ..Default::default()
             },
         ];
 
@@ -820,6 +895,7 @@ mod tests {
                     items
                         .iter()
                         .filter_map(|item| item.id.parse::<StatusLineItem>().ok()),
+                    /*truncatable*/ &BTreeSet::new(),
                     /*use_theme_colors*/ true,
                 )
             ),
@@ -839,20 +915,14 @@ mod tests {
                 name: String::new(),
                 description: None,
                 state: MultiSelectState::On,
-                brief_id: None,
-                orderable: true,
-                section_break_after: false,
-                on_activate: None,
+                ..Default::default()
             },
             MultiSelectItem {
                 id: StatusLineItem::GitBranch.to_string(),
                 name: String::new(),
                 description: None,
                 state: MultiSelectState::On,
-                brief_id: None,
-                orderable: true,
-                section_break_after: false,
-                on_activate: None,
+                ..Default::default()
             },
         ];
 
@@ -862,6 +932,7 @@ mod tests {
                     items
                         .iter()
                         .filter_map(|item| item.id.parse::<StatusLineItem>().ok()),
+                    /*truncatable*/ &BTreeSet::new(),
                     /*use_theme_colors*/ true,
                 )
             ),
@@ -887,20 +958,14 @@ mod tests {
                 name: String::new(),
                 description: None,
                 state: MultiSelectState::On,
-                brief_id: None,
-                orderable: true,
-                section_break_after: false,
-                on_activate: None,
+                ..Default::default()
             },
             MultiSelectItem {
                 id: StatusLineItem::ThreadTitle.to_string(),
                 name: String::new(),
                 description: None,
                 state: MultiSelectState::On,
-                brief_id: None,
-                orderable: true,
-                section_break_after: false,
-                on_activate: None,
+                ..Default::default()
             },
         ];
 
@@ -910,6 +975,7 @@ mod tests {
                     items
                         .iter()
                         .filter_map(|item| item.id.parse::<StatusLineItem>().ok()),
+                    /*truncatable*/ &BTreeSet::new(),
                     /*use_theme_colors*/ true,
                 )
             ),
@@ -929,6 +995,7 @@ mod tests {
             preview.pull_request_url = Some(url.to_owned());
             let mut view = StatusLineSetupView::new(
                 Some(&[StatusLineItem::PullRequestNumber.to_string()]),
+                /*truncatable*/ &[],
                 use_theme_colors,
                 StatuslineProviderActions::Hidden,
                 preview,
@@ -954,6 +1021,7 @@ mod tests {
                 StatusLineItem::CurrentDir.to_string(),
                 StatusLineItem::GitBranch.to_string(),
             ]),
+            &["git-branch".into()],
             /*use_theme_colors*/ true,
             StatuslineProviderActions::Hidden,
             StatusSurfacePreviewData::from_iter([
@@ -989,6 +1057,7 @@ mod tests {
                 StatusLineItem::ThreadCredits.to_string(),
                 StatusLineItem::EstimatedThreadCost.to_string(),
             ]),
+            /*truncatable*/ &[],
             /*use_theme_colors*/ true,
             StatuslineProviderActions::Hidden,
             StatusSurfacePreviewData::from_iter([
@@ -1016,6 +1085,7 @@ mod tests {
                 StatusLineItem::Hostname.to_string(),
                 StatusLineItem::CurrentDir.to_string(),
             ]),
+            /*truncatable*/ &[],
             /*use_theme_colors*/ true,
             StatuslineProviderActions::Hidden,
             StatusSurfacePreviewData::from_iter([
@@ -1043,7 +1113,7 @@ mod tests {
             .join("\n")
     }
 
-    fn line_text(content: Option<HyperlinkLine>) -> Option<String> {
-        content.map(|line| line.line.to_string())
+    fn line_text(content: Option<crate::bottom_pane::StatusLine>) -> Option<String> {
+        content.map(|line| line.as_native().unwrap().line.to_string())
     }
 }

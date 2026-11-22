@@ -4001,30 +4001,10 @@ impl App {
             AppEvent::StatusLineSetup {
                 items,
                 use_theme_colors,
+                truncatable,
             } => {
-                let ids = items.iter().map(ToString::to_string).collect::<Vec<_>>();
-                let items_edit = crate::legacy_core::config::edit::status_line_items_edit(&ids);
-                let colors_edit =
-                    crate::legacy_core::config::edit::status_line_use_colors_edit(use_theme_colors);
-                let apply_result = ConfigEditsBuilder::for_config_path(self.local_settings.user_config_path.as_path())
-                    .with_edits([items_edit, colors_edit])
-                    .apply()
+                self.save_status_line_settings(items, use_theme_colors, truncatable)
                     .await;
-                match apply_result {
-                    Ok(()) => {
-                        self.local_settings.tui.status_line = Some(ids.clone());
-                        self.local_settings.tui.status_line_use_colors = use_theme_colors;
-                        self.chat_widget.setup_status_line(items, use_theme_colors);
-                        self.chat_widget.refresh_config_panel(/*notice*/ None);
-                    }
-                    Err(err) => {
-                        let error = format_config_error(&err);
-                        tracing::error!(error = %error, "failed to persist status line settings; keeping previous selection");
-                        self.app_event_tx.send(AppEvent::FollowTranscript);
-                        let message = format!("Failed to save status line settings: {error}");
-                        self.chat_widget.report_config_save_error(message);
-                    }
-                }
             }
             AppEvent::StatusLineBranchUpdated { cwd, branch } => {
                 self.chat_widget.set_status_line_branch(cwd, branch);

@@ -39,6 +39,7 @@ chatbox_placeholder_tips = "off"
 file_mentions_preserve_at = true
 file_mentions_allow_explicit_paths = false
 primary_accent = "#00AAFF"
+status_line_truncatable = ["current-dir"]
 "##,
             ForkTuiOptions {
                 chatbox_placeholder_tips: ChatboxPlaceholderTips::Off,
@@ -46,6 +47,7 @@ primary_accent = "#00AAFF"
                 file_mentions_preserve_at: true,
                 file_mentions_allow_explicit_paths: false,
                 primary_accent: Some("#00AAFF".to_string()),
+                status_line_truncatable: vec!["current-dir".into()],
             },
         ),
     ] {

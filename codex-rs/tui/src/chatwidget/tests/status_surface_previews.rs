@@ -21,19 +21,24 @@ async fn thread_color_preview_matches_footer() {
             let preview = chat.status_surface_preview_data();
             for use_colors in [true, false] {
                 let line = preview
-                    .status_line_for_items(items, use_colors)
-                    .unwrap()
-                    .line;
+                    .status_line_for_items(
+                        items,
+                        /*truncatable*/ &Default::default(),
+                        use_colors,
+                    )
+                    .unwrap();
                 let footer = crate::bottom_pane::status_line_from_segments(
                     items
                         .into_iter()
                         .map(|item| (item, chat.status_line_value_for_item(item).unwrap())),
+                    /*truncatable*/ &Default::default(),
                     use_colors,
                     Some(id),
                     /*pull_request_url*/ None,
                 )
                 .unwrap();
-                assert_eq!(line, footer.line);
+                assert_eq!(line, footer);
+                let line = &line.as_native().unwrap().line;
                 snapshot.push(format!("colors={use_colors}: {line:?}"));
             }
             insta::assert_snapshot!(snapshot.join("\n"));
@@ -44,8 +49,12 @@ async fn thread_color_preview_matches_footer() {
 fn status_preview_line_option(chat: &mut ChatWidget, items: &[StatusLineItem]) -> Option<String> {
     let preview_data = chat.status_surface_preview_data();
     preview_data
-        .status_line_for_items(items.iter().copied(), /*use_theme_colors*/ true)
-        .map(|line| line.line.to_string())
+        .status_line_for_items(
+            items.iter().copied(),
+            /*truncatable*/ &Default::default(),
+            /*use_theme_colors*/ true,
+        )
+        .map(|line| line.as_native().unwrap().line.to_string())
 }
 
 fn status_preview_line(chat: &mut ChatWidget, items: &[StatusLineItem]) -> String {
@@ -145,17 +154,29 @@ async fn brief_status_line_preview_matches_footer_text_and_styles() {
         for full in pairs {
             let brief = full.brief_form().unwrap();
             let value = chat.status_line_value_for_item(brief).unwrap();
-            let line = preview.status_line_for_items([brief], use_colors).unwrap();
+            let line = preview
+                .status_line_for_items(
+                    [brief],
+                    /*truncatable*/ &Default::default(),
+                    use_colors,
+                )
+                .unwrap();
             let footer = crate::bottom_pane::status_line_from_segments(
                 [(brief, value)],
+                /*truncatable*/ &Default::default(),
                 use_colors,
                 chat.thread_id,
                 /*pull_request_url*/ None,
             )
             .unwrap();
             assert_eq!(line, footer);
-            let full_line = preview.status_line_for_items([full], use_colors).unwrap();
-            assert_eq!(line.line.spans[0].style, full_line.line.spans[0].style);
+            let full_line = preview
+                .status_line_for_items([full], /*truncatable*/ &Default::default(), use_colors)
+                .unwrap();
+            assert_eq!(
+                line.as_native().unwrap().line.spans[0].style,
+                full_line.as_native().unwrap().line.spans[0].style,
+            );
         }
     }
     // The picker displays the full rate-limit name even in brief mode.

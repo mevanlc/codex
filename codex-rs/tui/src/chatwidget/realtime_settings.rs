@@ -248,11 +248,12 @@ impl ChatWidget {
                 .all(|item| !item.is_enabled())
                 .then(|| "Select at least one input channel.".red().into())
         })
-        .on_confirm(move |ids, tx| {
-            let selected: Vec<_> = (1..=count)
-                .filter(|number| ids.contains(&number.to_string()))
-                .filter_map(std::num::NonZeroU16::new)
-                .collect();
+        .on_confirm(move |items, tx| {
+            let selected = items
+                .iter()
+                .filter_map(MultiSelectItem::selected_id)
+                .filter_map(|id| id.parse::<std::num::NonZeroU16>().ok())
+                .collect::<Vec<_>>();
             let channel = if selected.len() == usize::from(count) {
                 None
             } else if selected.len() == 1 {

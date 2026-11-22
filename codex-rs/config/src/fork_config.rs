@@ -13,6 +13,7 @@ pub(crate) const FORK_CONFIG_PATHS: &[&[&str]] = &[
     &["tui", "passive_hints"],
     &["tui", "file_mentions_preserve_at"],
     &["tui", "file_mentions_allow_explicit_paths"],
+    &["tui", "status_line_truncatable"],
     &["tui", "keymap", "global", "open_external_editor_with_quote"],
 ];
 

@@ -1,5 +1,6 @@
 //! Separate persistent transcript context from the composer's transient hint row.
 //! Measurement, rendering, and cursor placement share the same reserved status rectangle.
+//! Native status fits marked items to the rectangle's width before considering wrapped rows.
 //! Shortcut help grows above the input, preserving status and close rows below it even when clipped.
 
 use super::*;
@@ -12,7 +13,7 @@ impl ChatComposer {
         }
         if status_line
             .as_ref()
-            .is_some_and(|status| status.as_native().is_none())
+            .is_some_and(|status| !status.is_native())
         {
             self.effort_status_line_transition = None;
         }
@@ -70,7 +71,7 @@ impl ChatComposer {
             return use_status(None);
         }
         let status = self.footer.status_line_value.as_ref();
-        if status.is_some_and(|status| status.as_native().is_none())
+        if status.is_some_and(|status| !status.is_native())
             || self.footer.active_agent_label.is_none()
             || focus == StatusLineFocus::Unfocused
         {
@@ -109,8 +110,7 @@ impl ChatComposer {
             if focus == StatusLineFocus::Focused
                 && let Some(transition) = self.active_status_transition()
             {
-                let target = status.and_then(StatusLine::as_native).cloned();
-                if let Some(frame) = transition.render_line(target, area.width) {
+                if let Some(frame) = transition.render_line(status, area.width) {
                     StatusLine::from(frame).render(area, buf, focus);
                 }
                 if let Some(requester) = &self.frame_requester {
