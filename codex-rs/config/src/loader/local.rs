@@ -203,6 +203,8 @@ pub(super) async fn load_local_config_layers_with_overrides(
             toml: user.toml,
         },
     ];
+    append_project_layers(fs, &mut config_layers, project_layers.layers).await?;
+
     let overlay_file = codex_home.join(crate::CONFIG_OVERLAY_FILE);
     if !overrides.ignore_user_config
         && let Some(toml) = layer_io::read_config_from_path(
@@ -222,8 +224,6 @@ pub(super) async fn load_local_config_layers_with_overrides(
             toml,
         });
     }
-    append_project_layers(fs, &mut config_layers, project_layers.layers).await?;
-
     append_legacy_config_layers(&mut config_layers, loaded_managed, &codex_home)?;
 
     // Local config reads preserve raw executor paths. Only the profile ancestry and

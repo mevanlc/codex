@@ -508,6 +508,8 @@ impl App {
         self.chat_widget.local_settings.tui.session_picker_view =
             self.local_settings.tui.session_picker_view;
         self.chat_widget.local_settings.tui.resume_cwd = self.local_settings.tui.resume_cwd;
+        self.chat_widget
+            .reload_status_line_selection(self.local_settings.tui.status_line.clone());
         self.chat_widget.local_settings.tui.status_line_provider =
             self.local_settings.tui.status_line_provider.clone();
         self.chat_widget.set_status_line_truncatable(

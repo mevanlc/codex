@@ -122,18 +122,31 @@ impl ChatWidget {
     /// Applies status-line item selection from the setup view to in-memory config.
     ///
     /// An empty selection persists as an explicit empty list.
-    pub(crate) fn setup_status_line(&mut self, items: Vec<StatusLineItem>, use_theme_colors: bool) {
-        tracing::info!(
-            "status line setup confirmed with items: {items:#?}, use_theme_colors: {use_theme_colors}"
-        );
-        let ids = items.iter().map(ToString::to_string).collect::<Vec<_>>();
-        self.config_panel_tui.status_line = Some(ids.clone());
-        self.config_panel_tui.status_line_use_colors = use_theme_colors;
-        self.local_settings.tui.status_line = Some(ids);
-        self.local_settings.tui.status_line_use_colors = use_theme_colors;
+    pub(crate) fn apply_saved_status_line(
+        &mut self,
+        ids: Vec<String>,
+        use_theme_colors: Option<bool>,
+    ) {
         self.status_surface_overrides.status_line = None;
-        self.status_surface_overrides.status_line_use_colors = None;
+        self.reload_status_line_selection(Some(ids));
+        if let Some(colors) = use_theme_colors {
+            self.config_panel_tui.status_line_use_colors = colors;
+            self.local_settings.tui.status_line_use_colors = colors;
+            self.status_surface_overrides.status_line_use_colors = None;
+        }
         self.refresh_status_line();
+    }
+
+    pub(crate) fn reload_status_line_selection(&mut self, ids: Option<Vec<String>>) {
+        self.config_panel_tui.status_line.clone_from(&ids);
+        self.local_settings.tui.status_line =
+            self.status_surface_overrides.status_line.clone().or(ids);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn setup_status_line(&mut self, items: Vec<StatusLineItem>, use_theme_colors: bool) {
+        let ids = items.iter().map(ToString::to_string).collect();
+        self.apply_saved_status_line(ids, Some(use_theme_colors));
     }
 
     pub(crate) fn set_status_line_truncatable(&mut self, ids: Vec<String>) {

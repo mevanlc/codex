@@ -9,18 +9,22 @@ use codex_config::types::BuiltinStatusLine;
 use codex_config::types::StatusLineProviderId;
 use codex_config::types::StatusLineSelection;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use crossterm::event::KeyCode;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeSet;
 
 #[tokio::test]
-async fn status_line_overlay_write_failure_keeps_the_previously_saved_truncation()
--> anyhow::Result<()> {
+async fn status_line_overlay_write_failure_keeps_the_previous_selection() -> anyhow::Result<()> {
     let mut app = make_test_app().await;
+    let shared = app.local_settings.user_config_path.clone();
+    let shared_initial = "tui.status_line = ['current-dir']\n";
+    std::fs::write(&shared, shared_initial)?;
     let overlay = app
         .local_settings
         .codex_home
         .join(codex_config::CONFIG_OVERLAY_FILE);
-    let initial = "[tui]\nstatus_line_truncatable = ['current-dir']\n";
+    let initial =
+        "[tui]\nstatus_line = ['hostname-brief']\nstatus_line_truncatable = ['current-dir']\n";
     std::fs::write(&overlay, initial)?;
     app.refresh_in_memory_config_from_disk().await.unwrap();
     let broken = "[broken";
@@ -29,12 +33,13 @@ async fn status_line_overlay_write_failure_keeps_the_previously_saved_truncation
     app.save_status_line_settings(vec![StatusLineItem::ModelName], false, BTreeSet::new())
         .await;
     assert_eq!(std::fs::read_to_string(&overlay)?, broken);
-    assert_eq!(
-        app.local_settings.tui.status_line.as_deref(),
-        Some(["model".to_string()].as_slice())
-    );
-    assert!(!app.chat_widget.local_settings.tui.status_line_use_colors);
+    assert_eq!(std::fs::read_to_string(&shared)?, shared_initial);
     for settings in [&app.local_settings, &app.chat_widget.local_settings] {
+        assert_eq!(
+            settings.tui.status_line,
+            Some(vec!["hostname-brief".into()])
+        );
+        assert!(settings.tui.status_line_use_colors);
         assert_eq!(settings.tui.fork.status_line_truncatable, ["current-dir"]);
     }
 
@@ -51,7 +56,140 @@ async fn status_line_overlay_write_failure_keeps_the_previously_saved_truncation
             .is_empty()
     );
     let parsed: toml::Table = toml::from_str(&std::fs::read_to_string(overlay)?)?;
-    assert_eq!(parsed, toml::toml! { [tui] status_line_truncatable = [] });
+    assert_eq!(
+        parsed,
+        toml::toml! {
+            [tui]
+            status_line = ["model"]
+            status_line_truncatable = []
+        },
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn status_line_mirror_failure_keeps_the_fork_save_and_can_be_retried() -> anyhow::Result<()> {
+    let mut app = make_test_app().await;
+    let shared = app.local_settings.user_config_path.clone();
+    std::fs::write(&shared, "[broken")?;
+    let items = vec![StatusLineItem::ModelNameBrief, StatusLineItem::CurrentDir];
+    let truncatable = BTreeSet::from([StatusLineItem::CurrentDir]);
+    app.save_status_line_settings(items.clone(), false, truncatable.clone())
+        .await;
+
+    assert_eq!(std::fs::read_to_string(&shared)?, "[broken");
+    let overlay = app
+        .local_settings
+        .codex_home
+        .join(codex_config::CONFIG_OVERLAY_FILE);
+    let saved: toml::Table = toml::from_str(&std::fs::read_to_string(overlay)?)?;
+    assert_eq!(
+        saved,
+        toml::toml! {
+            [tui]
+            status_line = ["model-brief", "current-dir"]
+            status_line_truncatable = ["current-dir"]
+        },
+    );
+    for settings in [&app.local_settings, &app.chat_widget.local_settings] {
+        assert_eq!(
+            settings.tui.status_line,
+            Some(vec!["model-brief".into(), "current-dir".into()]),
+        );
+        assert!(settings.tui.status_line_use_colors);
+        assert_eq!(settings.tui.fork.status_line_truncatable, ["current-dir"]);
+    }
+
+    std::fs::write(&shared, "tui.theme = 'nord'\n")?;
+    app.save_status_line_settings(items, false, truncatable)
+        .await;
+    assert_eq!(
+        toml::from_str::<toml::Table>(&std::fs::read_to_string(shared)?)?,
+        toml::toml! {
+            [tui]
+            theme = "nord"
+            status_line = ["model", "current-dir"]
+            status_line_use_colors = false
+        },
+    );
+    assert!(!app.chat_widget.local_settings.tui.status_line_use_colors);
+    Ok(())
+}
+
+#[tokio::test]
+async fn status_line_save_with_profile_mirrors_to_base_and_reloads_overlay() -> anyhow::Result<()> {
+    let mut app = make_test_app().await;
+    let base = app.local_settings.user_config_path.clone();
+    let profile = app.local_settings.codex_home.join("work.config.toml");
+    std::fs::write(&base, "tui.status_line = ['current-dir']\n")?;
+    std::fs::write(&profile, "tui.status_line = ['thread-name']\n")?;
+    app.loader_overrides.user_config_path = Some(profile.clone());
+    app.loader_overrides.user_config_profile = Some("work".parse()?);
+    app.refresh_in_memory_config_from_disk().await.unwrap();
+
+    app.save_status_line_settings(
+        vec![StatusLineItem::HostnameBrief, StatusLineItem::ModelName],
+        false,
+        BTreeSet::new(),
+    )
+    .await;
+    app.refresh_in_memory_config_from_disk().await.unwrap();
+    assert_eq!(
+        app.chat_widget.local_settings.tui.status_line,
+        Some(vec!["hostname-brief".into(), "model".into()]),
+    );
+    assert_eq!(
+        toml::from_str::<toml::Table>(&std::fs::read_to_string(&base)?)?,
+        toml::toml! { [tui] status_line = ["hostname", "model"] },
+    );
+    assert_eq!(
+        toml::from_str::<toml::Table>(&std::fs::read_to_string(&profile)?)?,
+        toml::toml! {
+            [tui]
+            status_line = ["thread-name"]
+            status_line_use_colors = false
+        },
+    );
+
+    app.save_status_line_settings(Vec::new(), false, BTreeSet::new())
+        .await;
+    app.refresh_in_memory_config_from_disk().await.unwrap();
+    assert_eq!(
+        app.chat_widget.local_settings.tui.status_line,
+        Some(Vec::new())
+    );
+    assert_eq!(
+        toml::from_str::<toml::Table>(&std::fs::read_to_string(&base)?)?,
+        toml::toml! { [tui] status_line = [] },
+    );
+
+    let overlay = app
+        .local_settings
+        .codex_home
+        .join(codex_config::CONFIG_OVERLAY_FILE);
+    std::fs::write(&overlay, "tui.status_line = ['reasoning-brief']\n")?;
+    app.refresh_in_memory_config_from_disk().await.unwrap();
+    assert_eq!(
+        app.chat_widget.local_settings.tui.status_line,
+        Some(vec!["reasoning-brief".into()]),
+    );
+    assert_eq!(
+        toml::from_str::<toml::Table>(&std::fs::read_to_string(&base)?)?,
+        toml::toml! { [tui] status_line = [] },
+    );
+
+    app.chat_widget
+        .restore_user_message_to_composer("/statusline --clear".into());
+    app.chat_widget.handle_key_event(KeyCode::Enter.into());
+    app.refresh_in_memory_config_from_disk().await.unwrap();
+    assert_eq!(
+        app.chat_widget.local_settings.tui.status_line,
+        Some(Vec::new())
+    );
+    assert_eq!(
+        app.chat_widget.config_panel_tui.status_line,
+        Some(vec!["reasoning-brief".into()]),
+    );
     Ok(())
 }
 

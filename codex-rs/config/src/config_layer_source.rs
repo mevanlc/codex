@@ -83,6 +83,13 @@ impl ConfigLayerSource {
             ConfigLayerSource::Mdm { .. } => 0,
             ConfigLayerSource::System { .. } => 10,
             ConfigLayerSource::EnterpriseManaged { .. } => 15,
+            ConfigLayerSource::User { file, .. }
+                if file
+                    .file_name()
+                    .is_some_and(|name| name == crate::CONFIG_OVERLAY_FILE) =>
+            {
+                26
+            }
             ConfigLayerSource::User { profile, .. } => {
                 if profile.is_some() {
                     21

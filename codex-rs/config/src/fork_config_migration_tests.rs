@@ -89,11 +89,64 @@ async fn existing_overlay_wins_and_inline_and_dotted_keys_migrate() -> io::Resul
 }
 
 #[tokio::test]
+async fn brief_status_line_migrates_once_and_keeps_the_shared_copy() -> io::Result<()> {
+    let home = tempdir()?;
+    let shared = home.path().join(CONFIG_TOML_FILE);
+    let overlay = home.path().join(CONFIG_OVERLAY_FILE);
+    let legacy = "tui = { status_line = ['model-brief', 'current-dir', 'hostname-brief'], theme = 'nord' } # keep\n";
+    fs::write(&shared, legacy)?;
+
+    migrate_user_fork_config(home.path()).await?;
+
+    let saved_overlay = fs::read_to_string(&overlay)?;
+    assert_eq!(
+        toml::from_str::<toml::Table>(&saved_overlay).unwrap(),
+        toml::toml! { [tui] status_line = ["model-brief", "current-dir", "hostname-brief"] },
+    );
+    let saved_shared = fs::read_to_string(&shared)?;
+    assert_eq!(
+        toml::from_str::<toml::Table>(&saved_shared).unwrap(),
+        toml::toml! {
+            [tui]
+            status_line = ["model", "current-dir", "hostname"]
+            theme = "nord"
+        },
+    );
+    assert!(saved_shared.contains("# keep"));
+
+    let stock_edit = "tui.status_line = ['thread-name']\n";
+    fs::write(&shared, stock_edit)?;
+    migrate_user_fork_config(home.path()).await?;
+    assert_eq!(fs::read_to_string(shared)?, stock_edit);
+    assert_eq!(fs::read_to_string(overlay)?, saved_overlay);
+    Ok(())
+}
+
+#[tokio::test]
+async fn existing_status_line_overlay_supplies_the_migrated_shared_copy() -> io::Result<()> {
+    let home = tempdir()?;
+    let shared = home.path().join(CONFIG_TOML_FILE);
+    let overlay = home.path().join(CONFIG_OVERLAY_FILE);
+    let saved_overlay = "tui.status_line = [] # hidden\n";
+    fs::write(&shared, "[tui]\nstatus_line = ['model-brief']\n")?;
+    fs::write(&overlay, saved_overlay)?;
+
+    migrate_user_fork_config(home.path()).await?;
+
+    assert_eq!(fs::read_to_string(overlay)?, saved_overlay);
+    assert_eq!(
+        toml::from_str::<toml::Table>(&fs::read_to_string(shared)?).unwrap(),
+        toml::toml! { [tui] status_line = [] },
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn no_migration_creates_no_files_or_reformats_shared_config() -> io::Result<()> {
     let home = tempdir()?;
     migrate_user_fork_config(home.path()).await?;
     assert_eq!(fs::read_dir(home.path())?.count(), 0);
-    let original = "# mine\n[tui]\nanimations=false\n";
+    let original = "# mine\n[tui]\nanimations=false\nstatus_line=['current-dir']\n";
     fs::write(home.path().join(CONFIG_TOML_FILE), original)?;
     migrate_user_fork_config(home.path()).await?;
     assert_eq!(fs::read_dir(home.path())?.count(), 1);

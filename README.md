@@ -164,7 +164,7 @@ Store fork-only settings in **`$CODEX_HOME/config-overlay.toml`** (normally
 fork; without it, all fork defaults apply. Keep shared settings in `config.toml`
 so official clients can read that file without encountering fork extensions.
 
-The overlay accepts only `tui.primary_accent`, `tui.chatbox_placeholder_tips`,
+The fork-only overlay settings are `tui.primary_accent`, `tui.chatbox_placeholder_tips`,
 `tui.passive_hints`, `tui.file_mentions_preserve_at`, `tui.file_mentions_allow_explicit_paths`,
 `tui.status_line_truncatable`, and `tui.keymap.global.open_external_editor_with_quote`.
 On startup, the fork automatically moves these entries from the top level of `config.toml` into the
@@ -172,7 +172,8 @@ overlay, preserving existing overlay values when both files set the same key.
 It saves the overlay before removing the original entries, so interrupted
 migrations can be retried safely. With no entries to move, no files are created.
 Profile/project entries still require manual relocation because the overlay is
-global. The examples below belong in the overlay.
+global. The overlay also accepts `tui.status_line`, which has a shared copy
+described below.
 
 Fork-setting saves create the overlay when needed; standard saves still use the
 shared config or selected profile. Command-line `-c` overrides remain available.
@@ -292,8 +293,19 @@ The response status is `notPending` if the input was already consumed, was alrea
 ### Brief statusline components
 
 In `/statusline`, Space cycles supported rows through `[ ]` off, `[x]` full, and
-`[b]` brief. Other rows toggle on/off. Brief choices keep their position and save
-as independent IDs in the shared `[tui].status_line` list in `config.toml`:
+`[b]` brief. Other rows toggle on/off. Enter saves the ordered `[tui].status_line`
+list in `config-overlay.toml` and writes a copy with `-brief` suffixes removed
+to base `config.toml` for stock Codex.
+
+The fork uses the overlay list ahead of lists in base, profile, and project
+config. Remove the overlay key to follow the normal config layers again, or set
+it to `[]` to hide the built-in statusline. Command-line overrides still apply.
+
+On startup, the fork migrates existing brief IDs from base `config.toml` into
+the overlay and updates the shared copy. An existing overlay list takes
+precedence during migration. Subsequent picker saves refresh the shared copy,
+so edits made by stock Codex persist there until the next picker save. Manual
+overlay edits take effect when the fork reloads its config.
 
 | Brief ID | Display change |
 | --- | --- |

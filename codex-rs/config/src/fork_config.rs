@@ -7,6 +7,8 @@ use toml::Value;
 
 pub const CONFIG_OVERLAY_FILE: &str = "config-overlay.toml";
 
+pub(crate) const STATUS_LINE_PATH: &[&str] = &["tui", "status_line"];
+
 pub(crate) const FORK_CONFIG_PATHS: &[&[&str]] = &[
     &["tui", "primary_accent"],
     &["tui", "chatbox_placeholder_tips"],
@@ -16,6 +18,17 @@ pub(crate) const FORK_CONFIG_PATHS: &[&[&str]] = &[
     &["tui", "status_line_truncatable"],
     &["tui", "keymap", "global", "open_external_editor_with_quote"],
 ];
+
+pub(crate) fn overlay_config_paths() -> impl Iterator<Item = &'static [&'static str]> {
+    FORK_CONFIG_PATHS.iter().copied().chain([STATUS_LINE_PATH])
+}
+
+/// Return the full-form statusline ID used in the shared config.
+pub fn shared_status_line_id(id: &str) -> &str {
+    id.strip_suffix("-brief")
+        .filter(|full| !full.is_empty())
+        .unwrap_or(id)
+}
 
 /// Persistent destination of a configuration edit, independent of its value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,8 +104,7 @@ impl ConfigFileKind {
 }
 
 fn validate_overlay_paths(value: &Value, path: &mut Vec<String>) -> Result<(), String> {
-    if FORK_CONFIG_PATHS
-        .iter()
+    if overlay_config_paths()
         .any(|allowed| path.iter().map(String::as_str).eq(allowed.iter().copied()))
     {
         let config = path.iter().rev().fold(value.clone(), |value, key| {
@@ -103,7 +115,7 @@ fn validate_overlay_paths(value: &Value, path: &mut Vec<String>) -> Result<(), S
             .map(|_| ())
             .map_err(|error| format!("Invalid `{}`: {error}", path.join(".")));
     }
-    if !FORK_CONFIG_PATHS.iter().any(|allowed| {
+    if !overlay_config_paths().any(|allowed| {
         allowed
             .iter()
             .copied()
@@ -111,7 +123,7 @@ fn validate_overlay_paths(value: &Value, path: &mut Vec<String>) -> Result<(), S
             .eq(path.iter().map(String::as_str))
     }) {
         return Err(format!(
-            "`{}` is not a fork setting; {CONFIG_OVERLAY_FILE} accepts only fork settings",
+            "`{}` is not a supported setting in {CONFIG_OVERLAY_FILE}",
             path.join(".")
         ));
     }

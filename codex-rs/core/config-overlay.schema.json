@@ -90,6 +90,14 @@
           "description": "Overrides the default cyan accent used throughout the TUI.\n\nSupported formats: - `r,g,b` where each channel is `0..255` (for example `0,170,255`) - `#RRGGBB` (for example `#00AAFF`) - `0..255` ANSI palette index (for example `14`)",
           "type": "string"
         },
+        "status_line": {
+          "default": null,
+          "description": "Ordered list of status line item identifiers.\n\nWhen set, the TUI renders the selected items as the status line. When unset, the TUI defaults to: `model-with-reasoning`, `current-dir`, and `thread-name`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "status_line_truncatable": {
           "description": "Built-in status line items that may be shortened or dropped to fit the terminal. Use the same identifier for the full and brief forms, even for disabled items.",
           "items": {

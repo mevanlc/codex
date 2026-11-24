@@ -1,8 +1,13 @@
+use crate::path_utils::paths_match_after_normalization;
 use crate::path_utils::resolve_symlink_write_paths;
 use crate::path_utils::write_atomically;
 use anyhow::Context;
+use codex_config::CONFIG_OVERLAY_FILE;
 use codex_config::CONFIG_TOML_FILE;
+use codex_config::ensure_distinct_fork_config_files;
 use codex_config::is_structured_feature_path;
+use codex_config::lock_user_fork_config;
+use codex_config::shared_status_line_id;
 use codex_config::types::McpServerConfig;
 use codex_config::types::ResumeCwdMode;
 use codex_config::types::SessionPickerViewMode;
@@ -126,6 +131,71 @@ pub fn status_line_use_colors_edit(enabled: bool) -> ConfigEdit {
         segments: vec!["tui".to_string(), "status_line_use_colors".to_string()],
         value: value(enabled),
     }
+}
+
+/// Results of the shared writes after the authoritative statusline was saved.
+pub struct StatusLineSaveOutcome {
+    pub mirror: anyhow::Result<()>,
+    /// When the base config holds the color preference, it is saved with the mirror.
+    pub profile_colors: Option<anyhow::Result<()>>,
+}
+
+/// Save the fork's statusline and mirror the full-form IDs to the base user config.
+pub async fn save_status_line_config(
+    codex_home: &Path,
+    colors_path: &Path,
+    items: &[String],
+    truncatable: &[String],
+    use_colors: bool,
+) -> anyhow::Result<StatusLineSaveOutcome> {
+    let overlay_edits = [
+        status_line_items_edit(items),
+        ConfigEdit::SetPath {
+            segments: vec!["tui".into(), "status_line_truncatable".into()],
+            value: value(truncatable.iter().cloned().collect::<toml_edit::Array>()),
+        },
+    ];
+    let full_items = items
+        .iter()
+        .map(|id| shared_status_line_id(id).to_owned())
+        .collect::<Vec<_>>();
+    let mut mirror_edits = vec![status_line_items_edit(&full_items)];
+    let colors_edit = status_line_use_colors_edit(use_colors);
+    let codex_home = codex_home.to_path_buf();
+    let colors_path = colors_path.to_path_buf();
+    task::spawn_blocking(move || {
+        let _lock = lock_user_fork_config(&codex_home)?;
+        let overlay = codex_home.join(CONFIG_OVERLAY_FILE);
+        let shared = codex_home.join(CONFIG_TOML_FILE);
+        ensure_distinct_fork_config_files(&overlay, &shared)?;
+        ensure_distinct_fork_config_files(&overlay, &colors_path)?;
+        let colors_in_base = paths_match_after_normalization(
+            resolve_symlink_write_paths(&shared)?.write_path,
+            resolve_symlink_write_paths(&colors_path)?.write_path,
+        );
+
+        apply_blocking_to_resolved_file(&overlay, &overlay_edits)
+            .with_context(|| format!("failed to save {}", overlay.display()))?;
+
+        let profile_colors_edit = if colors_in_base {
+            mirror_edits.push(colors_edit);
+            None
+        } else {
+            Some(colors_edit)
+        };
+        let mirror = apply_blocking_to_resolved_file(&shared, &mirror_edits)
+            .with_context(|| format!("failed to update {}", shared.display()));
+        let profile_colors = profile_colors_edit.map(|edit| {
+            apply_blocking_to_resolved_file(&colors_path, &[edit])
+                .with_context(|| format!("failed to update {}", colors_path.display()))
+        });
+        Ok(StatusLineSaveOutcome {
+            mirror,
+            profile_colors,
+        })
+    })
+    .await
+    .context("statusline persistence task panicked")?
 }
 
 /// Produces a config edit that sets `[tui].terminal_title` to an explicit ordered list.

@@ -329,26 +329,6 @@ pub async fn load_config_layers_state(
     }
     layers.push(base_user_layer);
 
-    let overlay_file =
-        AbsolutePathBuf::resolve_path_against_base(crate::CONFIG_OVERLAY_FILE, codex_home);
-    if !ignore_user_config
-        && let Some(config) = layer_io::read_config_from_path(
-            fs,
-            &overlay_file,
-            /*log_missing_as_info*/ false,
-            strict_config,
-        )
-        .await?
-    {
-        layers.push(ConfigLayerEntry::new(
-            ConfigLayerSource::User {
-                file: overlay_file,
-                profile: None,
-            },
-            config,
-        ));
-    }
-
     if active_user_file != base_user_file {
         layers.push(
             load_user_config_layer(
@@ -462,6 +442,26 @@ pub async fn load_config_layers_state(
         };
         layers.extend(project_layers.layers);
         startup_warnings.extend(project_layers.startup_warnings);
+    }
+
+    let overlay_file =
+        AbsolutePathBuf::resolve_path_against_base(crate::CONFIG_OVERLAY_FILE, codex_home);
+    if !ignore_user_config
+        && let Some(config) = layer_io::read_config_from_path(
+            fs,
+            &overlay_file,
+            /*log_missing_as_info*/ false,
+            strict_config,
+        )
+        .await?
+    {
+        layers.push(ConfigLayerEntry::new(
+            ConfigLayerSource::User {
+                file: overlay_file,
+                profile: None,
+            },
+            config,
+        ));
     }
 
     // Add a layer for runtime overrides from the CLI or UI, if any exist.

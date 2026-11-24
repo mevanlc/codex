@@ -6,6 +6,7 @@
 )]
 
 use crate::fork_config::FORK_CONFIG_PATHS;
+use crate::fork_config::overlay_config_paths;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -57,7 +58,7 @@ pub(crate) fn shared_schema(mut schema: Value) -> Value {
 
 pub(crate) fn overlay_schema(runtime: &Value) -> Value {
     let mut schema = json!({"$schema": "http://json-schema.org/draft-07/schema#", "title": "ForkConfigOverlay", "type": "object", "additionalProperties": false, "properties": {}});
-    for path in FORK_CONFIG_PATHS {
+    for path in overlay_config_paths() {
         let mut properties = &mut schema["properties"];
         for key in &path[..path.len() - 1] {
             if properties.get(*key).is_none() {

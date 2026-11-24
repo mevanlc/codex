@@ -90,12 +90,20 @@ async fn statusline_ctrl_t_marks_disabled_items_and_round_trips_through_config()
     let overlay: toml::Table = toml::from_str(&std::fs::read_to_string(overlay)?)?;
     assert_eq!(
         overlay,
-        toml::toml! { [tui] status_line_truncatable = ["model", "model-with-reasoning"] }
+        toml::toml! {
+            [tui]
+            status_line = ["model-with-reasoning-brief"]
+            status_line_truncatable = ["model", "model-with-reasoning"]
+        }
     );
     let shared: toml::Table = toml::from_str(&std::fs::read_to_string(
         &app.local_settings.user_config_path,
     )?)?;
     assert!(shared["tui"].get("status_line_truncatable").is_none());
+    assert_eq!(
+        shared["tui"]["status_line"],
+        toml::Value::Array(vec!["model-with-reasoning".into()]),
+    );
     app.refresh_in_memory_config_from_disk().await.unwrap();
     assert_eq!(
         app.chat_widget.local_settings.tui.status_line,
