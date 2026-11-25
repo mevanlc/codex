@@ -343,7 +343,7 @@ fn provider_status_and_hints_use_separate_rows() {
 }
 
 #[test]
-fn status_rows_respect_host_budget_and_yield_to_the_draft() {
+fn status_rows_respect_host_budget() {
     let mut composer = composer();
     let tree: crate::ui_tree::UiTree = r#""one\ntwo\nthree\nfour\nfive""#.parse().unwrap();
     composer.set_status_line(Some(StatusLine::from(tree)));
@@ -379,10 +379,7 @@ fn status_rows_respect_host_budget_and_yield_to_the_draft() {
                 Some((input.x + 1, input.y + 2))
             );
             if height == 7 && separate_status_line {
-                insta::assert_snapshot!(
-                    "status_rows_respect_host_budget_and_yield_to_the_draft",
-                    frame(&buffer)
-                );
+                insta::assert_snapshot!(frame(&buffer));
             }
         }
     }
@@ -415,6 +412,71 @@ fn status_rows_respect_host_budget_and_yield_to_the_draft() {
         composer.footer_hint_height(/*width*/ 7, ComposerRenderOptions::default()),
         1
     );
+}
+
+#[test]
+fn draft_height_preserves_wrapped_status_and_reserved_hint_rows() {
+    let mut composer = composer();
+    composer.set_passive_hints(codex_config::types::PassiveHints::Never);
+    composer.set_status_line(Some(
+        Line::from("MODEL · ~/project · Context 20% used ".repeat(5)).into(),
+    ));
+    let width = 48;
+    for (max_height, height, status_enabled, status_height) in [
+        (Some(20), 20, true, 3),
+        (Some(10), 10, true, 2),
+        (None, 20, true, 1),
+        (Some(8), 8, false, 0),
+        (Some(4), 4, true, 0),
+    ] {
+        composer.set_status_line_enabled(status_enabled);
+        let options = ComposerRenderOptions {
+            separate_status_line: max_height.is_some(),
+            max_height,
+            ..Default::default()
+        };
+        let [short, tall] = [1, 2_000_u16].map(|lines| {
+            composer
+                .apply_external_edit("draft line\n".repeat(usize::from(lines - 1)) + "draft end");
+            let measured = composer
+                .desired_height_with_options(width, options)
+                .min(height);
+            let area = Rect::new(/*x*/ 0, height - measured, width, measured);
+            let layout = composer.layout_with_options(area, options);
+            assert_eq!(
+                layout.textarea.height,
+                lines.min(height - 3 - status_height)
+            );
+            assert_eq!(layout.status.height, status_height);
+            assert_eq!(layout.footer.height, 1);
+            let (buffer, rows) = render_status(&composer, area, options);
+            let hint_row = |buffer: &Buffer| {
+                (0..area.width)
+                    .map(|x| buffer[(x, layout.footer.y)].symbol())
+                    .collect::<String>()
+            };
+            let idle_hint = hint_row(&buffer);
+            if status_enabled {
+                assert!(idle_hint.trim().is_empty());
+            }
+            composer.show_footer_flash("Copied".into(), Duration::from_secs(/*secs*/ 3));
+            let (buffer, flashed_status) = render_status(&composer, area, options);
+            assert_eq!(flashed_status, rows);
+            let flashed_hint = hint_row(&buffer);
+            assert!(flashed_hint.contains("Copied"));
+            assert_eq!(
+                composer.layout_with_options(area, options).textarea,
+                layout.textarea
+            );
+            assert_eq!(
+                composer.cursor_pos_with_options(area, options),
+                Some((layout.textarea.x + 9, layout.textarea.bottom() - 1))
+            );
+            composer.footer.flash.as_mut().unwrap().expires_at = Instant::now();
+            (layout.status, layout.footer, rows, idle_hint, flashed_hint)
+        });
+        assert_eq!(short, tall);
+    }
 }
 
 #[test]
@@ -462,7 +524,7 @@ fn sidebar_focus_keeps_dim_extension_status_rows() {
 }
 
 #[test]
-fn thumbnails_fit_after_basic_footer_rows_and_before_extra_status() {
+fn thumbnails_fit_in_space_left_by_input_and_footer() {
     let mut composer = composer();
     composer.attach_image(PathBuf::from("preview.png"));
     composer.insert_str("draft");
@@ -1376,7 +1438,7 @@ fn input_history_search_uses_the_final_row() {
 }
 
 #[test]
-fn slash_suggestions_take_space_before_status_expands() {
+fn slash_suggestions_use_space_above_the_reserved_footer() {
     let mut composer = composer();
     let tree: crate::ui_tree::UiTree = r#""one\ntwo\nthree\nfour""#.parse().unwrap();
     composer.set_status_line(Some(tree.into()));
@@ -1389,10 +1451,11 @@ fn slash_suggestions_take_space_before_status_expands() {
         ..Default::default()
     };
     let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 7,
+        /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 8,
     );
     let (buf, rows) = render_status(&composer, area, options);
-    assert_eq!(rows, ["one…"]);
+    assert_eq!(rows, ["one", "two", "three…"]);
+    assert!(frame(&buf).contains("/model"));
     insta::assert_snapshot!(frame(&buf));
 
     composer.set_status_line(Some("OK".into()));

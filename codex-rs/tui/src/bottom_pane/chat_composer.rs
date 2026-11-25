@@ -22,6 +22,7 @@
 //! defaults to showing them once per CLI launch, until their first rendered disappearance;
 //! thread replacement retains that dismissal. `always` also keeps them visible while typing.
 //! Routine hints share one permanently reserved bottom row, keeping the composer and status anchored.
+//! Draft height does not affect how many status or hint rows fit. Tall drafts scroll above them.
 //! Escape dismisses visible shortcut help before editing, transcript backtracking, or interruption.
 //! Fullscreen limits the composer height; wheel browsing preserves the caret until editor input.
 //! Transcript interactions borrow the hint footer through `ComposerRenderOptions`;

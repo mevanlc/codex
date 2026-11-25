@@ -103,9 +103,11 @@ fn offline_delete_reveals_the_edited_row_without_moving_the_caret() {
         .content
         .chunks(usize::from(area.width))
         .map(|row| {
-            row.iter()
+            let row = row
+                .iter()
                 .map(ratatui::buffer::Cell::symbol)
-                .collect::<String>()
+                .collect::<String>();
+            format!("|{row}|")
         })
         .collect::<Vec<_>>()
         .join("\n");

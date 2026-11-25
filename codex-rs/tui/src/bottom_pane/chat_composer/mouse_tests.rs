@@ -28,8 +28,9 @@ fn composer_mouse_edits_flush_typing_and_reconcile_placeholders() {
         .draft
         .paste_burst
         .begin_with_retro_grabbed("\nworld".into(), Instant::now());
+    // Fit both lines after flushing, along with the reserved hint row.
     let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 4,
+        /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 5,
     );
     let mut buf = Buffer::empty(area);
     composer.render(area, &mut buf);

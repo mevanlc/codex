@@ -231,8 +231,10 @@ The shortcuts remain enabled in every mode. `always` still yields to popups and
 transient controls; Left continues to move the cursor while editing a draft.
 Status indicators, warnings, and explicitly opened shortcut help are unaffected.
 Routine hints share one permanently reserved bottom row, left blank when there is
-nothing to show. Plan mode, queue hints, and navigation hints shorten or hide when
-space is tight; appearing or disappearing hints do not shift the screen.
+nothing to show. The statusline, including any wrapped rows, and the hint row
+are sized independently of the draft. Long drafts scroll within the space above
+them. Plan mode, queue hints, and navigation hints shorten or hide when space is
+tight; appearing or disappearing hints do not shift the screen.
 
 ### File mentions
 

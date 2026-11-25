@@ -9,6 +9,8 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::layout::Size;
 
+const MIN_INPUT_HEIGHT: u16 = 3;
+
 struct ComposerRows {
     input: u16,
     above_input: u16,
@@ -16,7 +18,7 @@ struct ComposerRows {
     footer: FooterRows,
 }
 
-/// Allocates status and hint rows from the space left by the composer.
+/// Allocates status and hint rows within the available footer height.
 pub(crate) struct FooterLayout {
     cap: u16,
     wanted_hints: u16,
@@ -127,15 +129,15 @@ impl ChatComposer {
         let (composer_rect, popup_rect, mut footer_rect) = if shortcuts_above {
             let [shortcuts, composer, footer] = Layout::vertical([
                 Constraint::Max(above_input),
-                Constraint::Min(3 + voice_rows),
+                Constraint::Min(MIN_INPUT_HEIGHT + voice_rows),
                 Constraint::Length(footer_hint_height),
             ])
             .areas(area);
             (composer, shortcuts, footer)
         } else if self.popups.active.is_above_composer() {
-            // Preserve the draft first, then its footer, and use remaining space for suggestions.
+            // Fit the draft and its footer before using spare rows for suggestions.
             let [mut composer, mut popup, footer] = Layout::vertical([
-                Constraint::Min(3 + voice_rows),
+                Constraint::Min(MIN_INPUT_HEIGHT + voice_rows),
                 Constraint::Max(above_input),
                 Constraint::Length(footer_hint_height),
             ])
@@ -145,15 +147,16 @@ impl ChatComposer {
             (composer, popup, footer)
         } else {
             let [composer, popup] = Layout::vertical([
-                Constraint::Min(3 + voice_rows),
-                Constraint::Max(footer_hint_height),
+                Constraint::Min(MIN_INPUT_HEIGHT + voice_rows),
+                Constraint::Length(footer_hint_height),
             ])
             .areas(area);
             (composer, popup, popup)
         };
         footer_rect.y = footer_rect.y.saturating_add(status.height);
         // Keep the draft visible when clipped.
-        let voice_rows = voice_rows * u16::from(composer_rect.height >= voice_rows + 3);
+        let voice_rows =
+            voice_rows * u16::from(composer_rect.height >= voice_rows + MIN_INPUT_HEIGHT);
         let mut textarea_rect = composer_rect.inset(Insets::tlbr(
             /*top*/ 1 + voice_rows,
             LIVE_PREFIX_COLS,
@@ -247,6 +250,26 @@ impl ChatComposer {
         height: u16,
         options: ComposerRenderOptions<'_>,
     ) -> ComposerRows {
+        // Leave room for one editable row and its padding, then size the footer independently
+        // of the draft. Fullscreen uses its host's height budget to set the footer's cap.
+        let footer_budget = height.saturating_sub(MIN_INPUT_HEIGHT);
+        let workspace_height = options
+            .separate_status_line
+            .then_some(options.max_height.unwrap_or(u16::MAX));
+        // Find needs its query and result before the status line can use a row.
+        let find_active = options
+            .footer
+            .is_some_and(|footer| footer.cursor_column.is_some());
+        let footer_layout = FooterLayout::new(
+            workspace_height,
+            self.footer_hint_height(width, options),
+            /*priority_hint_rows*/ if find_active { 2 } else { 1 },
+        );
+        let wanted_status =
+            self.status_surface_height(footer_layout.status_bounds(width, footer_budget), options);
+        let footer = footer_layout.allocate(footer_budget, wanted_status);
+        let input_budget = height - footer.height();
+
         const COLS_WITH_MARGIN: u16 = LIVE_PREFIX_COLS + 1;
         let inner_width =
             width.saturating_sub(COLS_WITH_MARGIN.saturating_add(options.textarea_right_reserve));
@@ -267,7 +290,9 @@ impl ChatComposer {
             }),
         ]
         .into_iter()
-        .fold(0, u16::saturating_add);
+        .fold(0, u16::saturating_add)
+        .min(input_budget);
+        let remaining = input_budget - input_height;
         let above_input = if self.shortcuts_above_composer(options) {
             footer_height(&self.hint_footer_props(), width)
         } else if options.command_popup_placement == CommandPopupPlacement::AboveComposer {
@@ -276,50 +301,18 @@ impl ChatComposer {
                 .required_height(width, /*footer_total_height*/ 0)
         } else {
             0
-        };
-        let editing_hint = options.footer.is_some_and(|footer| footer.is_interactive)
-            || matches!(
-                self.footer_mode(),
-                FooterMode::HistorySearch
-                    | FooterMode::ShortcutOverlay(_)
-                    | FooterMode::QuitShortcutReminder
-                    | FooterMode::EscHint
-            );
-        // The draft can scroll when another interaction owns the bottom row.
-        let mut available = height
-            .saturating_sub(input_height)
-            .max(u16::from(editing_hint && height > 3));
-        // Use the frame's budget so measurement and painting choose the same cap.
-        let workspace_height = options
-            .separate_status_line
-            .then_some(options.max_height.unwrap_or(u16::MAX));
-        // Find needs its query and result before the status line can use a row.
-        let find_active = options
-            .footer
-            .is_some_and(|footer| footer.cursor_column.is_some());
-        let footer = FooterLayout::new(
-            workspace_height,
-            self.footer_hint_height(width, options),
-            /*priority_hint_rows*/ if find_active { 2 } else { 1 },
-        );
-        let wanted_status =
-            self.status_surface_height(footer.status_bounds(width, available), options);
-        let basic = (footer.reserved_hints + wanted_status.min(1)).min(2);
-        let above_input = above_input.min(available.saturating_sub(basic));
-        available -= above_input;
-        let mut thumbnails = options.image_previews.map_or(0, |previews| {
-            previews.height(inner_width, self.attachments.local_images.len())
-        });
-        if thumbnails <= available.saturating_sub(basic) {
-            available -= thumbnails;
-        } else {
-            thumbnails = 0;
         }
+        .min(remaining);
+        let thumbnails = options
+            .image_previews
+            .map(|previews| previews.height(inner_width, self.attachments.local_images.len()))
+            .filter(|height| *height <= remaining - above_input)
+            .unwrap_or_default();
         ComposerRows {
             input: input_height,
             above_input,
             thumbnails,
-            footer: footer.allocate(available, wanted_status),
+            footer,
         }
     }
 }
