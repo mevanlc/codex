@@ -865,8 +865,10 @@ pub(crate) enum AppEvent {
         result: Result<(), String>,
     },
 
-    /// Permanently delete the current active main thread and return to the command center.
-    DeleteCurrentThread,
+    /// Permanently delete the current active main thread, then return to the command center or quit.
+    DeleteCurrentThread {
+        exit_after_delete: bool,
+    },
 
     /// Fork the current session into a new thread, optionally assigning it a name.
     ForkCurrentSession {

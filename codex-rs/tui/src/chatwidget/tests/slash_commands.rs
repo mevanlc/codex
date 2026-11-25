@@ -3270,7 +3270,23 @@ async fn slash_delete_confirmation_requests_current_thread_delete() {
     assert_chatwidget_snapshot!("slash_delete_confirmation_command_center", popup);
     chat.handle_key_event(KeyEvent::from(KeyCode::Down));
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
-    assert_matches!(rx.try_recv(), Ok(AppEvent::DeleteCurrentThread));
+    assert_matches!(
+        rx.try_recv(),
+        Ok(AppEvent::DeleteCurrentThread {
+            exit_after_delete: false
+        })
+    );
+
+    chat.dispatch_command(SlashCommand::Delete);
+    chat.handle_key_event(KeyEvent::from(KeyCode::Down));
+    chat.handle_key_event(KeyEvent::from(KeyCode::Down));
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    assert_matches!(
+        rx.try_recv(),
+        Ok(AppEvent::DeleteCurrentThread {
+            exit_after_delete: true
+        })
+    );
 }
 
 #[tokio::test]

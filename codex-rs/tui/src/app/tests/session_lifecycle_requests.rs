@@ -2201,7 +2201,8 @@ async fn delete_current_thread_navigates_only_after_success() -> Result<()> {
         app.active_thread_id = Some(missing_id);
         app.chat_widget.insert_str("Retained on failure");
         assert_matches!(
-            app.delete_current_thread(&mut tui, &mut server).await?,
+            app.delete_current_thread(&mut tui, &mut server, /*exit_after_delete*/ true)
+                .await?,
             AppRunControl::Continue
         );
         assert_eq!(app.active_thread_id, Some(missing_id));
@@ -2255,7 +2256,8 @@ async fn delete_current_thread_navigates_only_after_success() -> Result<()> {
                 .is_err()
         );
         assert_matches!(
-            app.delete_current_thread(&mut tui, &mut server).await?,
+            app.delete_current_thread(&mut tui, &mut server, /*exit_after_delete*/ true)
+                .await?,
             AppRunControl::Continue
         );
         assert_eq!(app.active_thread_id, Some(thread_id));
@@ -2264,9 +2266,14 @@ async fn delete_current_thread_navigates_only_after_success() -> Result<()> {
         assert_eq!(recorded_params(&requests, "thread/delete").len(), 1);
         let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
         app.app_event_tx = AppEventSender::new(tx);
-        let control =
-            Box::pin(app.handle_event(&mut tui, &mut server, AppEvent::DeleteCurrentThread))
-                .await?;
+        let control = Box::pin(app.handle_event(
+            &mut tui,
+            &mut server,
+            AppEvent::DeleteCurrentThread {
+                exit_after_delete: false,
+            },
+        ))
+        .await?;
         assert!(
             server
                 .thread_read(thread_id, /*include_turns*/ false)
@@ -2312,6 +2319,67 @@ async fn delete_current_thread_navigates_only_after_success() -> Result<()> {
         server.shutdown().await?;
         proxy.await??;
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn delete_current_thread_and_exit_waits_for_deletion() -> Result<()> {
+    use crate::app::agents_overview::tests::overview_thread;
+
+    let (mut app, _codex_home) = make_history_test_app().await?;
+    app.app_server_target = AppServerTarget::Embedded;
+    let thread_id = create_history_rollout(&app.config, ThreadHistoryMode::Legacy, "delete me")?;
+    let mut server = crate::start_embedded_app_server_for_picker(&app.config).await?;
+    let resumed = server
+        .resume_thread(
+            &app.local_settings,
+            app.config.clone(),
+            thread_id,
+            crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+        )
+        .await?;
+    app.active_thread_id = Some(thread_id);
+    app.enqueue_primary_thread_session(resumed.session.clone(), resumed.turns)
+        .await?;
+    app.chat_widget.handle_thread_session(resumed.session);
+    // The cached child may still look active when the delete request returns.
+    let child = ThreadId::new();
+    app.agents_overview.threads.insert(
+        child,
+        Some(overview_thread(
+            child,
+            Some(thread_id),
+            "child",
+            ThreadStatus::Active {
+                active_flags: Vec::new(),
+            },
+        )),
+    );
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+
+    let control = Box::pin(app.handle_event(
+        &mut tui,
+        &mut server,
+        AppEvent::DeleteCurrentThread {
+            exit_after_delete: true,
+        },
+    ))
+    .await?;
+
+    assert_matches!(control, AppRunControl::Exit(ExitReason::UserRequested));
+    assert!(
+        server
+            .thread_read(thread_id, /*include_turns*/ false)
+            .await
+            .is_err()
+    );
+    assert!(!app.chat_widget.active_view_is(AGENTS_OVERVIEW_VIEW_ID));
+    assert!(
+        app.exit_info(ExitReason::UserRequested)
+            .resume_hint
+            .is_none()
+    );
+    server.shutdown().await?;
     Ok(())
 }
 

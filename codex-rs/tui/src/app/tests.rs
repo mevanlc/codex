@@ -4095,7 +4095,8 @@ async fn reopen_saved_side_chat(during: DuringOpen) -> Result<()> {
             },
         })
         .await?;
-    app.delete_current_thread(&mut tui, &mut server).await?;
+    app.delete_current_thread(&mut tui, &mut server, /*exit_after_delete*/ false)
+        .await?;
     let errors = std::iter::from_fn(|| events.try_recv().ok())
         .filter_map(|event| match event {
             AppEvent::InsertHistoryCell(cell) => {
@@ -4118,7 +4119,8 @@ async fn reopen_saved_side_chat(during: DuringOpen) -> Result<()> {
     server
         .thread_delete(ThreadId::from_string(&other_attachment.thread.id)?)
         .await?;
-    app.delete_current_thread(&mut tui, &mut server).await?;
+    app.delete_current_thread(&mut tui, &mut server, /*exit_after_delete*/ false)
+        .await?;
     for id in ids {
         let error = server
             .thread_read(id, /*include_turns*/ false)

@@ -296,7 +296,19 @@ impl ChatWidget {
                             name: "Yes, delete and return to command center".to_string(),
                             description: Some("Permanently delete this session now".to_string()),
                             actions: vec![Box::new(|tx| {
-                                tx.send(AppEvent::DeleteCurrentThread);
+                                tx.send(AppEvent::DeleteCurrentThread {
+                                    exit_after_delete: false,
+                                });
+                            })],
+                            dismiss_on_select: true,
+                            ..Default::default()
+                        },
+                        SelectionItem {
+                            name: "Delete and exit".to_string(),
+                            actions: vec![Box::new(|tx| {
+                                tx.send(AppEvent::DeleteCurrentThread {
+                                    exit_after_delete: true,
+                                });
                             })],
                             dismiss_on_select: true,
                             ..Default::default()

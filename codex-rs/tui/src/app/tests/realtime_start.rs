@@ -216,7 +216,12 @@ async fn lifecycle_actions_stop_parked_voice_before_removing_owner() -> Result<(
                         .expect("archive succeeded");
                 }
                 AgentsOverviewAction::Delete => {
-                    Box::pin(app.delete_current_thread(&mut tui, &mut server)).await?;
+                    Box::pin(app.delete_current_thread(
+                        &mut tui,
+                        &mut server,
+                        /*exit_after_delete*/ false,
+                    ))
+                    .await?;
                 }
             }
         } else {

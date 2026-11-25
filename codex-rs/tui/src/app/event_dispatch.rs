@@ -741,8 +741,8 @@ impl App {
                     }
                 }
             }
-            AppEvent::DeleteCurrentThread => {
-                return self.delete_current_thread(tui, app_server).await;
+            AppEvent::DeleteCurrentThread { exit_after_delete } => {
+                return self.delete_current_thread(tui, app_server, exit_after_delete).await;
             }
             AppEvent::ForkCurrentSession { name } => {
                 let from_locked_thread = self.chat_widget.is_external_writer_view();
@@ -1298,41 +1298,11 @@ impl App {
             AppEvent::StopCommitAnimation => {
                 self.commit_animation = None;
             }
-            AppEvent::Exit(mode)
-                if matches!(self.app_server_target, AppServerTarget::Embedded)
-                    && (self.agents_overview.threads.iter().any(|(id, thread)| {
-                        (mode == ExitMode::Immediate
-                            || Some(*id) != self.current_displayed_thread_id()
-                            || self.chat_widget.active_view_is(AGENTS_OVERVIEW_VIEW_ID))
-                            && matches!(thread.as_ref().map(|t| &t.status), Some(ThreadStatus::Active { .. }))
-                    }) || self.running_side_thread_id().await.is_some()) =>
-            {
-                self.chat_widget.show_selection_view(SelectionViewParams {
-                    title: Some("Quit and stop running sessions?".into()),
-                    subtitle: Some("Quitting this TUI will stop its running sessions.".into()),
-                    items: vec![
-                        SelectionItem {
-                            name: "Stay in Codex".into(),
-                            dismiss_on_select: true,
-                            ..Default::default()
-                        },
-                        SelectionItem {
-                            name: "Stop sessions and quit".into(),
-                            actions: vec![Box::new(move |tx| {
-                                tx.send(AppEvent::ConfirmedEmbeddedExit(mode))
-                            })],
-                            dismiss_on_select: true,
-                            ..Default::default()
-                        },
-                    ],
-                    ..SelectionViewParams::confirmation()
-                });
+            AppEvent::Exit(mode) => {
+                return self.request_exit(tui, app_server, mode, /*deleted_thread*/ None).await;
             }
-            AppEvent::Exit(mode) | AppEvent::ConfirmedEmbeddedExit(mode) => {
-                if matches!(mode, ExitMode::ShutdownFirst | ExitMode::ShutdownAfterInterrupt) {
-                    self.show_shutdown_feedback(tui)?;
-                }
-                return Ok(self.handle_exit_mode(app_server, mode).await);
+            AppEvent::ConfirmedEmbeddedExit(mode) => {
+                return self.exit_with_feedback(tui, app_server, mode).await;
             }
             AppEvent::RunningTaskExit { action, thread_id } => match action {
                 RunningTaskExitAction::RunInBackground => {
@@ -4421,6 +4391,71 @@ impl App {
         }
     }
 
+    async fn request_exit(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_server: &mut AppServerSession,
+        mode: ExitMode,
+        deleted_thread: Option<ThreadId>,
+    ) -> Result<AppRunControl> {
+        // Server deletion notifications for descendants may still be queued.
+        let deleted_subtree = deleted_thread.map(|id| self.known_thread_subtree(id));
+        if matches!(self.app_server_target, AppServerTarget::Embedded)
+            && (self.agents_overview.threads.iter().any(|(id, thread)| {
+                deleted_subtree.as_ref().is_none_or(|ids| !ids.contains(id))
+                    && (mode == ExitMode::Immediate
+                        || Some(*id) != self.current_displayed_thread_id()
+                        || self.chat_widget.active_view_is(AGENTS_OVERVIEW_VIEW_ID))
+                    && matches!(
+                        thread.as_ref().map(|t| &t.status),
+                        Some(ThreadStatus::Active { .. })
+                    )
+            }) || self.running_side_thread_id().await.is_some())
+        {
+            if deleted_thread.is_some() {
+                // If the user stays, they need a place to go after their session was deleted.
+                self.open_agents_overview(app_server);
+            }
+            self.chat_widget.show_selection_view(SelectionViewParams {
+                title: Some("Quit and stop running sessions?".into()),
+                subtitle: Some("Quitting this TUI will stop its running sessions.".into()),
+                items: vec![
+                    SelectionItem {
+                        name: "Stay in Codex".into(),
+                        dismiss_on_select: true,
+                        ..Default::default()
+                    },
+                    SelectionItem {
+                        name: "Stop sessions and quit".into(),
+                        actions: vec![Box::new(move |tx| {
+                            tx.send(AppEvent::ConfirmedEmbeddedExit(mode));
+                        })],
+                        dismiss_on_select: true,
+                        ..Default::default()
+                    },
+                ],
+                ..SelectionViewParams::confirmation()
+            });
+            return Ok(AppRunControl::Continue);
+        }
+        self.exit_with_feedback(tui, app_server, mode).await
+    }
+
+    async fn exit_with_feedback(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_server: &mut AppServerSession,
+        mode: ExitMode,
+    ) -> Result<AppRunControl> {
+        if matches!(
+            mode,
+            ExitMode::ShutdownFirst | ExitMode::ShutdownAfterInterrupt
+        ) {
+            self.show_shutdown_feedback(tui)?;
+        }
+        Ok(self.handle_exit_mode(app_server, mode).await)
+    }
+
     pub(super) async fn handle_exit_mode(
         &mut self,
         app_server: &mut AppServerSession,
@@ -4603,6 +4638,7 @@ impl App {
         &mut self,
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
+        exit_after_delete: bool,
     ) -> Result<AppRunControl> {
         let Some(thread_id) = self.active_thread_id.or(self.chat_widget.thread_id()) else {
             self.chat_widget
@@ -4646,6 +4682,11 @@ impl App {
                 self.detach_current_thread_for_navigation(app_server, /*destination*/ None)
                     .await;
                 self.reset_after_leaving_thread(tui).await;
+                if exit_after_delete {
+                    return self
+                        .request_exit(tui, app_server, ExitMode::ShutdownFirst, Some(thread_id))
+                        .await;
+                }
                 self.open_agents_overview(app_server);
                 AppRunControl::Continue
             }
